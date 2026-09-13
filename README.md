@@ -54,6 +54,20 @@ Chạy `powershell -ExecutionPolicy Bypass -File scripts/install_fcc_context_com
 
 Khi context chạm ngưỡng, bot sẽ báo lên chat rồi mở phiên mới bằng `fcc-claude -p`. Nếu máy có command `fcc-resume` riêng thì điền vào `CLAUDE_NEW_SESSION_COMMAND`.
 
+## Hai Agent
+
+Bật `TELEGRAM_AGENT_MODE=two_agent` để bot phản hồi ngay: câu đơn giản được Agent nhanh xử lý, câu cần phân tích sẽ chạy deep agent ở background nên Telegram vẫn nhận được tin mới trong lúc chờ Opus 5.
+
+```env
+TELEGRAM_AGENT_MODE=two_agent
+TELEGRAM_FAST_AGENT_COMMAND=
+TELEGRAM_FAST_AGENT_TIMEOUT_SECONDS=45
+TELEGRAM_DEEP_WAIT_REPLY=Da anh doi em chut, cau nay can phan tich ky hon nen em day sang Opus 5 roi bao lai anh ngay.
+TELEGRAM_DEEP_BUSY_REPLY=Da anh doi em chut, em van dang xu ly cau truoc. Anh cu nhan tiep, khi co ket qua em se gui lai.
+```
+
+Để `TELEGRAM_FAST_AGENT_COMMAND` trống thì Agent nhanh chỉ dùng rule local như chào hỏi, cảm ơn, ping, ok. Khi có model nhẹ hơn, điền command vào biến này; deep agent vẫn dùng nhóm cấu hình `CLAUDE_*` hiện tại.
+
 ## Sửa hook
 
 Muốn đổi giọng văn thì sửa file `HOOK.md` rồi mở PR, không cần sửa script Python.

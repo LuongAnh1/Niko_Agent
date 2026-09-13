@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -20,6 +21,13 @@ try:
         telegram_message_to_gateway,
     )
     from bots.sticker_picker import choose_sticker_file_id, load_sticker_config
+    from bots.agent_router import (
+        ROUTE_BUSY_REPLY,
+        ROUTE_DEEP_AGENT,
+        ROUTE_FAST_AGENT,
+        ROUTE_LOCAL_REPLY,
+        decide_agent_route,
+    )
 except ImportError:
     from chat_gateway import (
         build_identity_context,
@@ -29,6 +37,13 @@ except ImportError:
         telegram_message_to_gateway,
     )
     from sticker_picker import choose_sticker_file_id, load_sticker_config
+    from agent_router import (
+        ROUTE_BUSY_REPLY,
+        ROUTE_DEEP_AGENT,
+        ROUTE_FAST_AGENT,
+        ROUTE_LOCAL_REPLY,
+        decide_agent_route,
+    )
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
@@ -52,6 +67,14 @@ PROMPT_HOOK_MODE_ALWAYS = "always"
 PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
 PROMPT_HOOK_MODE_NEVER = "never"
 DEFAULT_PROMPT_HOOK_MODE = PROMPT_HOOK_MODE_NEW_SESSION
+AGENT_MODE_SINGLE = "single"
+AGENT_MODE_TWO_AGENT = "two_agent"
+DEFAULT_TELEGRAM_DEEP_WAIT_REPLY = (
+    "Dạ anh đợi em chút, câu này cần phân tích kỹ hơn nên em đẩy sang Opus 5 rồi báo lại anh ngay."
+)
+DEFAULT_TELEGRAM_DEEP_BUSY_REPLY = (
+    "Dạ anh đợi em chút, em vẫn đang xử lý câu trước. Anh cứ nhắn tiếp, khi có kết quả em sẽ gửi lại."
+)
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
 
 
@@ -64,6 +87,19 @@ class ClaudeSessionPlan:
     prompt_command: str
     notice: str = ""
     include_prompt_hook: bool = True
+
+
+@dataclass
+class DeepAgentJob:
+    chat_id: int
+    user_key: str
+    prompt: str
+    started_at: float
+
+
+DEEP_JOBS: dict[int, DeepAgentJob] = {}
+DEEP_JOBS_LOCK = threading.Lock()
+DEEP_AGENT_LOCK = threading.Lock()
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
@@ -237,6 +273,122 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
             send_sticker(token, chat_id, sticker_file_id)
     except Exception as exc:
         print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
+
+
+def two_agent_mode_enabled() -> bool:
+    mode = os.getenv("TELEGRAM_AGENT_MODE", AGENT_MODE_SINGLE).strip().lower()
+    return mode in {AGENT_MODE_TWO_AGENT, "dual", "2", "true", "on"}
+
+
+def fast_agent_command() -> str:
+    return os.getenv("TELEGRAM_FAST_AGENT_COMMAND", "").strip()
+
+
+def get_active_deep_job(chat_id: int) -> DeepAgentJob | None:
+    with DEEP_JOBS_LOCK:
+        return DEEP_JOBS.get(chat_id)
+
+
+def has_active_deep_job(chat_id: int) -> bool:
+    return get_active_deep_job(chat_id) is not None
+
+
+def build_deep_wait_reply() -> str:
+    template = os.getenv("TELEGRAM_DEEP_WAIT_REPLY", DEFAULT_TELEGRAM_DEEP_WAIT_REPLY)
+    return template.format()
+
+
+def build_deep_busy_reply(chat_id: int) -> str:
+    job = get_active_deep_job(chat_id)
+    elapsed_seconds = int(time.time() - job.started_at) if job else 0
+    elapsed_minutes = max(0, elapsed_seconds // 60)
+    template = os.getenv("TELEGRAM_DEEP_BUSY_REPLY", DEFAULT_TELEGRAM_DEEP_BUSY_REPLY)
+    return template.format(elapsed_seconds=elapsed_seconds, elapsed_minutes=elapsed_minutes)
+
+
+def call_fast_agent(prompt: str, gateway_message) -> str:
+    command = fast_agent_command()
+    if not command:
+        raise RuntimeError("Chua cau hinh TELEGRAM_FAST_AGENT_COMMAND.")
+
+    timeout_seconds = int(os.getenv("TELEGRAM_FAST_AGENT_TIMEOUT_SECONDS", "45"))
+    fast_prompt = build_telegram_prompt(prompt, gateway_message, include_prompt_hook=True)
+    return run_cli(command, fast_prompt, timeout_seconds=timeout_seconds) or "(Khong co noi dung tra ve.)"
+
+
+def start_deep_agent_job(token: str, chat_id: int, prompt: str, prompt_message) -> bool:
+    with DEEP_JOBS_LOCK:
+        if chat_id in DEEP_JOBS:
+            return False
+        DEEP_JOBS[chat_id] = DeepAgentJob(chat_id, prompt_message.user.key, prompt, time.time())
+
+    thread = threading.Thread(
+        target=run_deep_agent_job,
+        args=(token, chat_id, prompt, prompt_message),
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+def run_deep_agent_job(token: str, chat_id: int, prompt: str, prompt_message) -> None:
+    try:
+        with DEEP_AGENT_LOCK:
+            send_chat_action(token, chat_id)
+            session_plan = plan_claude_session()
+            if session_plan.notice:
+                send_message(token, chat_id, session_plan.notice)
+
+            answer = ensure_reply_suffix(
+                call_claude(
+                    build_telegram_prompt(prompt, prompt_message, session_plan.include_prompt_hook),
+                    session_plan.prompt_command,
+                )
+            )
+
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+    except Exception as exc:
+        send_message(token, chat_id, f"Loi deep agent: {exc}")
+    finally:
+        with DEEP_JOBS_LOCK:
+            DEEP_JOBS.pop(chat_id, None)
+
+
+def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_message) -> None:
+    route = decide_agent_route(
+        prompt,
+        deep_job_active=has_active_deep_job(chat_id),
+        fast_agent_available=bool(fast_agent_command()),
+    )
+    print(f"Agent route: {route.kind} ({route.reason})")
+
+    if route.kind == ROUTE_BUSY_REPLY:
+        answer = ensure_reply_suffix(build_deep_busy_reply(chat_id))
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+        return
+
+    if route.kind == ROUTE_LOCAL_REPLY:
+        answer = ensure_reply_suffix(route.reply)
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+        return
+
+    if route.kind == ROUTE_FAST_AGENT:
+        try:
+            send_chat_action(token, chat_id)
+            answer = ensure_reply_suffix(call_fast_agent(prompt, prompt_message))
+            send_message(token, chat_id, answer)
+            maybe_send_sticker(token, chat_id, prompt, answer)
+            return
+        except Exception as exc:
+            print(f"Fast agent loi, chuyen sang deep agent: {exc}", file=sys.stderr)
+
+    started = start_deep_agent_job(token, chat_id, prompt, prompt_message)
+    answer = ensure_reply_suffix(build_deep_wait_reply() if started else build_deep_busy_reply(chat_id))
+    send_message(token, chat_id, answer)
+    maybe_send_sticker(token, chat_id, prompt, answer)
 
 
 def call_claude(prompt: str, command: str | None = None) -> str:
@@ -501,11 +653,15 @@ def handle_message(
         return
 
     try:
+        prompt_message = gateway_message.with_text(prompt)
+        if two_agent_mode_enabled():
+            handle_two_agent_message(token, chat_id, prompt, prompt_message)
+            return
+
         send_chat_action(token, chat_id)
         session_plan = plan_claude_session()
         if session_plan.notice:
             send_message(token, chat_id, session_plan.notice)
-        prompt_message = gateway_message.with_text(prompt)
         answer = ensure_reply_suffix(
             call_claude(
                 build_telegram_prompt(prompt, prompt_message, session_plan.include_prompt_hook),
