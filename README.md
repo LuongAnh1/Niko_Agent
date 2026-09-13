@@ -68,12 +68,12 @@ Mặc định `new_session` chỉ nạp `HOOK.md` khi mở phiên mới/stateles
 
 ## Sticker Ducks
 
-Bot có thể gửi thêm sticker Ducks theo mood bằng local picker, không cần MCP.
+Bot có thể gửi thêm sticker Duck của Telegram (UtyaDuck) theo mood bằng local picker, không cần MCP.
 
 ```env
 TELEGRAM_STICKERS_ENABLED=1
 TELEGRAM_STICKER_CONFIG_FILE=stickers/ducks.json
-TELEGRAM_STICKER_SET_NAME=rtk_duck
+TELEGRAM_STICKER_SET_NAME=UtyaDuck
 TELEGRAM_STICKER_MODE=smart
 ```
 

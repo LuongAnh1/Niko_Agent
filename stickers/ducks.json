@@ -1,5 +1,5 @@
 {
-  "set_name": "rtk_duck",
+  "set_name": "UtyaDuck",
   "mode": "smart",
   "fallback_mood": "neutral",
   "mood_priority": [
@@ -15,8 +15,10 @@
     "warning": {
       "emojis": [
         "😱",
-        "😐",
-        "👊"
+        "🤯",
+        "😳",
+        "😡",
+        "😠"
       ],
       "keywords": [
         "loi",
@@ -34,11 +36,11 @@
     },
     "happy": {
       "emojis": [
+        "😂",
+        "😘",
         "👍",
-        "😎",
-        "🤩",
-        "🔥",
-        "🙃"
+        "🤗",
+        "👌"
       ],
       "keywords": [
         "haha",
@@ -59,8 +61,8 @@
     "thinking": {
       "emojis": [
         "🤔",
-        "🤨",
-        "😐"
+        "🙄",
+        "🤷‍♂️"
       ],
       "keywords": [
         "sao",
@@ -76,9 +78,9 @@
     },
     "coding": {
       "emojis": [
-        "🤓",
         "🤔",
-        "👍"
+        "👍",
+        "👌"
       ],
       "keywords": [
         "code",
@@ -96,10 +98,9 @@
     },
     "tease": {
       "emojis": [
-        "👻",
-        "🙃",
+        "😈",
         "😎",
-        "👊"
+        "😏"
       ],
       "keywords": [
         "treu",
@@ -112,8 +113,9 @@
     "hype": {
       "emojis": [
         "🔥",
-        "👍",
-        "🤩"
+        "🤑",
+        "🌈",
+        "👍"
       ],
       "keywords": [
         "ship",
@@ -128,8 +130,8 @@
     "sad": {
       "emojis": [
         "😭",
-        "😐",
-        "🤦‍♂️"
+        "🥶",
+        "👎"
       ],
       "keywords": [
         "buon",
@@ -143,8 +145,9 @@
     "neutral": {
       "emojis": [
         "👍",
-        "😐",
-        "🙏"
+        "👋",
+        "👌",
+        "😴"
       ],
       "keywords": []
     }

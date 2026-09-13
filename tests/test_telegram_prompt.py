@@ -137,7 +137,7 @@ class TelegramPromptTests(unittest.TestCase):
         STICKER_SET_CACHE.clear()
         calls = []
         config = {
-            "set_name": "rtk_duck",
+            "set_name": "UtyaDuck",
             "mode": "smart",
             "mood_priority": ["happy"],
             "moods": {"happy": {"keywords": ["ok"], "emojis": ["👍"]}},
@@ -154,7 +154,7 @@ class TelegramPromptTests(unittest.TestCase):
         ), patch("bots.telegram_bot.telegram_request", side_effect=fake_telegram_request):
             maybe_send_sticker("token", 123, "ok anh", "Dạ được anh")
 
-        self.assertEqual(calls[0], ("getStickerSet", {"name": "rtk_duck"}))
+        self.assertEqual(calls[0], ("getStickerSet", {"name": "UtyaDuck"}))
         self.assertEqual(calls[1], ("sendSticker", {"chat_id": 123, "sticker": "happy-duck"}))
 
 
