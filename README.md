@@ -9,9 +9,11 @@ Bot Telegram nhỏ gọi Claude CLI (`fcc-claude`) để anh em trong group chat
 1. Tạo bot bằng [@BotFather](https://t.me/BotFather), lấy token.
 2. Copy `.env.example` thành `.env`, điền:
 
+**Chú ý:** Cần cài Free Claude Code/FCC (đã cấu hình và điền API Key NVIDIA) và chạy `fcc-server` trước nếu `fcc-claude` đang trỏ qua FCC.
+
 ```env
 TELEGRAM_BOT_TOKEN=token_cua_bot
-TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
+TELEGRAM_ALLOWED_CHAT_IDS= chat_id_voi_bot
 CLAUDE_CLI_COMMAND=fcc-claude -p
 ```
 
@@ -21,7 +23,7 @@ CLAUDE_CLI_COMMAND=fcc-claude -p
 python bots/telegram_bot.py
 ```
 
-Trong group, tag bot bằng username hoặc reply tin nhắn của bot. Dùng `/id` để lấy `chat_id`.
+Dùng `/id` trong private chat hoặc group để lấy `chat_id`. Nếu bot chạy trong group thì điền `chat_id` của group.
 
 ## Sửa hook
 
