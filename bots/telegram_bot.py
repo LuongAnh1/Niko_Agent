@@ -42,14 +42,8 @@ GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
 SESSION_MODE_STATELESS = "stateless"
 SESSION_MODE_AUTO_RESUME = "auto_resume"
-DEFAULT_TELEGRAM_PROMPT_HOOK = (
-    "Ban la Niko, mot AI Agent dang chat chit voi mot dam duc rua trong group Telegram. "
-    "Noi chuyen bang tieng Viet, than mat, lanh loi, hai huoc het co the. "
-    "Phong cach nhu anh em trong ban nhau: vui, nhanh, co ca khia nhe, nhung khong cong kich ca nhan qua da. "
-    "Tra loi gon, dung chat group, tranh van phong mau me. "
-    "Bat buoc ket thuc moi cau tra loi bang dung cum: Ok nhé bạn"
-)
-DEFAULT_TELEGRAM_REPLY_SUFFIX = "Ok nhé bạn"
+DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
+DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 PROMPT_HOOK_MODE_ALWAYS = "always"
 PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
@@ -131,6 +125,28 @@ def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None
 def env_flag(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in TRUE_VALUES
 
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def resolve_project_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+    return repo_root() / path
+
+
+def load_telegram_prompt_hook() -> str:
+    hook_file = os.getenv("TELEGRAM_PROMPT_HOOK_FILE", DEFAULT_TELEGRAM_PROMPT_HOOK_FILE).strip()
+    if not hook_file:
+        return ""
+
+    path = resolve_project_path(hook_file)
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Khong tim thay file hook: {path}") from exc
+
 
 def prompt_hook_enabled_for_session(is_resuming: bool) -> bool:
     mode = os.getenv("TELEGRAM_PROMPT_HOOK_MODE", DEFAULT_PROMPT_HOOK_MODE).strip().lower()
@@ -148,7 +164,7 @@ def build_telegram_prompt(
 ) -> str:
     hook = ""
     if include_prompt_hook:
-        hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
+        hook = load_telegram_prompt_hook()
 
     identity_context = ""
     if gateway_message is not None and env_flag("CHAT_IDENTITY_ENABLED", "1"):

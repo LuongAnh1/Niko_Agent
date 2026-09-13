@@ -1,9 +1,11 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from bots.chat_gateway import telegram_message_to_gateway
-from bots.telegram_bot import build_telegram_prompt, plan_claude_session
+from bots.telegram_bot import build_telegram_prompt, ensure_reply_suffix, plan_claude_session
 
 
 class TelegramPromptTests(unittest.TestCase):
@@ -14,7 +16,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "CLAUDE_SESSION_MODE": "auto_resume",
                 "CLAUDE_RESUME_COMMAND": "fcc-claude --continue -p",
                 "CLAUDE_CONTEXT_LIMIT_PERCENT": "80",
-                "TELEGRAM_PROMPT_HOOK": "HOOK",
+                "TELEGRAM_PROMPT_HOOK_MODE": "new_session",
             },
             clear=False,
         ), patch("bots.telegram_bot.get_context_usage_percent", return_value=20):
@@ -30,7 +32,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "CLAUDE_SESSION_MODE": "auto_resume",
                 "CLAUDE_NEW_SESSION_PROMPT_COMMAND": "fcc-claude -p",
                 "CLAUDE_CONTEXT_LIMIT_PERCENT": "80",
-                "TELEGRAM_PROMPT_HOOK": "HOOK",
+                "TELEGRAM_PROMPT_HOOK_MODE": "new_session",
             },
             clear=False,
         ), patch("bots.telegram_bot.get_context_usage_percent", return_value=90), patch(
@@ -49,11 +51,25 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        with patch.dict(os.environ, {"TELEGRAM_PROMPT_HOOK": "HOOK", "CHAT_IDENTITY_ENABLED": "1"}, clear=False):
+        with patch.dict(os.environ, {"CHAT_IDENTITY_ENABLED": "1"}, clear=False):
             prompt = build_telegram_prompt("hello", message, include_prompt_hook=False)
 
-        self.assertNotIn("HOOK", prompt)
+        self.assertNotIn("Bạn là Niko", prompt)
         self.assertIn("user_key: telegram:123", prompt)
+        self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
+
+    def test_build_prompt_loads_hook_from_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook_file = Path(temp_dir) / "HOOK.md"
+            hook_file.write_text("HOOK FROM FILE", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"TELEGRAM_PROMPT_HOOK_FILE": str(hook_file), "CHAT_IDENTITY_ENABLED": "0"},
+                clear=False,
+            ):
+                prompt = build_telegram_prompt("hello", include_prompt_hook=True)
+
+        self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
 
     def test_hook_mode_always_keeps_hook_on_resume(self):
@@ -69,6 +85,12 @@ class TelegramPromptTests(unittest.TestCase):
             plan = plan_claude_session()
 
         self.assertTrue(plan.include_prompt_hook)
+
+    def test_reply_suffix_uses_meow_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            answer = ensure_reply_suffix("Dạ anh")
+
+        self.assertEqual(answer, "Dạ anh\n\nMeow")
 
 
 if __name__ == "__main__":
