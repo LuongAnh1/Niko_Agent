@@ -1,18 +1,29 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
+DEFAULT_CLAUDE_RESUME_COMMAND = "fcc-claude --continue -p"
+DEFAULT_CLAUDE_NEW_SESSION_COMMAND = "fcc-resume"
+DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND = "fcc-claude -p"
+DEFAULT_CLAUDE_NEW_SESSION_NOTICE = (
+    "Context phien chat gan nhat da dung {percent:.1f}%, Niko mo phien chat moi nhe."
+)
+DEFAULT_CONTEXT_LIMIT_PERCENT = 80.0
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
+SESSION_MODE_STATELESS = "stateless"
+SESSION_MODE_AUTO_RESUME = "auto_resume"
 DEFAULT_TELEGRAM_PROMPT_HOOK = (
     "Ban la Niko, mot AI Agent dang chat chit voi mot dam duc rua trong group Telegram. "
     "Noi chuyen bang tieng Viet, than mat, lanh loi, hai huoc het co the. "
@@ -25,6 +36,12 @@ DEFAULT_TELEGRAM_REPLY_SUFFIX = "Ok nhé bạn"
 
 class TelegramError(RuntimeError):
     pass
+
+
+@dataclass
+class ClaudeSessionPlan:
+    prompt_command: str
+    notice: str = ""
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
@@ -47,6 +64,43 @@ def split_command(command: str) -> list[str]:
     return shlex.split(command, posix=os.name != "nt")
 
 
+def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
+    args = split_command(command)
+    if prompt is None:
+        return args
+
+    if any("{prompt}" in arg for arg in args):
+        return [arg.replace("{prompt}", prompt) for arg in args]
+
+    return [*args, prompt]
+
+
+def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None = None) -> str:
+    if timeout_seconds is None:
+        timeout_seconds = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180"))
+
+    try:
+        result = subprocess.run(
+            build_cli_args(command, prompt),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Khong tim thay lenh: {command}. Kiem tra PATH/env.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Lenh chay qua lau, da het timeout: {command}") from exc
+
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "CLI tra ve loi khong ro."
+        raise RuntimeError(message)
+
+    return result.stdout.strip()
+
+
 def build_telegram_prompt(user_prompt: str) -> str:
     hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
     if not hook:
@@ -64,30 +118,108 @@ def ensure_reply_suffix(answer: str) -> str:
     return f"{answer}\n\n{suffix}"
 
 
-def call_claude(prompt: str) -> str:
-    command = split_command(os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND))
-    timeout_seconds = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180"))
+def call_claude(prompt: str, command: str | None = None) -> str:
+    command = command or os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
+    return run_cli(command, prompt) or "(Khong co noi dung tra ve.)"
 
+
+def parse_context_usage_percent(output: str) -> float | None:
     try:
-        result = subprocess.run(
-            [*command, prompt],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("Khong tim thay lenh Claude CLI. Kiem tra CLAUDE_CLI_COMMAND/PATH.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Claude CLI phan hoi qua lau, da het timeout.") from exc
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        data = None
 
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or "Claude CLI tra ve loi khong ro."
-        raise RuntimeError(message)
+    json_percent = find_context_percent(data)
+    if json_percent is not None:
+        return json_percent
 
-    return result.stdout.strip() or "(Khong co noi dung tra ve.)"
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", output)
+    if not match:
+        return None
+
+    return float(match.group(1).replace(",", "."))
+
+
+def find_context_percent(value) -> float | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_lower = str(key).lower()
+            if "percent" in key_lower or "percentage" in key_lower:
+                percent = coerce_percent(child)
+                if percent is not None:
+                    return percent
+
+            percent = find_context_percent(child)
+            if percent is not None:
+                return percent
+
+    if isinstance(value, list):
+        for child in value:
+            percent = find_context_percent(child)
+            if percent is not None:
+                return percent
+
+    return None
+
+
+def coerce_percent(value) -> float | None:
+    try:
+        percent = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if 0 <= percent <= 1:
+        return percent * 100
+    if 0 <= percent <= 100:
+        return percent
+    return None
+
+
+def get_context_usage_percent() -> float | None:
+    command = os.getenv("CLAUDE_CONTEXT_USAGE_COMMAND", "").strip()
+    if not command:
+        return None
+
+    timeout_seconds = int(os.getenv("CLAUDE_CONTROL_TIMEOUT_SECONDS", "30"))
+    output = run_cli(command, timeout_seconds=timeout_seconds)
+    percent = parse_context_usage_percent(output)
+    if percent is None:
+        raise RuntimeError(f"Khong doc duoc % context tu output cua: {command}")
+    return percent
+
+
+def build_new_session_notice(percent: float) -> str:
+    template = os.getenv("CLAUDE_NEW_SESSION_NOTICE", DEFAULT_CLAUDE_NEW_SESSION_NOTICE)
+    return template.format(percent=percent)
+
+
+def prepare_new_claude_session() -> None:
+    command = os.getenv("CLAUDE_NEW_SESSION_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_COMMAND).strip()
+    if not command:
+        return
+
+    timeout_seconds = int(os.getenv("CLAUDE_CONTROL_TIMEOUT_SECONDS", "30"))
+    run_cli(command, timeout_seconds=timeout_seconds)
+
+
+def plan_claude_session() -> ClaudeSessionPlan:
+    session_mode = os.getenv("CLAUDE_SESSION_MODE", SESSION_MODE_STATELESS).strip().lower()
+    if session_mode != SESSION_MODE_AUTO_RESUME:
+        return ClaudeSessionPlan(os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND))
+
+    percent = get_context_usage_percent()
+    if percent is None:
+        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+
+    limit = float(os.getenv("CLAUDE_CONTEXT_LIMIT_PERCENT", str(DEFAULT_CONTEXT_LIMIT_PERCENT)))
+    if percent < limit:
+        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+
+    prepare_new_claude_session()
+    return ClaudeSessionPlan(
+        os.getenv("CLAUDE_NEW_SESSION_PROMPT_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND),
+        build_new_session_notice(percent),
+    )
 
 
 def telegram_request(token: str, method: str, payload: dict) -> dict:
@@ -227,7 +359,10 @@ def handle_message(token: str, message: dict, allowed_chat_ids: set[int], bot_us
 
     try:
         send_chat_action(token, chat_id)
-        answer = ensure_reply_suffix(call_claude(build_telegram_prompt(prompt)))
+        session_plan = plan_claude_session()
+        if session_plan.notice:
+            send_message(token, chat_id, session_plan.notice)
+        answer = ensure_reply_suffix(call_claude(build_telegram_prompt(prompt), session_plan.prompt_command))
         send_message(token, chat_id, answer)
     except Exception as exc:
         send_message(token, chat_id, f"Loi: {exc}")
