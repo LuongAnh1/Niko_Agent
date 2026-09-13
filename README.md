@@ -56,12 +56,28 @@ Khi context chạm ngưỡng, bot sẽ báo lên chat rồi mở phiên mới b�
 
 ## Sửa hook
 
-Muốn đổi giọng văn thì sửa biến này trong `.env.example` hoặc mở PR:
+Muốn đổi giọng văn thì sửa file `HOOK.md` rồi mở PR, không cần sửa script Python.
 
 ```env
-TELEGRAM_PROMPT_HOOK=...
-TELEGRAM_REPLY_SUFFIX=Ok nhé bạn
+TELEGRAM_PROMPT_HOOK_MODE=new_session
+TELEGRAM_PROMPT_HOOK_FILE=HOOK.md
+TELEGRAM_REPLY_SUFFIX=Meow
 ```
+
+Mặc định `new_session` chỉ nạp `HOOK.md` khi mở phiên mới/stateless. Khi resume chat cũ, bot không gửi lại hook để tiết kiệm context; đổi thành `always` nếu muốn ép nạp mỗi tin.
+
+## Sticker Ducks
+
+Bot có thể gửi thêm sticker Duck của Telegram (UtyaDuck) theo mood bằng local picker, không cần MCP.
+
+```env
+TELEGRAM_STICKERS_ENABLED=1
+TELEGRAM_STICKER_CONFIG_FILE=stickers/ducks.json
+TELEGRAM_STICKER_SET_NAME=UtyaDuck
+TELEGRAM_STICKER_MODE=smart
+```
+
+Sửa keyword/emoji trong `stickers/ducks.json` nếu muốn đổi cách chọn sticker. `smart` chỉ gửi khi bắt được mood; đổi thành `always` nếu muốn câu nào cũng có sticker.
 
 ## Demo file prompt
 

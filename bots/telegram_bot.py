@@ -19,6 +19,7 @@ try:
         parse_user_aliases,
         telegram_message_to_gateway,
     )
+    from bots.sticker_picker import choose_sticker_file_id, load_sticker_config
 except ImportError:
     from chat_gateway import (
         build_identity_context,
@@ -27,6 +28,7 @@ except ImportError:
         parse_user_aliases,
         telegram_message_to_gateway,
     )
+    from sticker_picker import choose_sticker_file_id, load_sticker_config
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
@@ -42,15 +44,15 @@ GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
 SESSION_MODE_STATELESS = "stateless"
 SESSION_MODE_AUTO_RESUME = "auto_resume"
-DEFAULT_TELEGRAM_PROMPT_HOOK = (
-    "Ban la Niko, mot AI Agent dang chat chit voi mot dam duc rua trong group Telegram. "
-    "Noi chuyen bang tieng Viet, than mat, lanh loi, hai huoc het co the. "
-    "Phong cach nhu anh em trong ban nhau: vui, nhanh, co ca khia nhe, nhung khong cong kich ca nhan qua da. "
-    "Tra loi gon, dung chat group, tranh van phong mau me. "
-    "Bat buoc ket thuc moi cau tra loi bang dung cum: Ok nhé bạn"
-)
-DEFAULT_TELEGRAM_REPLY_SUFFIX = "Ok nhé bạn"
+DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
+DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
+DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "stickers/ducks.json"
 TRUE_VALUES = {"1", "true", "yes", "on"}
+PROMPT_HOOK_MODE_ALWAYS = "always"
+PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
+PROMPT_HOOK_MODE_NEVER = "never"
+DEFAULT_PROMPT_HOOK_MODE = PROMPT_HOOK_MODE_NEW_SESSION
+STICKER_SET_CACHE: dict[str, list[dict]] = {}
 
 
 class TelegramError(RuntimeError):
@@ -61,6 +63,7 @@ class TelegramError(RuntimeError):
 class ClaudeSessionPlan:
     prompt_command: str
     notice: str = ""
+    include_prompt_hook: bool = True
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
@@ -126,19 +129,61 @@ def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None
 def env_flag(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in TRUE_VALUES
 
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
 
-def build_telegram_prompt(user_prompt: str, gateway_message=None) -> str:
-    hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
+
+def resolve_project_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+    return repo_root() / path
+
+
+def load_telegram_prompt_hook() -> str:
+    hook_file = os.getenv("TELEGRAM_PROMPT_HOOK_FILE", DEFAULT_TELEGRAM_PROMPT_HOOK_FILE).strip()
+    if not hook_file:
+        return ""
+
+    path = resolve_project_path(hook_file)
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Khong tim thay file hook: {path}") from exc
+
+
+def prompt_hook_enabled_for_session(is_resuming: bool) -> bool:
+    mode = os.getenv("TELEGRAM_PROMPT_HOOK_MODE", DEFAULT_PROMPT_HOOK_MODE).strip().lower()
+    if mode in {PROMPT_HOOK_MODE_ALWAYS, "each_message", "per_message"}:
+        return True
+    if mode in {PROMPT_HOOK_MODE_NEVER, "off", "0", "false", "no"}:
+        return False
+    return not is_resuming
+
+
+def build_telegram_prompt(
+    user_prompt: str,
+    gateway_message=None,
+    include_prompt_hook: bool = True,
+) -> str:
+    hook = ""
+    if include_prompt_hook:
+        hook = load_telegram_prompt_hook()
+
     identity_context = ""
     if gateway_message is not None and env_flag("CHAT_IDENTITY_ENABLED", "1"):
         identity_context = build_identity_context(gateway_message)
 
-    parts = [
-        hook,
-        identity_context,
-        f"Tin nhan nguoi dung:\n{user_prompt}",
-    ]
-    return "\n\n".join(part for part in parts if part)
+    parts = []
+    if hook:
+        parts.append(hook)
+    if identity_context:
+        parts.append(identity_context)
+    if not parts:
+        return user_prompt
+
+    parts.append(f"Tin nhan nguoi dung:\n{user_prompt}")
+    return "\n\n".join(parts)
 
 
 def ensure_reply_suffix(answer: str) -> str:
@@ -148,6 +193,50 @@ def ensure_reply_suffix(answer: str) -> str:
         return answer
 
     return f"{answer}\n\n{suffix}"
+
+
+def load_effective_sticker_config() -> dict:
+    config_file = os.getenv("TELEGRAM_STICKER_CONFIG_FILE", DEFAULT_TELEGRAM_STICKER_CONFIG_FILE).strip()
+    config = load_sticker_config(resolve_project_path(config_file))
+
+    sticker_set_name = os.getenv("TELEGRAM_STICKER_SET_NAME", "").strip()
+    if sticker_set_name:
+        config["set_name"] = sticker_set_name
+
+    sticker_mode = os.getenv("TELEGRAM_STICKER_MODE", "").strip()
+    if sticker_mode:
+        config["mode"] = sticker_mode
+
+    return config
+
+
+def get_sticker_set_stickers(token: str, set_name: str) -> list[dict]:
+    if set_name not in STICKER_SET_CACHE:
+        result = telegram_request(token, "getStickerSet", {"name": set_name})
+        STICKER_SET_CACHE[set_name] = result.get("stickers", [])
+    return STICKER_SET_CACHE[set_name]
+
+
+def send_sticker(token: str, chat_id: int, sticker_file_id: str) -> None:
+    telegram_request(token, "sendSticker", {"chat_id": chat_id, "sticker": sticker_file_id})
+
+
+def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
+    if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
+        return
+
+    try:
+        config = load_effective_sticker_config()
+        set_name = str(config.get("set_name", "")).strip()
+        if not set_name:
+            return
+
+        stickers = get_sticker_set_stickers(token, set_name)
+        sticker_file_id = choose_sticker_file_id(stickers, config, f"{user_prompt}\n{answer}")
+        if sticker_file_id:
+            send_sticker(token, chat_id, sticker_file_id)
+    except Exception as exc:
+        print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
 
 
 def call_claude(prompt: str, command: str | None = None) -> str:
@@ -237,20 +326,30 @@ def prepare_new_claude_session() -> None:
 def plan_claude_session() -> ClaudeSessionPlan:
     session_mode = os.getenv("CLAUDE_SESSION_MODE", SESSION_MODE_STATELESS).strip().lower()
     if session_mode != SESSION_MODE_AUTO_RESUME:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
+        )
 
     percent = get_context_usage_percent()
     if percent is None:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
+        )
 
     limit = float(os.getenv("CLAUDE_CONTEXT_LIMIT_PERCENT", str(DEFAULT_CONTEXT_LIMIT_PERCENT)))
     if percent < limit:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
+        )
 
     prepare_new_claude_session()
     return ClaudeSessionPlan(
         os.getenv("CLAUDE_NEW_SESSION_PROMPT_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND),
         build_new_session_notice(percent),
+        include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
     )
 
 
@@ -408,9 +507,13 @@ def handle_message(
             send_message(token, chat_id, session_plan.notice)
         prompt_message = gateway_message.with_text(prompt)
         answer = ensure_reply_suffix(
-            call_claude(build_telegram_prompt(prompt, prompt_message), session_plan.prompt_command)
+            call_claude(
+                build_telegram_prompt(prompt, prompt_message, session_plan.include_prompt_hook),
+                session_plan.prompt_command,
+            )
         )
         send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
     except Exception as exc:
         send_message(token, chat_id, f"Loi: {exc}")
 

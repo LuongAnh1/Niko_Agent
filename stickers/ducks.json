@@ -1,0 +1,155 @@
+{
+  "set_name": "UtyaDuck",
+  "mode": "smart",
+  "fallback_mood": "neutral",
+  "mood_priority": [
+    "warning",
+    "happy",
+    "thinking",
+    "coding",
+    "tease",
+    "hype",
+    "sad"
+  ],
+  "moods": {
+    "warning": {
+      "emojis": [
+        "😱",
+        "🤯",
+        "😳",
+        "😡",
+        "😠"
+      ],
+      "keywords": [
+        "loi",
+        "error",
+        "fail",
+        "bug",
+        "khong duoc",
+        "hong",
+        "sai",
+        "toang",
+        "crash",
+        "cham",
+        "het context"
+      ]
+    },
+    "happy": {
+      "emojis": [
+        "😂",
+        "😘",
+        "👍",
+        "🤗",
+        "👌"
+      ],
+      "keywords": [
+        "haha",
+        "hehe",
+        "hihi",
+        "lol",
+        ":v",
+        "vui",
+        "ngon",
+        "dinh",
+        "tuyet",
+        "cam on",
+        "thanks",
+        "ok",
+        "oke"
+      ]
+    },
+    "thinking": {
+      "emojis": [
+        "🤔",
+        "🙄",
+        "🤷‍♂️"
+      ],
+      "keywords": [
+        "sao",
+        "vi sao",
+        "tai sao",
+        "lam sao",
+        "hum",
+        "hmm",
+        "nghi",
+        "phan tich",
+        "?"
+      ]
+    },
+    "coding": {
+      "emojis": [
+        "🤔",
+        "👍",
+        "👌"
+      ],
+      "keywords": [
+        "code",
+        "repo",
+        "git",
+        "pr",
+        "python",
+        "script",
+        "api",
+        "cli",
+        "mcp",
+        "hook",
+        "context"
+      ]
+    },
+    "tease": {
+      "emojis": [
+        "😈",
+        "😎",
+        "😏"
+      ],
+      "keywords": [
+        "treu",
+        "ca khia",
+        "cham biem",
+        "dua thoi",
+        "banh cuon"
+      ]
+    },
+    "hype": {
+      "emojis": [
+        "🔥",
+        "🤑",
+        "🌈",
+        "👍"
+      ],
+      "keywords": [
+        "ship",
+        "merge",
+        "deploy",
+        "done",
+        "xong",
+        "chay duoc",
+        "trien"
+      ]
+    },
+    "sad": {
+      "emojis": [
+        "😭",
+        "🥶",
+        "👎"
+      ],
+      "keywords": [
+        "buon",
+        "met",
+        "kho",
+        "nan",
+        "chiu",
+        "chan"
+      ]
+    },
+    "neutral": {
+      "emojis": [
+        "👍",
+        "👋",
+        "👌",
+        "😴"
+      ],
+      "keywords": []
+    }
+  }
+}
