@@ -25,6 +25,18 @@ python bots/telegram_bot.py
 
 Dùng `/id` trong private chat hoặc group để lấy `chat_id`. Nếu bot chạy trong group thì điền `chat_id` của group.
 
+## Nhận Diện Người Chat
+
+Dùng `/whoami` hoặc `/id` để lấy `user_key` của từng người. Bot sẽ gửi thông tin người nói vào prompt để Claude biết ai đang chat.
+
+```env
+CHAT_IDENTITY_ENABLED=1
+CHAT_ALLOWED_USER_KEYS=
+CHAT_USER_ALIASES=telegram:123456789=Anh A;telegram:987654321=Anh B
+```
+
+`CHAT_ALLOWED_USER_KEYS` để trống thì ai trong chat được phép cũng dùng được bot. Nếu muốn giới hạn theo từng người, điền danh sách `user_key`, cách nhau bằng dấu phẩy.
+
 ## Giữ phiên Claude
 
 Bot có thể tiếp tục phiên gần nhất nếu context chưa tới 80%:

@@ -11,6 +11,23 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+try:
+    from bots.chat_gateway import (
+        build_identity_context,
+        format_identity_reply,
+        parse_allowed_user_keys,
+        parse_user_aliases,
+        telegram_message_to_gateway,
+    )
+except ImportError:
+    from chat_gateway import (
+        build_identity_context,
+        format_identity_reply,
+        parse_allowed_user_keys,
+        parse_user_aliases,
+        telegram_message_to_gateway,
+    )
+
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_RESUME_COMMAND = "fcc-claude --continue -p"
@@ -33,6 +50,7 @@ DEFAULT_TELEGRAM_PROMPT_HOOK = (
     "Bat buoc ket thuc moi cau tra loi bang dung cum: Ok nhé bạn"
 )
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Ok nhé bạn"
+TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 class TelegramError(RuntimeError):
@@ -105,12 +123,22 @@ def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None
     return result.stdout.strip()
 
 
-def build_telegram_prompt(user_prompt: str) -> str:
-    hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
-    if not hook:
-        return user_prompt
+def env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in TRUE_VALUES
 
-    return f"{hook}\n\nTin nhan nguoi dung:\n{user_prompt}"
+
+def build_telegram_prompt(user_prompt: str, gateway_message=None) -> str:
+    hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
+    identity_context = ""
+    if gateway_message is not None and env_flag("CHAT_IDENTITY_ENABLED", "1"):
+        identity_context = build_identity_context(gateway_message)
+
+    parts = [
+        hook,
+        identity_context,
+        f"Tin nhan nguoi dung:\n{user_prompt}",
+    ]
+    return "\n\n".join(part for part in parts if part)
 
 
 def ensure_reply_suffix(answer: str) -> str:
@@ -335,18 +363,30 @@ def extract_group_prompt(message: dict, bot_username: str) -> str:
     return ""
 
 
-def handle_message(token: str, message: dict, allowed_chat_ids: set[int], bot_username: str) -> None:
+def handle_message(
+    token: str,
+    message: dict,
+    allowed_chat_ids: set[int],
+    allowed_user_keys: set[str],
+    user_aliases: dict[str, str],
+    bot_username: str,
+) -> None:
+    gateway_message = telegram_message_to_gateway(message, user_aliases)
     chat_id = message["chat"]["id"]
-    text = (message.get("text") or "").strip()
+    text = gateway_message.text
 
-    print(f"Nhan tin nhan tu chat_id={chat_id}")
+    print(f"Nhan tin nhan tu chat_id={chat_id}, user_key={gateway_message.user.key}")
 
-    if is_command_for_bot(text, "/id", bot_username):
-        send_message(token, chat_id, f"chat_id cua chat nay la: {chat_id}")
+    if is_command_for_bot(text, "/id", bot_username) or is_command_for_bot(text, "/whoami", bot_username):
+        send_message(token, chat_id, format_identity_reply(gateway_message))
         return
 
     if allowed_chat_ids and chat_id not in allowed_chat_ids:
         print(f"Bo qua chat_id chua duoc phep: {chat_id}")
+        return
+
+    if allowed_user_keys and gateway_message.user.key not in allowed_user_keys:
+        print(f"Bo qua user_key chua duoc phep: {gateway_message.user.key}")
         return
 
     if not text:
@@ -366,7 +406,10 @@ def handle_message(token: str, message: dict, allowed_chat_ids: set[int], bot_us
         session_plan = plan_claude_session()
         if session_plan.notice:
             send_message(token, chat_id, session_plan.notice)
-        answer = ensure_reply_suffix(call_claude(build_telegram_prompt(prompt), session_plan.prompt_command))
+        prompt_message = gateway_message.with_text(prompt)
+        answer = ensure_reply_suffix(
+            call_claude(build_telegram_prompt(prompt, prompt_message), session_plan.prompt_command)
+        )
         send_message(token, chat_id, answer)
     except Exception as exc:
         send_message(token, chat_id, f"Loi: {exc}")
@@ -381,6 +424,8 @@ def main() -> int:
         return 1
 
     allowed_chat_ids = parse_allowed_chat_ids()
+    allowed_user_keys = parse_allowed_user_keys(os.getenv("CHAT_ALLOWED_USER_KEYS", ""))
+    user_aliases = parse_user_aliases(os.getenv("CHAT_USER_ALIASES", ""))
     offset = None
 
     bot_username = get_bot_username(token)
@@ -388,6 +433,8 @@ def main() -> int:
     print(f"Bot username: @{bot_username}")
     if not allowed_chat_ids:
         print("Canh bao: TELEGRAM_ALLOWED_CHAT_IDS dang trong, bot se tra loi moi chat gui den.")
+    if allowed_user_keys:
+        print(f"Chi tra loi {len(allowed_user_keys)} user_key duoc phep.")
 
     prepare_long_polling(token)
 
@@ -402,7 +449,7 @@ def main() -> int:
                 offset = update["update_id"] + 1
                 message = update.get("message")
                 if message:
-                    handle_message(token, message, allowed_chat_ids, bot_username)
+                    handle_message(token, message, allowed_chat_ids, allowed_user_keys, user_aliases, bot_username)
         except KeyboardInterrupt:
             print("\nDa dung bot.")
             return 0
