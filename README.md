@@ -32,12 +32,15 @@ Bot có thể tiếp tục phiên gần nhất nếu context chưa tới 80%:
 ```env
 CLAUDE_SESSION_MODE=auto_resume
 CLAUDE_RESUME_COMMAND=fcc-claude --continue -p
-CLAUDE_CONTEXT_USAGE_COMMAND=python scripts/claude_context_usage.py
+CLAUDE_CONTEXT_USAGE_COMMAND=fcc-context --json
 CLAUDE_CONTEXT_LIMIT_PERCENT=80
-CLAUDE_NEW_SESSION_COMMAND=fcc-resume
+CLAUDE_CONTEXT_WINDOW_TOKENS=1000000
+CLAUDE_NEW_SESSION_COMMAND=
 ```
 
-Khi context chạm ngưỡng, bot sẽ báo lên chat rồi mở phiên mới.
+Chạy `powershell -ExecutionPolicy Bypass -File scripts/install_fcc_context_command.ps1` một lần để có lệnh `fcc-context`. Với Opus 5/`opus[1m]`, để window là `1000000`.
+
+Khi context chạm ngưỡng, bot sẽ báo lên chat rồi mở phiên mới bằng `fcc-claude -p`. Nếu máy có command `fcc-resume` riêng thì điền vào `CLAUDE_NEW_SESSION_COMMAND`.
 
 ## Sửa hook
 

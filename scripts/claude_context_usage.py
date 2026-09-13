@@ -1,10 +1,27 @@
+import argparse
 import json
 import os
 from pathlib import Path
 
 
-DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
+DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_CHARS_PER_TOKEN = 4.0
+
+
+def load_env_file(path: Path = Path(".env")) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def claude_projects_dir() -> Path:
@@ -66,40 +83,64 @@ def estimate_session_tokens(session_file: Path) -> int:
     return int(total_chars / chars_per_token)
 
 
-def main() -> int:
+def context_window_tokens() -> int:
+    raw_value = os.getenv("CLAUDE_CONTEXT_WINDOW_TOKENS", "").strip().lower()
+    if not raw_value or raw_value == "auto":
+        return DEFAULT_CONTEXT_WINDOW_TOKENS
+
+    return int(raw_value.replace("_", ""))
+
+
+def build_usage() -> dict:
     projects_dir = claude_projects_dir()
     session_file = latest_session_file(projects_dir)
-    context_window_tokens = int(os.getenv("CLAUDE_CONTEXT_WINDOW_TOKENS", str(DEFAULT_CONTEXT_WINDOW_TOKENS)))
+    window_tokens = context_window_tokens()
 
     if session_file is None:
-        print(
-            json.dumps(
-                {
-                    "has_session": False,
-                    "used_percent": 100.0,
-                    "estimated_tokens": 0,
-                    "context_window_tokens": context_window_tokens,
-                    "projects_dir": str(projects_dir),
-                },
-                ensure_ascii=False,
-            )
-        )
-        return 0
+        return {
+            "has_session": False,
+            "used_percent": 100.0,
+            "estimated_tokens": 0,
+            "context_window_tokens": window_tokens,
+            "projects_dir": str(projects_dir),
+            "note": "No Claude JSONL session found; starting a new session is safest.",
+        }
 
     estimated_tokens = estimate_session_tokens(session_file)
-    used_percent = min(100.0, estimated_tokens / context_window_tokens * 100)
-    print(
-        json.dumps(
-            {
-                "has_session": True,
-                "used_percent": used_percent,
-                "estimated_tokens": estimated_tokens,
-                "context_window_tokens": context_window_tokens,
-                "session_file": str(session_file),
-            },
-            ensure_ascii=False,
-        )
-    )
+    used_percent = min(100.0, estimated_tokens / window_tokens * 100)
+    return {
+        "has_session": True,
+        "used_percent": used_percent,
+        "estimated_tokens": estimated_tokens,
+        "context_window_tokens": window_tokens,
+        "session_file": str(session_file),
+        "note": "Estimated from saved Claude transcript text, not exact provider token accounting.",
+    }
+
+
+def print_text(usage: dict) -> None:
+    print(f"has_session: {str(usage['has_session']).lower()}")
+    print(f"used_percent: {usage['used_percent']:.2f}%")
+    print(f"estimated_tokens: {usage['estimated_tokens']:,}")
+    print(f"context_window_tokens: {usage['context_window_tokens']:,}")
+    if usage.get("session_file"):
+        print(f"session_file: {usage['session_file']}")
+    else:
+        print(f"projects_dir: {usage['projects_dir']}")
+    print(f"note: {usage['note']}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Estimate the latest Claude Code session context usage.")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    args = parser.parse_args()
+
+    load_env_file()
+    usage = build_usage()
+    if args.json:
+        print(json.dumps(usage, ensure_ascii=False))
+    else:
+        print_text(usage)
     return 0
 
 

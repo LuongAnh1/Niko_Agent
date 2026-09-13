@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -13,7 +14,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_RESUME_COMMAND = "fcc-claude --continue -p"
-DEFAULT_CLAUDE_NEW_SESSION_COMMAND = "fcc-resume"
+DEFAULT_CLAUDE_NEW_SESSION_COMMAND = ""
 DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_NEW_SESSION_NOTICE = (
     "Context phien chat gan nhat da dung {percent:.1f}%, Niko mo phien chat moi nhe."
@@ -65,7 +66,10 @@ def split_command(command: str) -> list[str]:
 
 
 def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
-    args = split_command(command)
+    args = split_command(os.path.expandvars(command))
+    if args:
+        args[0] = shutil.which(args[0]) or args[0]
+
     if prompt is None:
         return args
 
