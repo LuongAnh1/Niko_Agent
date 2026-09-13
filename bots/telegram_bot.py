@@ -1,11 +1,11 @@
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -20,6 +20,13 @@ try:
         telegram_message_to_gateway,
     )
     from bots.sticker_picker import choose_sticker_file_id, load_sticker_config
+    from bots.agent_router import (
+        ROUTE_BUSY_REPLY,
+        ROUTE_DELAYED_DEEP_AGENT,
+        ROUTE_FAST_AGENT,
+        ROUTE_LOCAL_REPLY,
+        decide_agent_route,
+    )
 except ImportError:
     from chat_gateway import (
         build_identity_context,
@@ -29,29 +36,33 @@ except ImportError:
         telegram_message_to_gateway,
     )
     from sticker_picker import choose_sticker_file_id, load_sticker_config
+    from agent_router import (
+        ROUTE_BUSY_REPLY,
+        ROUTE_DELAYED_DEEP_AGENT,
+        ROUTE_FAST_AGENT,
+        ROUTE_LOCAL_REPLY,
+        decide_agent_route,
+    )
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
-DEFAULT_CLAUDE_RESUME_COMMAND = "fcc-claude --continue -p"
-DEFAULT_CLAUDE_NEW_SESSION_COMMAND = ""
-DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND = "fcc-claude -p"
-DEFAULT_CLAUDE_NEW_SESSION_NOTICE = (
-    "Context phien chat gan nhat da dung {percent:.1f}%, Niko mo phien chat moi nhe."
-)
-DEFAULT_CONTEXT_LIMIT_PERCENT = 80.0
+DEFAULT_CLAUDE_DEEP_AGENT_COMMAND = ""
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
-SESSION_MODE_STATELESS = "stateless"
-SESSION_MODE_AUTO_RESUME = "auto_resume"
 DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
 DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "stickers/ducks.json"
 TRUE_VALUES = {"1", "true", "yes", "on"}
-PROMPT_HOOK_MODE_ALWAYS = "always"
-PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
-PROMPT_HOOK_MODE_NEVER = "never"
-DEFAULT_PROMPT_HOOK_MODE = PROMPT_HOOK_MODE_NEW_SESSION
+AGENT_MODE_SINGLE = "single"
+AGENT_MODE_TWO_AGENT = "two_agent"
+DEFAULT_TELEGRAM_DEEP_WAIT_REPLY = (
+    "Dạ anh đợi em chút, câu này cần phân tích kỹ hơn nên em đẩy sang Opus 5 rồi báo lại anh ngay."
+)
+DEFAULT_TELEGRAM_DEEP_BUSY_REPLY = (
+    "Dạ anh đợi em chút, em vẫn đang xử lý câu trước. Anh cứ nhắn tiếp, khi có kết quả em sẽ gửi lại."
+)
+DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS = 3.0
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
 
 
@@ -60,10 +71,16 @@ class TelegramError(RuntimeError):
 
 
 @dataclass
-class ClaudeSessionPlan:
-    prompt_command: str
-    notice: str = ""
-    include_prompt_hook: bool = True
+class DeepAgentJob:
+    chat_id: int
+    user_key: str
+    prompt: str
+    started_at: float
+
+
+DEEP_JOBS: dict[int, DeepAgentJob] = {}
+DEEP_JOBS_LOCK = threading.Lock()
+DEEP_AGENT_LOCK = threading.Lock()
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
@@ -152,15 +169,6 @@ def load_telegram_prompt_hook() -> str:
         raise RuntimeError(f"Khong tim thay file hook: {path}") from exc
 
 
-def prompt_hook_enabled_for_session(is_resuming: bool) -> bool:
-    mode = os.getenv("TELEGRAM_PROMPT_HOOK_MODE", DEFAULT_PROMPT_HOOK_MODE).strip().lower()
-    if mode in {PROMPT_HOOK_MODE_ALWAYS, "each_message", "per_message"}:
-        return True
-    if mode in {PROMPT_HOOK_MODE_NEVER, "off", "0", "false", "no"}:
-        return False
-    return not is_resuming
-
-
 def build_telegram_prompt(
     user_prompt: str,
     gateway_message=None,
@@ -239,118 +247,148 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
         print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
 
 
+def two_agent_mode_enabled() -> bool:
+    mode = os.getenv("TELEGRAM_AGENT_MODE", AGENT_MODE_SINGLE).strip().lower()
+    return mode in {AGENT_MODE_TWO_AGENT, "dual", "2", "true", "on"}
+
+
+def fast_agent_command() -> str:
+    return os.getenv("TELEGRAM_FAST_AGENT_COMMAND", "").strip()
+
+
+def get_active_deep_job(chat_id: int) -> DeepAgentJob | None:
+    with DEEP_JOBS_LOCK:
+        return DEEP_JOBS.get(chat_id)
+
+
+def has_active_deep_job(chat_id: int) -> bool:
+    return get_active_deep_job(chat_id) is not None
+
+
+def build_deep_wait_reply() -> str:
+    template = os.getenv("TELEGRAM_DEEP_WAIT_REPLY", DEFAULT_TELEGRAM_DEEP_WAIT_REPLY)
+    return template.format()
+
+
+def build_deep_busy_reply(chat_id: int) -> str:
+    job = get_active_deep_job(chat_id)
+    elapsed_seconds = int(time.time() - job.started_at) if job else 0
+    elapsed_minutes = max(0, elapsed_seconds // 60)
+    template = os.getenv("TELEGRAM_DEEP_BUSY_REPLY", DEFAULT_TELEGRAM_DEEP_BUSY_REPLY)
+    return template.format(elapsed_seconds=elapsed_seconds, elapsed_minutes=elapsed_minutes)
+
+
+def uncertain_delay_seconds() -> float:
+    raw_value = os.getenv(
+        "TELEGRAM_UNCERTAIN_DELAY_SECONDS",
+        str(DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS),
+    ).strip()
+    try:
+        return max(0.0, min(30.0, float(raw_value)))
+    except ValueError:
+        return DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS
+
+
+def delay_before_deep_agent_if_needed(route_kind: str) -> None:
+    if route_kind != ROUTE_DELAYED_DEEP_AGENT:
+        return
+    delay_seconds = uncertain_delay_seconds()
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+
+
+def call_fast_agent(prompt: str, gateway_message) -> str:
+    command = fast_agent_command()
+    if not command:
+        raise RuntimeError("Chua cau hinh TELEGRAM_FAST_AGENT_COMMAND.")
+
+    timeout_seconds = int(os.getenv("TELEGRAM_FAST_AGENT_TIMEOUT_SECONDS", "45"))
+    fast_prompt = build_telegram_prompt(prompt, gateway_message, include_prompt_hook=True)
+    return run_cli(command, fast_prompt, timeout_seconds=timeout_seconds) or "(Khong co noi dung tra ve.)"
+
+
+def deep_agent_command() -> str:
+    command = os.getenv("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
+    if command:
+        return command
+    return os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
+
+
+def call_deep_agent(prompt: str, gateway_message) -> str:
+    deep_prompt = build_telegram_prompt(prompt, gateway_message, include_prompt_hook=True)
+    return call_claude(deep_prompt, deep_agent_command())
+
+
+def start_deep_agent_job(token: str, chat_id: int, prompt: str, prompt_message) -> bool:
+    with DEEP_JOBS_LOCK:
+        if chat_id in DEEP_JOBS:
+            return False
+        DEEP_JOBS[chat_id] = DeepAgentJob(chat_id, prompt_message.user.key, prompt, time.time())
+
+    thread = threading.Thread(
+        target=run_deep_agent_job,
+        args=(token, chat_id, prompt, prompt_message),
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+def run_deep_agent_job(token: str, chat_id: int, prompt: str, prompt_message) -> None:
+    try:
+        with DEEP_AGENT_LOCK:
+            send_chat_action(token, chat_id)
+            answer = ensure_reply_suffix(call_deep_agent(prompt, prompt_message))
+
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+    except Exception as exc:
+        send_message(token, chat_id, f"Loi deep agent: {exc}")
+    finally:
+        with DEEP_JOBS_LOCK:
+            DEEP_JOBS.pop(chat_id, None)
+
+
+def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_message) -> None:
+    route = decide_agent_route(
+        prompt,
+        deep_job_active=has_active_deep_job(chat_id),
+        fast_agent_available=bool(fast_agent_command()),
+    )
+    print(f"Agent route: {route.kind} ({route.reason})")
+
+    if route.kind == ROUTE_BUSY_REPLY:
+        answer = ensure_reply_suffix(build_deep_busy_reply(chat_id))
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+        return
+
+    if route.kind == ROUTE_LOCAL_REPLY:
+        answer = ensure_reply_suffix(route.reply)
+        send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
+        return
+
+    if route.kind == ROUTE_FAST_AGENT:
+        try:
+            send_chat_action(token, chat_id)
+            answer = ensure_reply_suffix(call_fast_agent(prompt, prompt_message))
+            send_message(token, chat_id, answer)
+            maybe_send_sticker(token, chat_id, prompt, answer)
+            return
+        except Exception as exc:
+            print(f"Fast agent loi, chuyen sang deep agent: {exc}", file=sys.stderr)
+
+    delay_before_deep_agent_if_needed(route.kind)
+    started = start_deep_agent_job(token, chat_id, prompt, prompt_message)
+    answer = ensure_reply_suffix(build_deep_wait_reply() if started else build_deep_busy_reply(chat_id))
+    send_message(token, chat_id, answer)
+    maybe_send_sticker(token, chat_id, prompt, answer)
+
+
 def call_claude(prompt: str, command: str | None = None) -> str:
     command = command or os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
     return run_cli(command, prompt) or "(Khong co noi dung tra ve.)"
-
-
-def parse_context_usage_percent(output: str) -> float | None:
-    try:
-        data = json.loads(output)
-    except json.JSONDecodeError:
-        data = None
-
-    json_percent = find_context_percent(data)
-    if json_percent is not None:
-        return json_percent
-
-    match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", output)
-    if not match:
-        return None
-
-    return float(match.group(1).replace(",", "."))
-
-
-def find_context_percent(value) -> float | None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            key_lower = str(key).lower()
-            if "percent" in key_lower or "percentage" in key_lower:
-                percent = coerce_percent(child)
-                if percent is not None:
-                    return percent
-
-            percent = find_context_percent(child)
-            if percent is not None:
-                return percent
-
-    if isinstance(value, list):
-        for child in value:
-            percent = find_context_percent(child)
-            if percent is not None:
-                return percent
-
-    return None
-
-
-def coerce_percent(value) -> float | None:
-    try:
-        percent = float(value)
-    except (TypeError, ValueError):
-        return None
-
-    if 0 <= percent <= 1:
-        return percent * 100
-    if 0 <= percent <= 100:
-        return percent
-    return None
-
-
-def get_context_usage_percent() -> float | None:
-    command = os.getenv("CLAUDE_CONTEXT_USAGE_COMMAND", "").strip()
-    if not command:
-        return None
-
-    timeout_seconds = int(os.getenv("CLAUDE_CONTROL_TIMEOUT_SECONDS", "30"))
-    output = run_cli(command, timeout_seconds=timeout_seconds)
-    percent = parse_context_usage_percent(output)
-    if percent is None:
-        raise RuntimeError(f"Khong doc duoc % context tu output cua: {command}")
-    return percent
-
-
-def build_new_session_notice(percent: float) -> str:
-    template = os.getenv("CLAUDE_NEW_SESSION_NOTICE", DEFAULT_CLAUDE_NEW_SESSION_NOTICE)
-    return template.format(percent=percent)
-
-
-def prepare_new_claude_session() -> None:
-    command = os.getenv("CLAUDE_NEW_SESSION_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_COMMAND).strip()
-    if not command:
-        return
-
-    timeout_seconds = int(os.getenv("CLAUDE_CONTROL_TIMEOUT_SECONDS", "30"))
-    run_cli(command, timeout_seconds=timeout_seconds)
-
-
-def plan_claude_session() -> ClaudeSessionPlan:
-    session_mode = os.getenv("CLAUDE_SESSION_MODE", SESSION_MODE_STATELESS).strip().lower()
-    if session_mode != SESSION_MODE_AUTO_RESUME:
-        return ClaudeSessionPlan(
-            os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND),
-            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
-        )
-
-    percent = get_context_usage_percent()
-    if percent is None:
-        return ClaudeSessionPlan(
-            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
-            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
-        )
-
-    limit = float(os.getenv("CLAUDE_CONTEXT_LIMIT_PERCENT", str(DEFAULT_CONTEXT_LIMIT_PERCENT)))
-    if percent < limit:
-        return ClaudeSessionPlan(
-            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
-            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
-        )
-
-    prepare_new_claude_session()
-    return ClaudeSessionPlan(
-        os.getenv("CLAUDE_NEW_SESSION_PROMPT_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND),
-        build_new_session_notice(percent),
-        include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
-    )
 
 
 def telegram_request(token: str, method: str, payload: dict) -> dict:
@@ -501,17 +539,13 @@ def handle_message(
         return
 
     try:
-        send_chat_action(token, chat_id)
-        session_plan = plan_claude_session()
-        if session_plan.notice:
-            send_message(token, chat_id, session_plan.notice)
         prompt_message = gateway_message.with_text(prompt)
-        answer = ensure_reply_suffix(
-            call_claude(
-                build_telegram_prompt(prompt, prompt_message, session_plan.include_prompt_hook),
-                session_plan.prompt_command,
-            )
-        )
+        if two_agent_mode_enabled():
+            handle_two_agent_message(token, chat_id, prompt, prompt_message)
+            return
+
+        send_chat_action(token, chat_id)
+        answer = ensure_reply_suffix(call_deep_agent(prompt, prompt_message))
         send_message(token, chat_id, answer)
         maybe_send_sticker(token, chat_id, prompt, answer)
     except Exception as exc:

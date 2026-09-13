@@ -8,47 +8,29 @@ from bots.chat_gateway import telegram_message_to_gateway
 from bots.telegram_bot import (
     STICKER_SET_CACHE,
     build_telegram_prompt,
+    deep_agent_command,
     ensure_reply_suffix,
     maybe_send_sticker,
-    plan_claude_session,
+    uncertain_delay_seconds,
 )
 from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 
 
 class TelegramPromptTests(unittest.TestCase):
-    def test_resume_session_does_not_include_prompt_hook_by_default(self):
+    def test_deep_agent_command_defaults_to_claude_command(self):
+        with patch.dict(os.environ, {"CLAUDE_CLI_COMMAND": "fcc-claude -p"}, clear=True):
+            self.assertEqual(deep_agent_command(), "fcc-claude -p")
+
+    def test_deep_agent_command_can_override_default(self):
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_SESSION_MODE": "auto_resume",
-                "CLAUDE_RESUME_COMMAND": "fcc-claude --continue -p",
-                "CLAUDE_CONTEXT_LIMIT_PERCENT": "80",
-                "TELEGRAM_PROMPT_HOOK_MODE": "new_session",
+                "CLAUDE_CLI_COMMAND": "fcc-claude -p",
+                "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude --model opus[1m] -p",
             },
-            clear=False,
-        ), patch("bots.telegram_bot.get_context_usage_percent", return_value=20):
-            plan = plan_claude_session()
-
-        self.assertEqual(plan.prompt_command, "fcc-claude --continue -p")
-        self.assertFalse(plan.include_prompt_hook)
-
-    def test_new_session_includes_prompt_hook_by_default(self):
-        with patch.dict(
-            os.environ,
-            {
-                "CLAUDE_SESSION_MODE": "auto_resume",
-                "CLAUDE_NEW_SESSION_PROMPT_COMMAND": "fcc-claude -p",
-                "CLAUDE_CONTEXT_LIMIT_PERCENT": "80",
-                "TELEGRAM_PROMPT_HOOK_MODE": "new_session",
-            },
-            clear=False,
-        ), patch("bots.telegram_bot.get_context_usage_percent", return_value=90), patch(
-            "bots.telegram_bot.prepare_new_claude_session"
+            clear=True,
         ):
-            plan = plan_claude_session()
-
-        self.assertEqual(plan.prompt_command, "fcc-claude -p")
-        self.assertTrue(plan.include_prompt_hook)
+            self.assertEqual(deep_agent_command(), "fcc-claude --model opus[1m] -p")
 
     def test_build_prompt_can_skip_hook_but_keep_identity(self):
         message = telegram_message_to_gateway(
@@ -78,20 +60,6 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
-
-    def test_hook_mode_always_keeps_hook_on_resume(self):
-        with patch.dict(
-            os.environ,
-            {
-                "CLAUDE_SESSION_MODE": "auto_resume",
-                "TELEGRAM_PROMPT_HOOK_MODE": "always",
-                "CLAUDE_CONTEXT_LIMIT_PERCENT": "80",
-            },
-            clear=False,
-        ), patch("bots.telegram_bot.get_context_usage_percent", return_value=20):
-            plan = plan_claude_session()
-
-        self.assertTrue(plan.include_prompt_hook)
 
     def test_reply_suffix_uses_meow_default(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -156,6 +124,13 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertEqual(calls[0], ("getStickerSet", {"name": "UtyaDuck"}))
         self.assertEqual(calls[1], ("sendSticker", {"chat_id": 123, "sticker": "happy-duck"}))
+
+    def test_uncertain_delay_seconds_is_bounded(self):
+        with patch.dict(os.environ, {"TELEGRAM_UNCERTAIN_DELAY_SECONDS": "45"}, clear=False):
+            self.assertEqual(uncertain_delay_seconds(), 30.0)
+
+        with patch.dict(os.environ, {"TELEGRAM_UNCERTAIN_DELAY_SECONDS": "2.5"}, clear=False):
+            self.assertEqual(uncertain_delay_seconds(), 2.5)
 
 
 if __name__ == "__main__":
