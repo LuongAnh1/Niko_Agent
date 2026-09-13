@@ -51,6 +51,10 @@ DEFAULT_TELEGRAM_PROMPT_HOOK = (
 )
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Ok nhé bạn"
 TRUE_VALUES = {"1", "true", "yes", "on"}
+PROMPT_HOOK_MODE_ALWAYS = "always"
+PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
+PROMPT_HOOK_MODE_NEVER = "never"
+DEFAULT_PROMPT_HOOK_MODE = PROMPT_HOOK_MODE_NEW_SESSION
 
 
 class TelegramError(RuntimeError):
@@ -61,6 +65,7 @@ class TelegramError(RuntimeError):
 class ClaudeSessionPlan:
     prompt_command: str
     notice: str = ""
+    include_prompt_hook: bool = True
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
@@ -127,18 +132,38 @@ def env_flag(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in TRUE_VALUES
 
 
-def build_telegram_prompt(user_prompt: str, gateway_message=None) -> str:
-    hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
+def prompt_hook_enabled_for_session(is_resuming: bool) -> bool:
+    mode = os.getenv("TELEGRAM_PROMPT_HOOK_MODE", DEFAULT_PROMPT_HOOK_MODE).strip().lower()
+    if mode in {PROMPT_HOOK_MODE_ALWAYS, "each_message", "per_message"}:
+        return True
+    if mode in {PROMPT_HOOK_MODE_NEVER, "off", "0", "false", "no"}:
+        return False
+    return not is_resuming
+
+
+def build_telegram_prompt(
+    user_prompt: str,
+    gateway_message=None,
+    include_prompt_hook: bool = True,
+) -> str:
+    hook = ""
+    if include_prompt_hook:
+        hook = os.getenv("TELEGRAM_PROMPT_HOOK", DEFAULT_TELEGRAM_PROMPT_HOOK).strip()
+
     identity_context = ""
     if gateway_message is not None and env_flag("CHAT_IDENTITY_ENABLED", "1"):
         identity_context = build_identity_context(gateway_message)
 
-    parts = [
-        hook,
-        identity_context,
-        f"Tin nhan nguoi dung:\n{user_prompt}",
-    ]
-    return "\n\n".join(part for part in parts if part)
+    parts = []
+    if hook:
+        parts.append(hook)
+    if identity_context:
+        parts.append(identity_context)
+    if not parts:
+        return user_prompt
+
+    parts.append(f"Tin nhan nguoi dung:\n{user_prompt}")
+    return "\n\n".join(parts)
 
 
 def ensure_reply_suffix(answer: str) -> str:
@@ -237,20 +262,30 @@ def prepare_new_claude_session() -> None:
 def plan_claude_session() -> ClaudeSessionPlan:
     session_mode = os.getenv("CLAUDE_SESSION_MODE", SESSION_MODE_STATELESS).strip().lower()
     if session_mode != SESSION_MODE_AUTO_RESUME:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
+        )
 
     percent = get_context_usage_percent()
     if percent is None:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
+        )
 
     limit = float(os.getenv("CLAUDE_CONTEXT_LIMIT_PERCENT", str(DEFAULT_CONTEXT_LIMIT_PERCENT)))
     if percent < limit:
-        return ClaudeSessionPlan(os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND))
+        return ClaudeSessionPlan(
+            os.getenv("CLAUDE_RESUME_COMMAND", DEFAULT_CLAUDE_RESUME_COMMAND),
+            include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=True),
+        )
 
     prepare_new_claude_session()
     return ClaudeSessionPlan(
         os.getenv("CLAUDE_NEW_SESSION_PROMPT_COMMAND", DEFAULT_CLAUDE_NEW_SESSION_PROMPT_COMMAND),
         build_new_session_notice(percent),
+        include_prompt_hook=prompt_hook_enabled_for_session(is_resuming=False),
     )
 
 
@@ -408,7 +443,10 @@ def handle_message(
             send_message(token, chat_id, session_plan.notice)
         prompt_message = gateway_message.with_text(prompt)
         answer = ensure_reply_suffix(
-            call_claude(build_telegram_prompt(prompt, prompt_message), session_plan.prompt_command)
+            call_claude(
+                build_telegram_prompt(prompt, prompt_message, session_plan.include_prompt_hook),
+                session_plan.prompt_command,
+            )
         )
         send_message(token, chat_id, answer)
     except Exception as exc:

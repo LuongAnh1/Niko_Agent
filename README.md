@@ -59,9 +59,12 @@ Khi context chạm ngưỡng, bot sẽ báo lên chat rồi mở phiên mới b�
 Muốn đổi giọng văn thì sửa biến này trong `.env.example` hoặc mở PR:
 
 ```env
+TELEGRAM_PROMPT_HOOK_MODE=new_session
 TELEGRAM_PROMPT_HOOK=...
 TELEGRAM_REPLY_SUFFIX=Ok nhé bạn
 ```
+
+Mặc định `new_session` chỉ nạp hook khi mở phiên mới/stateless. Khi resume chat cũ, bot không gửi lại hook để tiết kiệm context; đổi thành `always` nếu muốn ép nạp mỗi tin.
 
 ## Demo file prompt
 
