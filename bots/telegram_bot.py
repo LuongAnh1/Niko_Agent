@@ -19,6 +19,7 @@ try:
         parse_user_aliases,
         telegram_message_to_gateway,
     )
+    from bots.sticker_picker import choose_sticker_file_id, load_sticker_config
 except ImportError:
     from chat_gateway import (
         build_identity_context,
@@ -27,6 +28,7 @@ except ImportError:
         parse_user_aliases,
         telegram_message_to_gateway,
     )
+    from sticker_picker import choose_sticker_file_id, load_sticker_config
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
@@ -44,11 +46,13 @@ SESSION_MODE_STATELESS = "stateless"
 SESSION_MODE_AUTO_RESUME = "auto_resume"
 DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
+DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "stickers/ducks.json"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 PROMPT_HOOK_MODE_ALWAYS = "always"
 PROMPT_HOOK_MODE_NEW_SESSION = "new_session"
 PROMPT_HOOK_MODE_NEVER = "never"
 DEFAULT_PROMPT_HOOK_MODE = PROMPT_HOOK_MODE_NEW_SESSION
+STICKER_SET_CACHE: dict[str, list[dict]] = {}
 
 
 class TelegramError(RuntimeError):
@@ -189,6 +193,50 @@ def ensure_reply_suffix(answer: str) -> str:
         return answer
 
     return f"{answer}\n\n{suffix}"
+
+
+def load_effective_sticker_config() -> dict:
+    config_file = os.getenv("TELEGRAM_STICKER_CONFIG_FILE", DEFAULT_TELEGRAM_STICKER_CONFIG_FILE).strip()
+    config = load_sticker_config(resolve_project_path(config_file))
+
+    sticker_set_name = os.getenv("TELEGRAM_STICKER_SET_NAME", "").strip()
+    if sticker_set_name:
+        config["set_name"] = sticker_set_name
+
+    sticker_mode = os.getenv("TELEGRAM_STICKER_MODE", "").strip()
+    if sticker_mode:
+        config["mode"] = sticker_mode
+
+    return config
+
+
+def get_sticker_set_stickers(token: str, set_name: str) -> list[dict]:
+    if set_name not in STICKER_SET_CACHE:
+        result = telegram_request(token, "getStickerSet", {"name": set_name})
+        STICKER_SET_CACHE[set_name] = result.get("stickers", [])
+    return STICKER_SET_CACHE[set_name]
+
+
+def send_sticker(token: str, chat_id: int, sticker_file_id: str) -> None:
+    telegram_request(token, "sendSticker", {"chat_id": chat_id, "sticker": sticker_file_id})
+
+
+def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
+    if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
+        return
+
+    try:
+        config = load_effective_sticker_config()
+        set_name = str(config.get("set_name", "")).strip()
+        if not set_name:
+            return
+
+        stickers = get_sticker_set_stickers(token, set_name)
+        sticker_file_id = choose_sticker_file_id(stickers, config, f"{user_prompt}\n{answer}")
+        if sticker_file_id:
+            send_sticker(token, chat_id, sticker_file_id)
+    except Exception as exc:
+        print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
 
 
 def call_claude(prompt: str, command: str | None = None) -> str:
@@ -465,6 +513,7 @@ def handle_message(
             )
         )
         send_message(token, chat_id, answer)
+        maybe_send_sticker(token, chat_id, prompt, answer)
     except Exception as exc:
         send_message(token, chat_id, f"Loi: {exc}")
 

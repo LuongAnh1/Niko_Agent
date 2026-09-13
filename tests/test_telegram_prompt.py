@@ -5,7 +5,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bots.chat_gateway import telegram_message_to_gateway
-from bots.telegram_bot import build_telegram_prompt, ensure_reply_suffix, plan_claude_session
+from bots.telegram_bot import (
+    STICKER_SET_CACHE,
+    build_telegram_prompt,
+    ensure_reply_suffix,
+    maybe_send_sticker,
+    plan_claude_session,
+)
+from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 
 
 class TelegramPromptTests(unittest.TestCase):
@@ -91,6 +98,64 @@ class TelegramPromptTests(unittest.TestCase):
             answer = ensure_reply_suffix("Dạ anh")
 
         self.assertEqual(answer, "Dạ anh\n\nMeow")
+
+    def test_sticker_picker_detects_warning_mood(self):
+        config = {
+            "mood_priority": ["warning"],
+            "moods": {"warning": {"keywords": ["loi"], "emojis": ["😱"]}},
+        }
+
+        self.assertEqual(detect_sticker_mood("Bot bị lỗi rồi anh", config), "warning")
+
+    def test_sticker_picker_chooses_matching_duck_sticker(self):
+        config = {
+            "mode": "smart",
+            "mood_priority": ["happy"],
+            "moods": {"happy": {"keywords": ["ok"], "emojis": ["👍"]}},
+        }
+        stickers = [
+            {"file_id": "sad-duck", "emoji": "😐"},
+            {"file_id": "happy-duck", "emoji": "👍"},
+        ]
+
+        sticker = choose_sticker_file_id(stickers, config, "ok anh", chooser=lambda items: items[0])
+
+        self.assertEqual(sticker, "happy-duck")
+
+    def test_sticker_picker_smart_mode_skips_when_no_mood(self):
+        config = {
+            "mode": "smart",
+            "mood_priority": ["happy"],
+            "moods": {"happy": {"keywords": ["ok"], "emojis": ["👍"]}},
+        }
+
+        sticker = choose_sticker_file_id([{"file_id": "duck", "emoji": "👍"}], config, "xin chao")
+
+        self.assertIsNone(sticker)
+
+    def test_maybe_send_sticker_sends_matching_duck_sticker(self):
+        STICKER_SET_CACHE.clear()
+        calls = []
+        config = {
+            "set_name": "rtk_duck",
+            "mode": "smart",
+            "mood_priority": ["happy"],
+            "moods": {"happy": {"keywords": ["ok"], "emojis": ["👍"]}},
+        }
+
+        def fake_telegram_request(token, method, payload):
+            calls.append((method, payload))
+            if method == "getStickerSet":
+                return {"stickers": [{"file_id": "happy-duck", "emoji": "👍"}]}
+            return {}
+
+        with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "1"}, clear=False), patch(
+            "bots.telegram_bot.load_effective_sticker_config", return_value=config
+        ), patch("bots.telegram_bot.telegram_request", side_effect=fake_telegram_request):
+            maybe_send_sticker("token", 123, "ok anh", "Dạ được anh")
+
+        self.assertEqual(calls[0], ("getStickerSet", {"name": "rtk_duck"}))
+        self.assertEqual(calls[1], ("sendSticker", {"chat_id": 123, "sticker": "happy-duck"}))
 
 
 if __name__ == "__main__":

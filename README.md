@@ -66,6 +66,19 @@ TELEGRAM_REPLY_SUFFIX=Meow
 
 Mặc định `new_session` chỉ nạp `HOOK.md` khi mở phiên mới/stateless. Khi resume chat cũ, bot không gửi lại hook để tiết kiệm context; đổi thành `always` nếu muốn ép nạp mỗi tin.
 
+## Sticker Ducks
+
+Bot có thể gửi thêm sticker Ducks theo mood bằng local picker, không cần MCP.
+
+```env
+TELEGRAM_STICKERS_ENABLED=1
+TELEGRAM_STICKER_CONFIG_FILE=stickers/ducks.json
+TELEGRAM_STICKER_SET_NAME=rtk_duck
+TELEGRAM_STICKER_MODE=smart
+```
+
+Sửa keyword/emoji trong `stickers/ducks.json` nếu muốn đổi cách chọn sticker. `smart` chỉ gửi khi bắt được mood; đổi thành `always` nếu muốn câu nào cũng có sticker.
+
 ## Demo file prompt
 
 ```bash
