@@ -3,6 +3,7 @@ import unittest
 from bots.agent_router import (
     ROUTE_BUSY_REPLY,
     ROUTE_DEEP_AGENT,
+    ROUTE_DELAYED_DEEP_AGENT,
     ROUTE_FAST_AGENT,
     ROUTE_LOCAL_REPLY,
     decide_agent_route,
@@ -22,6 +23,12 @@ class AgentRouterTests(unittest.TestCase):
         self.assertEqual(route.kind, ROUTE_LOCAL_REPLY)
         self.assertIn('anh', route.reply)
 
+    def test_short_praise_returns_local_reply(self):
+        route = decide_agent_route('tốt lắm')
+
+        self.assertEqual(route.kind, ROUTE_LOCAL_REPLY)
+        self.assertIn('cảm ơn', route.reply)
+
     def test_deep_keywords_route_to_deep_agent(self):
         route = decide_agent_route('thiết kế lại gateway Telegram giúp anh', fast_agent_available=True)
 
@@ -32,10 +39,10 @@ class AgentRouterTests(unittest.TestCase):
 
         self.assertEqual(route.kind, ROUTE_FAST_AGENT)
 
-    def test_simple_unknown_without_fast_agent_falls_back_to_deep(self):
+    def test_simple_unknown_without_fast_agent_uses_delayed_deep(self):
         route = decide_agent_route('thời tiết đẹp không', fast_agent_available=False)
 
-        self.assertEqual(route.kind, ROUTE_DEEP_AGENT)
+        self.assertEqual(route.kind, ROUTE_DELAYED_DEEP_AGENT)
 
     def test_long_prompt_uses_deep_agent(self):
         self.assertTrue(should_use_deep_agent('a' * 220))

@@ -62,11 +62,12 @@ Bật `TELEGRAM_AGENT_MODE=two_agent` để bot phản hồi ngay: câu đơn gi
 TELEGRAM_AGENT_MODE=two_agent
 TELEGRAM_FAST_AGENT_COMMAND=
 TELEGRAM_FAST_AGENT_TIMEOUT_SECONDS=45
+TELEGRAM_UNCERTAIN_DELAY_SECONDS=3
 TELEGRAM_DEEP_WAIT_REPLY=Da anh doi em chut, cau nay can phan tich ky hon nen em day sang Opus 5 roi bao lai anh ngay.
 TELEGRAM_DEEP_BUSY_REPLY=Da anh doi em chut, em van dang xu ly cau truoc. Anh cu nhan tiep, khi co ket qua em se gui lai.
 ```
 
-Để `TELEGRAM_FAST_AGENT_COMMAND` trống thì Agent nhanh chỉ dùng rule local như chào hỏi, cảm ơn, ping, ok. Khi có model nhẹ hơn, điền command vào biến này; deep agent vẫn dùng nhóm cấu hình `CLAUDE_*` hiện tại.
+Để `TELEGRAM_FAST_AGENT_COMMAND` trống thì Agent nhanh chỉ dùng rule local như chào hỏi, cảm ơn, ping, ok hoặc câu khen ngắn. Câu không rõ local/deep keyword sẽ chờ `TELEGRAM_UNCERTAIN_DELAY_SECONDS` giây rồi mới báo chờ và đẩy sang deep agent. Khi có model nhẹ hơn, điền command vào biến này; deep agent vẫn dùng nhóm cấu hình `CLAUDE_*` hiện tại.
 
 ## Sửa hook
 

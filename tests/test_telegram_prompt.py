@@ -11,6 +11,7 @@ from bots.telegram_bot import (
     ensure_reply_suffix,
     maybe_send_sticker,
     plan_claude_session,
+    uncertain_delay_seconds,
 )
 from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 
@@ -157,6 +158,12 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertEqual(calls[0], ("getStickerSet", {"name": "UtyaDuck"}))
         self.assertEqual(calls[1], ("sendSticker", {"chat_id": 123, "sticker": "happy-duck"}))
 
+    def test_uncertain_delay_seconds_is_bounded(self):
+        with patch.dict(os.environ, {"TELEGRAM_UNCERTAIN_DELAY_SECONDS": "45"}, clear=False):
+            self.assertEqual(uncertain_delay_seconds(), 30.0)
+
+        with patch.dict(os.environ, {"TELEGRAM_UNCERTAIN_DELAY_SECONDS": "2.5"}, clear=False):
+            self.assertEqual(uncertain_delay_seconds(), 2.5)
 
 if __name__ == "__main__":
     unittest.main()

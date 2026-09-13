@@ -24,6 +24,7 @@ try:
     from bots.agent_router import (
         ROUTE_BUSY_REPLY,
         ROUTE_DEEP_AGENT,
+        ROUTE_DELAYED_DEEP_AGENT,
         ROUTE_FAST_AGENT,
         ROUTE_LOCAL_REPLY,
         decide_agent_route,
@@ -40,6 +41,7 @@ except ImportError:
     from agent_router import (
         ROUTE_BUSY_REPLY,
         ROUTE_DEEP_AGENT,
+        ROUTE_DELAYED_DEEP_AGENT,
         ROUTE_FAST_AGENT,
         ROUTE_LOCAL_REPLY,
         decide_agent_route,
@@ -75,6 +77,7 @@ DEFAULT_TELEGRAM_DEEP_WAIT_REPLY = (
 DEFAULT_TELEGRAM_DEEP_BUSY_REPLY = (
     "Dạ anh đợi em chút, em vẫn đang xử lý câu trước. Anh cứ nhắn tiếp, khi có kết quả em sẽ gửi lại."
 )
+DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS = 3.0
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
 
 
@@ -306,6 +309,25 @@ def build_deep_busy_reply(chat_id: int) -> str:
     return template.format(elapsed_seconds=elapsed_seconds, elapsed_minutes=elapsed_minutes)
 
 
+def uncertain_delay_seconds() -> float:
+    raw_value = os.getenv(
+        "TELEGRAM_UNCERTAIN_DELAY_SECONDS",
+        str(DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS),
+    ).strip()
+    try:
+        return max(0.0, min(30.0, float(raw_value)))
+    except ValueError:
+        return DEFAULT_TELEGRAM_UNCERTAIN_DELAY_SECONDS
+
+
+def delay_before_deep_agent_if_needed(route_kind: str) -> None:
+    if route_kind != ROUTE_DELAYED_DEEP_AGENT:
+        return
+    delay_seconds = uncertain_delay_seconds()
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+
+
 def call_fast_agent(prompt: str, gateway_message) -> str:
     command = fast_agent_command()
     if not command:
@@ -385,6 +407,7 @@ def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_messa
         except Exception as exc:
             print(f"Fast agent loi, chuyen sang deep agent: {exc}", file=sys.stderr)
 
+    delay_before_deep_agent_if_needed(route.kind)
     started = start_deep_agent_job(token, chat_id, prompt, prompt_message)
     answer = ensure_reply_suffix(build_deep_wait_reply() if started else build_deep_busy_reply(chat_id))
     send_message(token, chat_id, answer)

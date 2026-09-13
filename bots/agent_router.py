@@ -8,6 +8,7 @@ ROUTE_LOCAL_REPLY = 'local_reply'
 ROUTE_FAST_AGENT = 'fast_agent'
 ROUTE_DEEP_AGENT = 'deep_agent'
 ROUTE_BUSY_REPLY = 'busy_reply'
+ROUTE_DELAYED_DEEP_AGENT = 'delayed_deep_agent'
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,15 @@ class AgentRoute:
 ACK_VALUES = {'ok', 'oke', 'okay', 'umk', 'uk', 'uh', 'uhm', 'vang', 'da'}
 GREETING_KEYWORDS = ('chao', 'hello', 'hi', 'alo', 'em oi', 'niko oi')
 THANKS_KEYWORDS = ('cam on', 'thanks', 'thank you', 'thank')
+PRAISE_KEYWORDS = (
+    'tot lam',
+    'gioi',
+    'hay qua',
+    'ngon',
+    'de thuong',
+    'good job',
+    'well done',
+)
 DEEP_KEYWORDS = (
     'phan tich',
     'thiet ke',
@@ -71,7 +81,7 @@ def decide_agent_route(
     if fast_agent_available:
         return AgentRoute(ROUTE_FAST_AGENT, reason='fast_agent_available')
 
-    return AgentRoute(ROUTE_DEEP_AGENT, reason='default_no_fast_agent')
+    return AgentRoute(ROUTE_DELAYED_DEEP_AGENT, reason='uncertain_no_fast_agent')
 
 
 def build_local_reply(normalized_prompt: str) -> str:
@@ -90,6 +100,9 @@ def build_local_reply(normalized_prompt: str) -> str:
 
     if len(compact) <= 90 and any(contains_keyword(compact, keyword) for keyword in THANKS_KEYWORDS):
         return 'Dạ không có gì anh.'
+
+    if len(compact) <= 90 and any(contains_keyword(compact, keyword) for keyword in PRAISE_KEYWORDS):
+        return 'Dạ em cảm ơn anh, em vui lắm.'
 
     return ''
 
