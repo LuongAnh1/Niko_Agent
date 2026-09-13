@@ -9,3 +9,5 @@ output.txt
 .DS_Store
 .venv/
 venv/
+
+.codegraph
