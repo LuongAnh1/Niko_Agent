@@ -7,24 +7,43 @@ Bot Telegram nhỏ gọi Claude CLI (`fcc-claude`) để anh em trong group chat
 ## Chạy Local
 
 1. Tạo bot bằng [@BotFather](https://t.me/BotFather), lấy token.
-2. Copy `.env.example` thành `.env`, điền:
+2. Copy `.env.example` thành `.env` để điền cấu hình chung cho hệ thống.
+3. Copy `bots/telegram/.env.example` thành `bots/telegram/.env` để điền cấu hình riêng của Telegram.
 
 **Chú ý:** Cần cài Free Claude Code/FCC (đã cấu hình và điền API Key NVIDIA) và chạy `fcc-server` trước nếu `fcc-claude` đang trỏ qua FCC.
+
+Root `.env`:
+
+```env
+CLAUDE_CLI_COMMAND=fcc-claude -p
+CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
+CLAUDE_WORKDIR=.runtime/claude_sandbox
+CLAUDE_TIMEOUT_SECONDS=180
+CHAT_IDENTITY_ENABLED=1
+CHAT_ALLOWED_USER_KEYS=
+CHAT_USER_ALIASES=telegram:123456789=Anh A;telegram:987654321=Anh B
+```
+
+`bots/telegram/.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=token_cua_bot
 TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
+TELEGRAM_GROUP_MODE=mentions
 TELEGRAM_MENTION_REPLIES=1
-CLAUDE_CLI_COMMAND=fcc-claude -p
-CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
-CLAUDE_WORKDIR=.runtime/claude_sandbox
+TELEGRAM_AGENT_MODE=two_agent
+TELEGRAM_PROMPT_HOOK_FILE=HOOK.md
+TELEGRAM_REPLY_SUFFIX=Meow
+TELEGRAM_STICKERS_ENABLED=1
 ```
 
-3. Chạy bot:
+4. Chạy bot:
 
 ```bash
 python bots/telegram_bot.py
 ```
+
+Khi chạy, bot sẽ load `.env` trước rồi load `bots/telegram/.env` sau. Biến trong `bots/telegram/.env` có thể override biến cùng tên đọc từ root `.env`, nhưng không override biến môi trường thật của hệ điều hành.
 
 Dùng `/id` trong private chat hoặc `/id@TenBot` trong group để lấy `chat_id`. Nếu bot chạy trong group thì điền `chat_id` của group. Trong group, bot chỉ xử lý tin nhắn có tag tên bot. Khi trả lời, bot sẽ mention người vừa gọi nếu bật `TELEGRAM_MENTION_REPLIES=1`.
 
