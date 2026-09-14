@@ -14,6 +14,7 @@ Bot Telegram nhỏ gọi Claude CLI (`fcc-claude`) để anh em trong group chat
 ```env
 TELEGRAM_BOT_TOKEN=token_cua_bot
 TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
+TELEGRAM_MENTION_REPLIES=1
 CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
 CLAUDE_WORKDIR=.runtime/claude_sandbox
@@ -25,7 +26,7 @@ CLAUDE_WORKDIR=.runtime/claude_sandbox
 python bots/telegram_bot.py
 ```
 
-Dùng `/id` trong private chat hoặc group để lấy `chat_id`. Nếu bot chạy trong group thì điền `chat_id` của group.
+Dùng `/id` trong private chat hoặc `/id@TenBot` trong group để lấy `chat_id`. Nếu bot chạy trong group thì điền `chat_id` của group. Trong group, bot chỉ xử lý tin nhắn có tag tên bot. Khi trả lời, bot sẽ mention người vừa gọi nếu bật `TELEGRAM_MENTION_REPLIES=1`.
 
 ## Nhận Diện Người Chat
 

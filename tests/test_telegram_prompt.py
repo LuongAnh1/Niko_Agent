@@ -11,6 +11,8 @@ from bots.telegram_bot import (
     build_telegram_prompt,
     deep_agent_command,
     ensure_reply_suffix,
+    format_reply_for_recipient,
+    handle_message,
     maybe_send_sticker,
     run_cli,
     sanitize_tool_like_answer,
@@ -20,6 +22,70 @@ from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 
 
 class TelegramPromptTests(unittest.TestCase):
+
+    def test_group_sticker_without_mention_is_ignored(self):
+        message = {
+            "sticker": {"file_id": "duck"},
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch("bots.telegram_bot.send_message") as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        send_message.assert_not_called()
+
+    def test_group_reply_without_mention_is_ignored(self):
+        message = {
+            "text": "tiếp đi",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+            "reply_to_message": {"from": {"is_bot": True, "username": "NikoBot"}},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_GROUP_MODE": "mentions"}, clear=False), patch(
+            "bots.telegram_bot.send_message"
+        ) as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        send_message.assert_not_called()
+
+    def test_group_mention_gets_reply_with_user_mention(self):
+        message = {
+            "text": "@NikoBot alo",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_AGENT_MODE": "two_agent",
+                "TELEGRAM_GROUP_MODE": "mentions",
+                "TELEGRAM_MENTION_REPLIES": "1",
+                "TELEGRAM_STICKERS_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("bots.telegram_bot.send_message") as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        self.assertTrue(send_message.call_args.args[2].startswith("@anhluong "))
+
+    def test_group_reply_can_use_html_mention_when_username_missing(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "@NikoBot alo",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+            }
+        )
+
+        text, parse_mode = format_reply_for_recipient("Dạ anh", message)
+
+        self.assertEqual(parse_mode, "HTML")
+        self.assertIn('tg://user?id=123', text)
+        self.assertIn("Dạ anh", text)
+
     def test_deep_agent_command_defaults_to_claude_command(self):
         with patch.dict(os.environ, {"CLAUDE_CLI_COMMAND": "fcc-claude -p"}, clear=True):
             self.assertEqual(deep_agent_command(), "fcc-claude -p")

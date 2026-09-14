@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from html import escape as html_escape
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -53,6 +54,7 @@ GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
 DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
+DEFAULT_TELEGRAM_MENTION_REPLIES = "1"
 DEFAULT_TOOL_UNAVAILABLE_REPLY = (
     "Dạ hiện tại em không có quyền tự đọc file hay quét thư mục. "
     "Nếu anh muốn em xem file/tài liệu nào, anh gửi nội dung hoặc để harness nạp phần liên quan vào prompt giúp em nhé."
@@ -416,10 +418,10 @@ def run_deep_agent_job(token: str, chat_id: int, prompt: str, prompt_message) ->
             send_chat_action(token, chat_id)
             answer = ensure_reply_suffix(call_deep_agent(prompt, prompt_message))
 
-        send_message(token, chat_id, answer)
+        send_reply(token, chat_id, answer, prompt_message)
         maybe_send_sticker(token, chat_id, prompt, answer)
     except Exception as exc:
-        send_message(token, chat_id, f"Loi deep agent: {exc}")
+        send_reply(token, chat_id, f"Loi deep agent: {exc}", prompt_message)
     finally:
         with DEEP_JOBS_LOCK:
             DEEP_JOBS.pop(chat_id, None)
@@ -435,13 +437,13 @@ def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_messa
 
     if route.kind == ROUTE_BUSY_REPLY:
         answer = ensure_reply_suffix(build_deep_busy_reply(chat_id))
-        send_message(token, chat_id, answer)
+        send_reply(token, chat_id, answer, prompt_message)
         maybe_send_sticker(token, chat_id, prompt, answer)
         return
 
     if route.kind == ROUTE_LOCAL_REPLY:
         answer = ensure_reply_suffix(route.reply)
-        send_message(token, chat_id, answer)
+        send_reply(token, chat_id, answer, prompt_message)
         maybe_send_sticker(token, chat_id, prompt, answer)
         return
 
@@ -449,7 +451,7 @@ def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_messa
         try:
             send_chat_action(token, chat_id)
             answer = ensure_reply_suffix(call_fast_agent(prompt, prompt_message))
-            send_message(token, chat_id, answer)
+            send_reply(token, chat_id, answer, prompt_message)
             maybe_send_sticker(token, chat_id, prompt, answer)
             return
         except Exception as exc:
@@ -458,7 +460,7 @@ def handle_two_agent_message(token: str, chat_id: int, prompt: str, prompt_messa
     delay_before_deep_agent_if_needed(route.kind)
     started = start_deep_agent_job(token, chat_id, prompt, prompt_message)
     answer = ensure_reply_suffix(build_deep_wait_reply() if started else build_deep_busy_reply(chat_id))
-    send_message(token, chat_id, answer)
+    send_reply(token, chat_id, answer, prompt_message)
     maybe_send_sticker(token, chat_id, prompt, answer)
 
 
@@ -491,10 +493,47 @@ def telegram_request(token: str, method: str, payload: dict) -> dict:
     return data["result"]
 
 
-def send_message(token: str, chat_id: int, text: str) -> None:
+def send_message(token: str, chat_id: int, text: str, parse_mode: str | None = None) -> None:
     chunks = split_text(text, MAX_TELEGRAM_MESSAGE_LENGTH)
     for chunk in chunks:
-        telegram_request(token, "sendMessage", {"chat_id": chat_id, "text": chunk})
+        payload = {"chat_id": chat_id, "text": chunk}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        telegram_request(token, "sendMessage", payload)
+
+
+def recipient_mention(gateway_message) -> tuple[str, str | None]:
+    if gateway_message is None or not env_flag("TELEGRAM_MENTION_REPLIES", DEFAULT_TELEGRAM_MENTION_REPLIES):
+        return "", None
+    if gateway_message.chat_type not in {"group", "supergroup"}:
+        return "", None
+
+    if gateway_message.user.mention:
+        return gateway_message.user.mention, None
+    if gateway_message.user.user_id:
+        user_id = html_escape(gateway_message.user.user_id, quote=True)
+        label = html_escape(gateway_message.user.label or "anh", quote=False)
+        return f'<a href="tg://user?id={user_id}">{label}</a>', "HTML"
+
+    return "", None
+
+
+def format_reply_for_recipient(text: str, gateway_message) -> tuple[str, str | None]:
+    mention, parse_mode = recipient_mention(gateway_message)
+    if not mention:
+        return text, None
+
+    if parse_mode == "HTML":
+        return f"{mention} {html_escape(text, quote=False)}", parse_mode
+
+    if text.lstrip().lower().startswith(mention.lower()):
+        return text, None
+    return f"{mention} {text}", None
+
+
+def send_reply(token: str, chat_id: int, text: str, gateway_message) -> None:
+    reply_text, parse_mode = format_reply_for_recipient(text, gateway_message)
+    send_message(token, chat_id, reply_text, parse_mode=parse_mode)
 
 
 def send_chat_action(token: str, chat_id: int, action: str = "typing") -> None:
@@ -567,9 +606,6 @@ def extract_group_prompt(message: dict, bot_username: str) -> str:
     if group_mode == GROUP_MODE_ALL:
         return strip_bot_mentions(text, bot_username)
 
-    if is_reply_to_bot(message, bot_username):
-        return text
-
     if f"@{bot_username}".lower() in text.lower():
         return strip_bot_mentions(text, bot_username)
 
@@ -586,12 +622,17 @@ def handle_message(
 ) -> None:
     gateway_message = telegram_message_to_gateway(message, user_aliases)
     chat_id = message["chat"]["id"]
-    text = gateway_message.text
+    prompt = extract_group_prompt(message, bot_username)
 
     print(f"Nhan tin nhan tu chat_id={chat_id}, user_key={gateway_message.user.key}")
 
-    if is_command_for_bot(text, "/id", bot_username) or is_command_for_bot(text, "/whoami", bot_username):
-        send_message(token, chat_id, format_identity_reply(gateway_message))
+    if not prompt:
+        return
+
+    prompt_message = gateway_message.with_text(prompt)
+
+    if is_command_for_bot(prompt, "/id", bot_username) or is_command_for_bot(prompt, "/whoami", bot_username):
+        send_reply(token, chat_id, format_identity_reply(prompt_message), prompt_message)
         return
 
     if allowed_chat_ids and chat_id not in allowed_chat_ids:
@@ -602,30 +643,21 @@ def handle_message(
         print(f"Bo qua user_key chua duoc phep: {gateway_message.user.key}")
         return
 
-    if not text:
-        send_message(token, chat_id, "Hien tai bot chi xu ly tin nhan text.")
-        return
-
-    if is_command_for_bot(text, "/start", bot_username):
-        send_message(token, chat_id, "Gui tin nhan cho minh, minh se hoi Claude CLI va tra loi lai tai day.")
-        return
-
-    prompt = extract_group_prompt(message, bot_username)
-    if not prompt:
+    if is_command_for_bot(prompt, "/start", bot_username):
+        send_reply(token, chat_id, "Gui tin nhan cho minh, minh se hoi Claude CLI va tra loi lai tai day.", prompt_message)
         return
 
     try:
-        prompt_message = gateway_message.with_text(prompt)
         if two_agent_mode_enabled():
             handle_two_agent_message(token, chat_id, prompt, prompt_message)
             return
 
         send_chat_action(token, chat_id)
         answer = ensure_reply_suffix(call_deep_agent(prompt, prompt_message))
-        send_message(token, chat_id, answer)
+        send_reply(token, chat_id, answer, prompt_message)
         maybe_send_sticker(token, chat_id, prompt, answer)
     except Exception as exc:
-        send_message(token, chat_id, f"Loi: {exc}")
+        send_reply(token, chat_id, f"Loi: {exc}", prompt_message)
 
 
 def main() -> int:
