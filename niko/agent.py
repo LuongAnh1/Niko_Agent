@@ -25,7 +25,7 @@ from niko.config import env_flag, env_value, resolve_project_path
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_DEEP_AGENT_COMMAND = ""
 DEFAULT_CLAUDE_WORKDIR = ""
-DEFAULT_NIKO_PROMPT_HOOK_FILE = "HOOK.md"
+DEFAULT_NIKO_PROMPT_HOOK_FILE = "niko/HOOK.md"
 DEFAULT_NIKO_REPLY_SUFFIX = "Meow"
 DEFAULT_TOOL_UNAVAILABLE_REPLY = (
     "DÃ¡ÂºÂ¡ hiÃ¡Â»â€¡n tÃ¡ÂºÂ¡i em khÃƒÂ´ng cÃƒÂ³ quyÃ¡Â»Ân tÃ¡Â»Â± Ã„â€˜Ã¡Â»Âc file hay quÃƒÂ©t thÃ†Â° mÃ¡Â»Â¥c. "

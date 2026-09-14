@@ -9,8 +9,9 @@ Niko Agent la loi xu ly chinh dung Claude CLI (`fcc-claude`). Cac bot trong `bot
 ```text
 niko/                 # Core Niko Agent: route prompt, build context, goi Claude CLI
 niko/.env.example     # Cau hinh rieng cua Niko core
+niko/.runtime/        # Vung chay tam cua Niko, khong commit
 bots/telegram/        # Telegram gateway: polling, mention, sticker, gui/nhan tin
-HOOK.md               # Persona/hook nap vao Niko
+niko/HOOK.md          # Persona/hook nap vao Niko
 stickers/ducks.json   # Mapping mood cho sticker Duck
 ```
 
@@ -38,7 +39,7 @@ Root `.env` la cau hinh chung cua he thong:
 ```env
 CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
-CLAUDE_WORKDIR=.runtime/claude_sandbox
+CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
 CLAUDE_TIMEOUT_SECONDS=180
 CHAT_IDENTITY_ENABLED=1
 CHAT_ALLOWED_USER_KEYS=
@@ -52,7 +53,7 @@ NIKO_AGENT_MODE=two_agent
 NIKO_FAST_AGENT_COMMAND=
 NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
 NIKO_UNCERTAIN_DELAY_SECONDS=3
-NIKO_PROMPT_HOOK_FILE=HOOK.md
+NIKO_PROMPT_HOOK_FILE=niko/HOOK.md
 NIKO_REPLY_SUFFIX=Meow
 ```
 
@@ -76,7 +77,7 @@ Bat `NIKO_AGENT_MODE=two_agent` de bot tra loi nhanh neu cau hoi don gian. Neu c
 
 ## Sua Hook
 
-Muon doi giong van thi sua `HOOK.md` va mo Pull Request. Khong can sua script Python.
+Muon doi giong van thi sua `niko/HOOK.md` va mo Pull Request. Khong can sua script Python.
 
 ## PR
 
