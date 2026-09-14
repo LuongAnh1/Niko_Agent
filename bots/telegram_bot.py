@@ -53,6 +53,10 @@ GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
 DEFAULT_TELEGRAM_PROMPT_HOOK_FILE = "HOOK.md"
 DEFAULT_TELEGRAM_REPLY_SUFFIX = "Meow"
+DEFAULT_TOOL_UNAVAILABLE_REPLY = (
+    "Dạ hiện tại em không có quyền tự đọc file hay quét thư mục. "
+    "Nếu anh muốn em xem file/tài liệu nào, anh gửi nội dung hoặc để harness nạp phần liên quan vào prompt giúp em nhé."
+)
 DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "stickers/ducks.json"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 AGENT_MODE_SINGLE = "single"
@@ -206,9 +210,69 @@ def build_telegram_prompt(
     return "\n\n".join(parts)
 
 
+
+
+def strip_existing_reply_suffix(answer: str) -> str:
+    suffix = os.getenv("TELEGRAM_REPLY_SUFFIX", DEFAULT_TELEGRAM_REPLY_SUFFIX).strip()
+    stripped = answer.strip()
+    if suffix and stripped.lower().endswith(suffix.lower()):
+        return stripped[: -len(suffix)].strip()
+    return stripped
+
+
+def is_tool_call_dict(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+
+    tool_name = str(value.get("tool") or value.get("name") or "").strip().lower()
+    if not tool_name:
+        return False
+
+    tool_payload_keys = {"arguments", "input", "path", "command"}
+    if not any(key in value for key in tool_payload_keys):
+        return False
+
+    return True
+
+
+def looks_like_fake_tool_call(answer: str) -> bool:
+    text = strip_existing_reply_suffix(answer)
+    lowered = text.lower()
+    if not lowered:
+        return False
+
+    if lowered.startswith("<tool") or "</tool>" in lowered:
+        return True
+
+    json_text = text
+    if "</tool>" in lowered:
+        json_text = text[: lowered.find("</tool>")].strip()
+
+    if json_text.startswith("```"):
+        lines = json_text.splitlines()
+        if len(lines) >= 3 and lines[-1].strip() == "```":
+            json_text = "\n".join(lines[1:-1]).strip()
+
+    if not json_text.startswith("{"):
+        return False
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return False
+
+    return is_tool_call_dict(data)
+
+
+def sanitize_tool_like_answer(answer: str) -> str:
+    if looks_like_fake_tool_call(answer):
+        return os.getenv("TELEGRAM_TOOL_UNAVAILABLE_REPLY", DEFAULT_TOOL_UNAVAILABLE_REPLY).strip()
+    return answer
+
+
 def ensure_reply_suffix(answer: str) -> str:
     suffix = os.getenv("TELEGRAM_REPLY_SUFFIX", DEFAULT_TELEGRAM_REPLY_SUFFIX).strip()
-    answer = answer.strip()
+    answer = sanitize_tool_like_answer(answer).strip()
     if not suffix or answer.endswith(suffix):
         return answer
 

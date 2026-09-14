@@ -13,6 +13,7 @@ from bots.telegram_bot import (
     ensure_reply_suffix,
     maybe_send_sticker,
     run_cli,
+    sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
 from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
@@ -75,6 +76,27 @@ class TelegramPromptTests(unittest.TestCase):
 
             self.assertEqual(run.call_args.kwargs["cwd"], workdir)
             self.assertTrue(workdir.exists())
+
+
+    def test_tool_like_answer_is_replaced_before_suffix(self):
+        raw_answer = '''{
+  "tool": "read",
+  "arguments": {
+    "path": "./.git/objects/info/packs"
+  }
+}
+</tool>Meow'''
+
+        answer = ensure_reply_suffix(raw_answer)
+
+        self.assertIn("không có quyền tự đọc file", answer)
+        self.assertNotIn('"tool"', answer)
+        self.assertTrue(answer.endswith("Meow"))
+
+    def test_normal_json_answer_is_not_replaced(self):
+        raw_answer = '{"answer": "OK"}'
+
+        self.assertEqual(sanitize_tool_like_answer(raw_answer), raw_answer)
 
     def test_reply_suffix_uses_meow_default(self):
         with patch.dict(os.environ, {}, clear=True):
