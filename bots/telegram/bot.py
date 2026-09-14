@@ -243,18 +243,20 @@ def handle_message(
 ) -> None:
     gateway_message = telegram_message_to_gateway(message, user_aliases)
     chat_id = message["chat"]["id"]
-    prompt = extract_group_prompt(message, bot_username)
+    raw_text = (message.get("text") or "").strip()
 
     print(f"Nhan tin nhan tu chat_id={chat_id}, user_key={gateway_message.user.key}")
 
+    if is_command_for_bot(raw_text, "/id", bot_username) or is_command_for_bot(raw_text, "/whoami", bot_username):
+        prompt_message = gateway_message.with_text(raw_text)
+        send_reply(token, chat_id, format_identity_reply(prompt_message), prompt_message)
+        return
+
+    prompt = extract_group_prompt(message, bot_username)
     if not prompt:
         return
 
     prompt_message = gateway_message.with_text(prompt)
-
-    if is_command_for_bot(prompt, "/id", bot_username) or is_command_for_bot(prompt, "/whoami", bot_username):
-        send_reply(token, chat_id, format_identity_reply(prompt_message), prompt_message)
-        return
 
     if allowed_chat_ids and chat_id not in allowed_chat_ids:
         print(f"Bo qua chat_id chua duoc phep: {chat_id}")
