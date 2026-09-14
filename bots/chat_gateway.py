@@ -47,7 +47,8 @@ class ChatGatewayMessage:
 
 def parse_user_aliases(raw_value: str, default_platform: str = "telegram") -> dict[str, str]:
     aliases: dict[str, str] = {}
-    for item in raw_value.replace("\\n", ";").split(";"):
+    normalized_value = raw_value.replace("\\n", ";").replace(",", ";")
+    for item in normalized_value.split(";"):
         if "=" not in item:
             continue
 

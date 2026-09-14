@@ -11,3 +11,4 @@ output.txt
 venv/
 
 .codegraph
+.runtime/

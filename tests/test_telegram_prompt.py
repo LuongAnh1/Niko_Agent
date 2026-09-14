@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,13 +11,83 @@ from bots.telegram_bot import (
     build_telegram_prompt,
     deep_agent_command,
     ensure_reply_suffix,
+    format_reply_for_recipient,
+    handle_message,
     maybe_send_sticker,
+    run_cli,
+    sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
 from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 
 
 class TelegramPromptTests(unittest.TestCase):
+
+    def test_group_sticker_without_mention_is_ignored(self):
+        message = {
+            "sticker": {"file_id": "duck"},
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch("bots.telegram_bot.send_message") as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        send_message.assert_not_called()
+
+    def test_group_reply_without_mention_is_ignored(self):
+        message = {
+            "text": "tiếp đi",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+            "reply_to_message": {"from": {"is_bot": True, "username": "NikoBot"}},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_GROUP_MODE": "mentions"}, clear=False), patch(
+            "bots.telegram_bot.send_message"
+        ) as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        send_message.assert_not_called()
+
+    def test_group_mention_gets_reply_with_user_mention(self):
+        message = {
+            "text": "@NikoBot alo",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_AGENT_MODE": "two_agent",
+                "TELEGRAM_GROUP_MODE": "mentions",
+                "TELEGRAM_MENTION_REPLIES": "1",
+                "TELEGRAM_STICKERS_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("bots.telegram_bot.send_message") as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        self.assertTrue(send_message.call_args.args[2].startswith("@anhluong "))
+
+    def test_group_reply_can_use_html_mention_when_username_missing(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "@NikoBot alo",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+            },
+            {"telegram:123": "Con,telegram:456=Con cu"},
+        )
+
+        text, parse_mode = format_reply_for_recipient("Dạ anh", message)
+
+        self.assertEqual(parse_mode, "HTML")
+        self.assertIn('<a href="tg://user?id=123">Luong</a>', text)
+        self.assertNotIn("telegram:456", text)
+        self.assertIn("Dạ anh", text)
+
     def test_deep_agent_command_defaults_to_claude_command(self):
         with patch.dict(os.environ, {"CLAUDE_CLI_COMMAND": "fcc-claude -p"}, clear=True):
             self.assertEqual(deep_agent_command(), "fcc-claude -p")
@@ -60,6 +131,40 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
+
+
+    def test_run_cli_uses_configured_workdir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workdir = Path(temp_dir) / "claude_sandbox"
+            completed = subprocess.CompletedProcess([], 0, stdout="OK\n", stderr="")
+            with patch.dict(os.environ, {"CLAUDE_WORKDIR": str(workdir)}, clear=False), patch(
+                "bots.telegram_bot.subprocess.run", return_value=completed
+            ) as run:
+                self.assertEqual(run_cli("fcc-claude -p", "hello"), "OK")
+
+            self.assertEqual(run.call_args.kwargs["cwd"], workdir)
+            self.assertTrue(workdir.exists())
+
+
+    def test_tool_like_answer_is_replaced_before_suffix(self):
+        raw_answer = '''{
+  "tool": "read",
+  "arguments": {
+    "path": "./.git/objects/info/packs"
+  }
+}
+</tool>Meow'''
+
+        answer = ensure_reply_suffix(raw_answer)
+
+        self.assertIn("không có quyền tự đọc file", answer)
+        self.assertNotIn('"tool"', answer)
+        self.assertTrue(answer.endswith("Meow"))
+
+    def test_normal_json_answer_is_not_replaced(self):
+        raw_answer = '{"answer": "OK"}'
+
+        self.assertEqual(sanitize_tool_like_answer(raw_answer), raw_answer)
 
     def test_reply_suffix_uses_meow_default(self):
         with patch.dict(os.environ, {}, clear=True):
