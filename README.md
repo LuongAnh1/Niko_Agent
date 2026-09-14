@@ -71,9 +71,17 @@ Thu tu load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Bien moi tr
 
 ## Hai Agent
 
-Bat `NIKO_AGENT_MODE=two_agent` de bot tra loi nhanh neu cau hoi don gian. Neu cau hoi can phan tich, Niko day sang deep agent chay background, Telegram van tiep tuc nhan tin va co the bao anh doi em chut.
+Bat `NIKO_AGENT_MODE=two_agent` de tach vai tro:
 
-`NIKO_FAST_AGENT_COMMAND` de trong thi fast agent chi dung rule noi bo nhu chao hoi, cam on, ping, ok, hoac cau khen ngan. Deep agent dung `CLAUDE_DEEP_AGENT_COMMAND`; neu de trong thi fallback ve `CLAUDE_CLI_COMMAND`.
+```text
+Telegram gateway -> Niko router -> Niko Fast / Niko Deep
+```
+
+Niko Fast la mat giao tiep nhanh. Neu cau hoi don gian, Fast tra loi truc tiep. Neu cau hoi can phan tich, Niko Deep chay background; Fast gui cau bao doi/bao ban trong luc cho.
+
+Khi Niko Deep xu ly xong, ket qua noi bo se quay lai Niko Fast truoc. Fast compose thanh cau tra loi tu nhien cho nguoi dung, roi Telegram gateway moi gui ra chat.
+
+`NIKO_FAST_AGENT_COMMAND` nen tro toi model nhe/nhanh. De trong thi he thong fallback ve rule/template local cho wait/busy va gui ket qua deep truc tiep. Deep agent dung `CLAUDE_DEEP_AGENT_COMMAND`; neu de trong thi fallback ve `CLAUDE_CLI_COMMAND`.
 
 ## Sua Hook
 

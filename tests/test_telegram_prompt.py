@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,10 @@ from bots.telegram.bot import (
 )
 from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 from niko.agent import (
+    DeepAgentJob,
+    FAST_AGENT_TASK_BUSY,
+    FAST_AGENT_TASK_FINAL,
+    NikoAgent,
     build_niko_prompt,
     deep_agent_command,
     ensure_reply_suffix,
@@ -20,6 +25,7 @@ from niko.agent import (
     sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
+from niko.agent_router import ROUTE_BUSY_REPLY
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.config import load_env_files
 
@@ -73,6 +79,60 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertTrue(send_message.call_args.args[2].startswith("@anhluong "))
 
+    def test_deep_agent_result_is_composed_by_fast_agent(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = NikoAgent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {"NIKO_FAST_AGENT_COMMAND": "fast -p", "NIKO_REPLY_SUFFIX": "Meow"},
+            clear=False,
+        ), patch("niko.agent.call_deep_agent", return_value="DEEP RAW"), patch(
+            "niko.agent.call_fast_agent", return_value="FAST FINAL"
+        ) as fast_agent:
+            agent.run_deep_agent_job("456", "phan tich giup anh", message, delivered.append)
+
+        self.assertEqual(delivered, ["FAST FINAL\n\nMeow"])
+        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_FINAL)
+        self.assertEqual(fast_agent.call_args.kwargs["deep_answer"], "DEEP RAW")
+
+    def test_busy_deep_job_uses_fast_agent_and_tracks_followup(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "them thong tin",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = NikoAgent()
+        conversation_id = agent.conversation_id_for(message)
+        active_job = DeepAgentJob(conversation_id, message.user.key, "original prompt", time.time())
+        agent.deep_jobs[conversation_id] = active_job
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=False,
+        ), patch("niko.agent.call_fast_agent", return_value="FAST BUSY") as fast_agent:
+            route = agent.handle_message("them thong tin", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_BUSY_REPLY)
+        self.assertEqual(delivered, ["FAST BUSY\n\nMeow"])
+        self.assertEqual(active_job.followups, ["them thong tin"])
+        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_BUSY)
+        self.assertIs(fast_agent.call_args.kwargs["active_job"], active_job)
     def test_group_reply_can_use_html_mention_when_username_missing(self):
         message = telegram_message_to_gateway(
             {
