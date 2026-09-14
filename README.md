@@ -9,7 +9,6 @@ Niko Agent la loi xu ly chinh dung Claude CLI (`fcc-claude`). Cac bot trong `bot
 ```text
 niko/                 # Core Niko Agent: route prompt, build context, goi Claude CLI
 bots/telegram/        # Telegram gateway: polling, mention, sticker, gui/nhan tin
-bots/telegram_bot.py  # Wrapper cu, van chay duoc de tuong thich
 HOOK.md               # Persona/hook nap vao Niko
 stickers/ducks.json   # Mapping mood cho sticker Duck
 ```
@@ -26,11 +25,6 @@ stickers/ducks.json   # Mapping mood cho sticker Duck
 python -m bots.telegram.bot
 ```
 
-Lenh cu van dung duoc:
-
-```bash
-python bots/telegram_bot.py
-```
 
 ## Lay ID
 
