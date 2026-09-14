@@ -8,6 +8,7 @@ Niko Agent la loi xu ly chinh dung Claude CLI (`fcc-claude`). Cac bot trong `bot
 
 ```text
 niko/                 # Core Niko Agent: route prompt, build context, goi Claude CLI
+niko/.env.example     # Cau hinh rieng cua Niko core
 bots/telegram/        # Telegram gateway: polling, mention, sticker, gui/nhan tin
 HOOK.md               # Persona/hook nap vao Niko
 stickers/ducks.json   # Mapping mood cho sticker Duck
@@ -16,15 +17,15 @@ stickers/ducks.json   # Mapping mood cho sticker Duck
 ## Chay Local
 
 1. Tao bot Telegram bang [@BotFather](https://t.me/BotFather) va lay token.
-2. Copy `.env.example` thanh `.env`, dien cau hinh chung cho Claude/Niko.
-3. Copy `bots/telegram/.env.example` thanh `bots/telegram/.env`, dien cau hinh Telegram.
-4. Cai va cau hinh Free Claude Code/FCC. Neu `fcc-claude` tro qua FCC thi chay `fcc-server` truoc.
-5. Chay bot:
+2. Copy `.env.example` thanh `.env`, dien cau hinh chung cho Claude/identity.
+3. Copy `niko/.env.example` thanh `niko/.env`, dien cau hinh rieng cua Niko.
+4. Copy `bots/telegram/.env.example` thanh `bots/telegram/.env`, dien cau hinh Telegram.
+5. Cai va cau hinh Free Claude Code/FCC. Neu `fcc-claude` tro qua FCC thi chay `fcc-server` truoc.
+6. Chay bot:
 
 ```bash
 python -m bots.telegram.bot
 ```
-
 
 ## Lay ID
 
@@ -32,19 +33,27 @@ Dung `/id` trong private chat hoac `/id@TenBot` trong group de lay `chat_id` va 
 
 ## Env
 
-Root `.env` la cau hinh chung cua he thong va Niko:
+Root `.env` la cau hinh chung cua he thong:
 
 ```env
 CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
 CLAUDE_WORKDIR=.runtime/claude_sandbox
 CLAUDE_TIMEOUT_SECONDS=180
-NIKO_AGENT_MODE=two_agent
-NIKO_PROMPT_HOOK_FILE=HOOK.md
-NIKO_REPLY_SUFFIX=Meow
 CHAT_IDENTITY_ENABLED=1
 CHAT_ALLOWED_USER_KEYS=
 CHAT_USER_ALIASES=telegram:123456789=Anh A
+```
+
+`niko/.env` la cau hinh rieng cua Niko core:
+
+```env
+NIKO_AGENT_MODE=two_agent
+NIKO_FAST_AGENT_COMMAND=
+NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
+NIKO_UNCERTAIN_DELAY_SECONDS=3
+NIKO_PROMPT_HOOK_FILE=HOOK.md
+NIKO_REPLY_SUFFIX=Meow
 ```
 
 `bots/telegram/.env` chi la cau hinh gateway Telegram:
@@ -57,7 +66,7 @@ TELEGRAM_MENTION_REPLIES=1
 TELEGRAM_STICKERS_ENABLED=1
 ```
 
-`bots/telegram/.env` duoc load sau root `.env`, nen co the override bien cung ten neu can. Nen giu bien `NIKO_*` o root `.env`, khong de trong folder bot.
+Thu tu load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Bien moi truong that cua he dieu hanh van duoc uu tien hon file `.env`.
 
 ## Hai Agent
 

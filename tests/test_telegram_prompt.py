@@ -134,15 +134,28 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
 
-    def test_load_env_files_reads_root_and_telegram_env(self):
+    def test_load_env_files_reads_root_niko_and_telegram_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / ".env").write_text(
                 "\n".join(
                     [
                         "CLAUDE_TIMEOUT_SECONDS=7",
+                        "NIKO_AGENT_MODE=single",
                         "TELEGRAM_GROUP_MODE=all",
                         "PRESERVE_ME=root",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            niko_env_dir = root / "niko"
+            niko_env_dir.mkdir(parents=True)
+            (niko_env_dir / ".env").write_text(
+                "\n".join(
+                    [
+                        "NIKO_AGENT_MODE=two_agent",
+                        "NIKO_REPLY_SUFFIX=Meow",
                     ]
                 )
                 + "\n",
@@ -166,6 +179,8 @@ class TelegramPromptTests(unittest.TestCase):
             ):
                 load_env_files("telegram")
                 self.assertEqual(os.environ["CLAUDE_TIMEOUT_SECONDS"], "7")
+                self.assertEqual(os.environ["NIKO_AGENT_MODE"], "two_agent")
+                self.assertEqual(os.environ["NIKO_REPLY_SUFFIX"], "Meow")
                 self.assertEqual(os.environ["TELEGRAM_GROUP_MODE"], "mentions")
                 self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "token")
                 self.assertEqual(os.environ["PRESERVE_ME"], "shell")

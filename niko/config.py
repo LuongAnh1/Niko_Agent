@@ -32,9 +32,12 @@ def load_env_file(path: Path = Path(".env"), override_keys: set[str] | None = No
 
 
 def load_env_files(bot_name: str | None = None) -> None:
-    root_keys = load_env_file(repo_root() / ".env")
+    root = repo_root()
+    root_keys = load_env_file(root / ".env")
+    niko_keys = load_env_file(root / "niko" / ".env", override_keys=root_keys)
+    loaded_file_keys = root_keys | niko_keys
     if bot_name:
-        load_env_file(repo_root() / "bots" / bot_name / ".env", override_keys=root_keys)
+        load_env_file(root / "bots" / bot_name / ".env", override_keys=loaded_file_keys)
 
 
 def env_value(name: str, default: str = "", legacy_name: str | None = None) -> str:
