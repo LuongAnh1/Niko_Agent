@@ -17,15 +17,20 @@ from niko.agent import (
     DeepAgentJob,
     FAST_AGENT_TASK_BUSY,
     FAST_AGENT_TASK_FINAL,
+    FAST_AGENT_TASK_TRIAGE,
+    FAST_AGENT_TASK_WAIT,
+    FAST_DECISION_SEND_TO_DEEP,
     NikoAgent,
     build_niko_prompt,
+    call_fast_agent,
     deep_agent_command,
     ensure_reply_suffix,
+    parse_fast_agent_decision,
     run_cli,
     sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
-from niko.agent_router import ROUTE_BUSY_REPLY
+from niko.agent_router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.config import load_env_files
 
@@ -133,6 +138,158 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertEqual(active_job.followups, ["them thong tin"])
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_BUSY)
         self.assertIs(fast_agent.call_args.kwargs["active_job"], active_job)
+
+    def test_fast_agent_decision_parses_json_fence_and_suffix(self):
+        raw_answer = (
+            "```json\n"
+            "{\"route\":\"send_to_deep\",\"reply\":\"Da anh doi em chut\"}\n"
+            "```\n\n"
+            "Meow"
+        )
+
+        with patch.dict(os.environ, {"NIKO_REPLY_SUFFIX": "Meow"}, clear=True):
+            decision = parse_fast_agent_decision(raw_answer)
+
+        self.assertEqual(decision.route, FAST_DECISION_SEND_TO_DEEP)
+        self.assertEqual(decision.reply, "Da anh doi em chut")
+
+    def test_fast_triage_prompt_skips_hook(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook_file = Path(temp_dir) / "HOOK.md"
+            hook_file.write_text("HOOK FROM FILE", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                    "NIKO_PROMPT_HOOK_FILE": str(hook_file),
+                    "CHAT_IDENTITY_ENABLED": "0",
+                },
+                clear=True,
+            ), patch(
+                "niko.agent.run_cli",
+                return_value='{\"route\":\"reply_now\",\"reply\":\"Da anh\"}',
+            ) as run:
+                call_fast_agent("hello", message, task=FAST_AGENT_TASK_TRIAGE)
+
+        prompt = run.call_args.args[1]
+        self.assertNotIn("HOOK FROM FILE", prompt)
+        self.assertIn("Nhiem vu: phan loai", prompt)
+
+    def test_fast_triage_reply_now_does_not_start_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "thoi tiet dep khong",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = NikoAgent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.agent.call_fast_agent",
+            return_value='{\"route\":\"reply_now\",\"reply\":\"Da em tra loi nhanh duoc anh.\"}',
+        ) as fast_agent, patch.object(
+            agent,
+            "start_deep_agent_job",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("thoi tiet dep khong", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, ["Da em tra loi nhanh duoc anh.\n\nMeow"])
+        start_deep.assert_not_called()
+        fast_agent.assert_called_once()
+        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_TRIAGE)
+
+    def test_fast_triage_can_handoff_to_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "nen lam cach nao day anh nhi",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = NikoAgent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.agent.call_fast_agent",
+            return_value='{\"route\":\"send_to_deep\",\"reply\":\"Da anh doi em chut\"}',
+        ) as fast_agent, patch.object(
+            agent,
+            "start_deep_agent_job",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, ["Da anh doi em chut\n\nMeow"])
+        start_deep.assert_called_once()
+        fast_agent.assert_called_once()
+        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_TRIAGE)
+
+    def test_invalid_fast_triage_falls_back_to_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "nen lam cach nao day anh nhi",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = NikoAgent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.agent.call_fast_agent",
+            side_effect=["khong phai json", "FAST WAIT"],
+        ) as fast_agent, patch.object(
+            agent,
+            "start_deep_agent_job",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, ["FAST WAIT\n\nMeow"])
+        start_deep.assert_called_once()
+        self.assertEqual(
+            [call.kwargs["task"] for call in fast_agent.call_args_list],
+            [FAST_AGENT_TASK_TRIAGE, FAST_AGENT_TASK_WAIT],
+        )
+
     def test_group_reply_can_use_html_mention_when_username_missing(self):
         message = telegram_message_to_gateway(
             {

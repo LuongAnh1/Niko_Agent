@@ -50,7 +50,7 @@ CHAT_USER_ALIASES=telegram:123456789=Anh A
 
 ```env
 NIKO_AGENT_MODE=two_agent
-NIKO_FAST_AGENT_COMMAND=
+NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
 NIKO_UNCERTAIN_DELAY_SECONDS=3
 NIKO_PROMPT_HOOK_FILE=niko/HOOK.md
@@ -77,7 +77,7 @@ Bat `NIKO_AGENT_MODE=two_agent` de tach vai tro:
 Telegram gateway -> Niko router -> Niko Fast / Niko Deep
 ```
 
-Niko Fast la mat giao tiep nhanh. Neu cau hoi don gian, Fast tra loi truc tiep. Neu cau hoi can phan tich, Niko Deep chay background; Fast gui cau bao doi/bao ban trong luc cho.
+Niko Fast la mat giao tiep nhanh va lop triage cho cac cau hoi khong chac. Neu Fast thay co the tra loi ngay, Fast tra loi truc tiep. Neu Fast thay can phan tich, can tool/memory/tai lieu, hoac khong chac, Niko Deep chay background; Fast gui cau bao doi/bao ban trong luc cho.
 
 Khi Niko Deep xu ly xong, ket qua noi bo se quay lai Niko Fast truoc. Fast compose thanh cau tra loi tu nhien cho nguoi dung, roi Telegram gateway moi gui ra chat.
 
