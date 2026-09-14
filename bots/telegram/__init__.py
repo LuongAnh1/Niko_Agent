@@ -1,3 +1,1 @@
-from bots.telegram.bot import main
-
-__all__ = ["main"]
+"""Telegram gateway package for Niko Agent."""
