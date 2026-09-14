@@ -63,6 +63,35 @@ class TelegramPromptTests(unittest.TestCase):
 
         send_message.assert_not_called()
 
+    def test_group_id_command_without_mention_returns_identity(self):
+        message = {
+            "text": "/id",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_GROUP_MODE": "mentions"}, clear=False), patch(
+            "bots.telegram.bot.send_message"
+        ) as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        reply = send_message.call_args.args[2]
+        self.assertIn("chat_id: -100", reply)
+        self.assertIn("user_key: telegram:123", reply)
+
+    def test_group_id_command_for_other_bot_is_ignored(self):
+        message = {
+            "text": "/id@OtherBot",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_GROUP_MODE": "mentions"}, clear=False), patch(
+            "bots.telegram.bot.send_message"
+        ) as send_message:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        send_message.assert_not_called()
     def test_group_mention_gets_reply_with_user_mention(self):
         message = {
             "text": "@NikoBot alo",
