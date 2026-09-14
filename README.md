@@ -15,7 +15,8 @@ Bot Telegram nhỏ gọi Claude CLI (`fcc-claude`) để anh em trong group chat
 TELEGRAM_BOT_TOKEN=token_cua_bot
 TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
 CLAUDE_CLI_COMMAND=fcc-claude -p
-CLAUDE_DEEP_AGENT_COMMAND=
+CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
+CLAUDE_WORKDIR=.runtime/claude_sandbox
 ```
 
 3. Chạy bot:
@@ -53,7 +54,7 @@ TELEGRAM_DEEP_BUSY_REPLY=Da anh doi em chut, em van dang xu ly cau truoc. Anh cu
 
 Để `TELEGRAM_FAST_AGENT_COMMAND` trống thì Agent nhanh chỉ dùng rule local như chào hỏi, cảm ơn, ping, ok hoặc câu khen ngắn. Câu không rõ local/deep keyword sẽ chờ `TELEGRAM_UNCERTAIN_DELAY_SECONDS` giây rồi mới báo chờ và đẩy sang deep agent.
 
-Deep agent dùng `CLAUDE_DEEP_AGENT_COMMAND` nếu có cấu hình, nếu không thì dùng `CLAUDE_CLI_COMMAND`. Bot luôn gọi deep agent như một lượt xử lý mới.
+Deep agent dùng `CLAUDE_DEEP_AGENT_COMMAND` nếu có cấu hình, nếu không thì dùng `CLAUDE_CLI_COMMAND`. `--bare --no-session-persistence --tools=` giúp tắt tool/quét file của Claude CLI, còn `CLAUDE_WORKDIR` cho bot chạy CLI trong thư mục sandbox rỗng.
 
 ## Sửa Hook
 

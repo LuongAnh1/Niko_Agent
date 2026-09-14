@@ -47,6 +47,7 @@ except ImportError:
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_DEEP_AGENT_COMMAND = ""
+DEFAULT_CLAUDE_WORKDIR = ""
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
@@ -124,6 +125,7 @@ def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None
     try:
         result = subprocess.run(
             build_cli_args(command, prompt),
+            cwd=resolve_claude_workdir(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -155,6 +157,16 @@ def resolve_project_path(raw_path: str) -> Path:
     if path.is_absolute():
         return path
     return repo_root() / path
+
+
+def resolve_claude_workdir() -> Path | None:
+    raw_path = os.getenv("CLAUDE_WORKDIR", DEFAULT_CLAUDE_WORKDIR).strip()
+    if not raw_path:
+        return None
+
+    path = resolve_project_path(raw_path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def load_telegram_prompt_hook() -> str:

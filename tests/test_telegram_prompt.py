@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from bots.telegram_bot import (
     deep_agent_command,
     ensure_reply_suffix,
     maybe_send_sticker,
+    run_cli,
     uncertain_delay_seconds,
 )
 from bots.sticker_picker import choose_sticker_file_id, detect_sticker_mood
@@ -60,6 +62,19 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
+
+
+    def test_run_cli_uses_configured_workdir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workdir = Path(temp_dir) / "claude_sandbox"
+            completed = subprocess.CompletedProcess([], 0, stdout="OK\n", stderr="")
+            with patch.dict(os.environ, {"CLAUDE_WORKDIR": str(workdir)}, clear=False), patch(
+                "bots.telegram_bot.subprocess.run", return_value=completed
+            ) as run:
+                self.assertEqual(run_cli("fcc-claude -p", "hello"), "OK")
+
+            self.assertEqual(run.call_args.kwargs["cwd"], workdir)
+            self.assertTrue(workdir.exists())
 
     def test_reply_suffix_uses_meow_default(self):
         with patch.dict(os.environ, {}, clear=True):
