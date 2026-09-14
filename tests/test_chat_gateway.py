@@ -1,6 +1,6 @@
 import unittest
 
-from bots.chat_gateway import (
+from niko.chat_gateway import (
     build_identity_context,
     format_identity_reply,
     parse_allowed_user_keys,
@@ -11,11 +11,11 @@ from bots.chat_gateway import (
 
 class ChatGatewayTests(unittest.TestCase):
     def test_parses_aliases_with_default_platform(self):
-        aliases = parse_user_aliases("123=Anh Luong;telegram:456=Nam,789=Con cu")
+        aliases = parse_user_aliases("123=Anh Luong;telegram:456=Nam,789=Anh Ba")
 
         self.assertEqual(aliases["telegram:123"], "Anh Luong")
         self.assertEqual(aliases["telegram:456"], "Nam")
-        self.assertEqual(aliases["telegram:789"], "Con cu")
+        self.assertEqual(aliases["telegram:789"], "Anh Ba")
 
     def test_parses_allowed_user_keys_with_default_platform(self):
         keys = parse_allowed_user_keys("123, telegram:456;789")
