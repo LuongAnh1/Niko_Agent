@@ -502,6 +502,11 @@ def send_message(token: str, chat_id: int, text: str, parse_mode: str | None = N
         telegram_request(token, "sendMessage", payload)
 
 
+def recipient_mention_label(gateway_message) -> str:
+    user = gateway_message.user
+    return user.display_name or user.mention or "anh"
+
+
 def recipient_mention(gateway_message) -> tuple[str, str | None]:
     if gateway_message is None or not env_flag("TELEGRAM_MENTION_REPLIES", DEFAULT_TELEGRAM_MENTION_REPLIES):
         return "", None
@@ -512,7 +517,7 @@ def recipient_mention(gateway_message) -> tuple[str, str | None]:
         return gateway_message.user.mention, None
     if gateway_message.user.user_id:
         user_id = html_escape(gateway_message.user.user_id, quote=True)
-        label = html_escape(gateway_message.user.label or "anh", quote=False)
+        label = html_escape(recipient_mention_label(gateway_message), quote=False)
         return f'<a href="tg://user?id={user_id}">{label}</a>', "HTML"
 
     return "", None

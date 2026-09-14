@@ -77,13 +77,15 @@ class TelegramPromptTests(unittest.TestCase):
                 "text": "@NikoBot alo",
                 "from": {"id": 123, "first_name": "Luong"},
                 "chat": {"id": -100, "type": "supergroup", "title": "Niko Test"},
-            }
+            },
+            {"telegram:123": "Con,telegram:456=Con cu"},
         )
 
         text, parse_mode = format_reply_for_recipient("Dạ anh", message)
 
         self.assertEqual(parse_mode, "HTML")
-        self.assertIn('tg://user?id=123', text)
+        self.assertIn('<a href="tg://user?id=123">Luong</a>', text)
+        self.assertNotIn("telegram:456", text)
         self.assertIn("Dạ anh", text)
 
     def test_deep_agent_command_defaults_to_claude_command(self):
