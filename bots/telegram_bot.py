@@ -90,9 +90,11 @@ DEEP_JOBS_LOCK = threading.Lock()
 DEEP_AGENT_LOCK = threading.Lock()
 
 
-def load_env_file(path: Path = Path(".env")) -> None:
+def load_env_file(path: Path = Path(".env"), override_keys: set[str] | None = None) -> set[str]:
+    loaded_keys: set[str] = set()
+    override_keys = override_keys or set()
     if not path.exists():
-        return
+        return loaded_keys
 
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -102,8 +104,15 @@ def load_env_file(path: Path = Path(".env")) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
+        if key and (key not in os.environ or key in override_keys):
             os.environ[key] = value
+            loaded_keys.add(key)
+    return loaded_keys
+
+
+def load_env_files() -> None:
+    root_keys = load_env_file(repo_root() / ".env")
+    load_env_file(repo_root() / "bots" / "telegram" / ".env", override_keys=root_keys)
 
 
 def split_command(command: str) -> list[str]:
@@ -666,7 +675,7 @@ def handle_message(
 
 
 def main() -> int:
-    load_env_file()
+    load_env_files()
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:

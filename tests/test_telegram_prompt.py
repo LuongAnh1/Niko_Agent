@@ -13,6 +13,7 @@ from bots.telegram_bot import (
     ensure_reply_suffix,
     format_reply_for_recipient,
     handle_message,
+    load_env_files,
     maybe_send_sticker,
     run_cli,
     sanitize_tool_like_answer,
@@ -132,6 +133,42 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
 
+
+    def test_load_env_files_reads_root_and_telegram_env(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / ".env").write_text(
+                "\n".join(
+                    [
+                        "CLAUDE_TIMEOUT_SECONDS=7",
+                        "TELEGRAM_GROUP_MODE=all",
+                        "PRESERVE_ME=root",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            telegram_env_dir = root / "bots" / "telegram"
+            telegram_env_dir.mkdir(parents=True)
+            (telegram_env_dir / ".env").write_text(
+                "\n".join(
+                    [
+                        "TELEGRAM_GROUP_MODE=mentions",
+                        "TELEGRAM_BOT_TOKEN=token",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"PRESERVE_ME": "shell"}, clear=True), patch(
+                "bots.telegram_bot.repo_root", return_value=root
+            ):
+                load_env_files()
+                self.assertEqual(os.environ["CLAUDE_TIMEOUT_SECONDS"], "7")
+                self.assertEqual(os.environ["TELEGRAM_GROUP_MODE"], "mentions")
+                self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "token")
+                self.assertEqual(os.environ["PRESERVE_ME"], "shell")
 
     def test_run_cli_uses_configured_workdir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
