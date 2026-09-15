@@ -16,6 +16,12 @@ bots/telegram/               # Telegram gateway: polling, mention, /id, sticker,
 stickers/ducks.json          # Mapping mood cho sticker Duck
 ```
 
+## Tai Lieu
+
+- docs/architecture.md: tong quan kien truc va ranh gioi module.
+- docs/telegram-chat-flow.md: luong xu ly tin nhan Telegram voi hai agent.
+- AGENTS.md: context ngan cho Codex khi mo phien chat moi.
+
 ## Chay Local
 
 1. Tao bot Telegram bang [@BotFather](https://t.me/BotFather) va lay token.
