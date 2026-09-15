@@ -13,7 +13,7 @@ niko/.env.example            # Cau hinh rieng cua Niko runtime/agent
 niko/.runtime/               # Vung chay tam cua Niko, khong commit
 niko/HOOK.md                 # Persona/hook nap vao Niko
 bots/telegram/               # Telegram gateway: polling, mention, /id, sticker, gui/nhan tin
-stickers/ducks.json          # Mapping mood cho sticker Duck
+bots/telegram/stickers/ducks.json          # Mapping mood cho sticker Duck cua Telegram
 ```
 
 ## Tai Lieu

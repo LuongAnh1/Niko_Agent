@@ -8,7 +8,7 @@ Day la project Python cho Niko Agent. Niko dung Claude CLI (`fcc-claude`) thay c
 - `niko/graphs/chat_reply/` la graph nghiep vu chat: route tin nhan, goi Niko Fast, day Niko Deep, quan ly deep job background, compose final reply.
 - `niko/runtime.py` la runtime goi Claude CLI: doc env command, nap `niko/HOOK.md`, chen identity context, resolve `CLAUDE_WORKDIR`.
 - `niko/chat_gateway.py` chuan hoa identity/message chung cho cac cong chat.
-- `stickers/ducks.json` la local sticker picker config cho Telegram Duck.
+- `bots/telegram/stickers/ducks.json` la local sticker picker config cho Telegram Duck.
 
 ## Important Docs
 
