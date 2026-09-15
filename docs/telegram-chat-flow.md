@@ -1,45 +1,45 @@
-# Telegram Chat Flow
+# Luồng Xử Lý Chat Telegram
 
-Tai lieu nay mo ta luong xu ly tin nhan Telegram hien tai cua Niko Agent. Kien truc dang chay theo huong hai agent: Niko Fast de phan hoi nhanh/triage, Niko Deep de xu ly viec can suy nghi ky hon.
+Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Kiến trúc đang chạy theo hướng hai agent: Niko Fast để phản hồi nhanh/triage, Niko Deep để xử lý việc cần suy nghĩ kỹ hơn.
 
-## Thanh Phan
+## Thành Phần
 
 - `bots/telegram/bot.py`: Telegram gateway.
-- `niko.chat_gateway`: chuan hoa message Telegram thanh `ChatGatewayMessage`.
-- `niko.graphs.chat_reply.graph.ChatReplyGraph`: dieu phoi flow chat.
+- `niko.chat_gateway`: chuẩn hóa message Telegram thành `ChatGatewayMessage`.
+- `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối flow chat.
 - `niko.graphs.chat_reply.router`: rule router local/deep/fast/busy.
 - `niko.graphs.chat_reply.prompts`: prompt task cho Niko Fast.
-- `niko.runtime`: goi Claude CLI cho Fast/Deep thong qua env command.
+- `niko.runtime`: gọi Claude CLI cho Fast/Deep thông qua env command.
 
-## Luong Gateway Telegram
+## Luồng Gateway Telegram
 
-`bots/telegram/bot.py` chi lam cong vao/ra:
+`bots/telegram/bot.py` chỉ làm cổng vào/ra:
 
-1. Long polling Telegram bang `getUpdates`.
-2. Lay `message` tu update.
-3. Convert sang `ChatGatewayMessage` bang `telegram_message_to_gateway`.
-4. Neu la `/id` hoac `/whoami` dung cho bot hien tai thi tra identity ngay, khong can tag bot trong group.
-5. Neu la group va `TELEGRAM_GROUP_MODE=mentions`, chi xu ly message co tag `@TenBot`.
-6. Kiem tra `TELEGRAM_ALLOWED_CHAT_IDS` va `CHAT_ALLOWED_USER_KEYS`.
-7. Tao callback `deliver_reply` va `notify_working`.
-8. Goi `CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)`.
-9. Khi graph tra loi, gateway gui message, mention nguoi goi neu bat `TELEGRAM_MENTION_REPLIES=1`, va co the gui sticker Duck neu bat sticker.
+1. Long polling Telegram bằng `getUpdates`.
+2. Lấy `message` từ update.
+3. Convert sang `ChatGatewayMessage` bằng `telegram_message_to_gateway`.
+4. Nếu là `/id` hoặc `/whoami` đúng cho bot hiện tại thì trả identity ngay, không cần tag bot trong group.
+5. Nếu là group và `TELEGRAM_GROUP_MODE=mentions`, chỉ xử lý message có tag `@TenBot`.
+6. Kiểm tra `TELEGRAM_ALLOWED_CHAT_IDS` và `CHAT_ALLOWED_USER_KEYS`.
+7. Tạo callback `deliver_reply` và `notify_working`.
+8. Gọi `CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)`.
+9. Khi graph trả lời, gateway gửi message, mention người gọi nếu bật `TELEGRAM_MENTION_REPLIES=1`, và có thể gửi sticker Duck nếu bật sticker.
 
-Gateway khong quyet dinh dung Fast hay Deep. Quyet dinh do nam trong `ChatReplyGraph`.
+Gateway không quyết định dùng Fast hay Deep. Quyết định đó nằm trong `ChatReplyGraph`.
 
-## Che Do Single Agent
+## Chế Độ Single Agent
 
-Neu `NIKO_AGENT_MODE=single`, flow rat ngan:
+Nếu `NIKO_AGENT_MODE=single`, flow rất ngắn:
 
 ```text
 Telegram -> ChatReplyGraph -> Niko Deep -> Telegram
 ```
 
-Graph goi `runtime.call_deep_agent(...)` dong bo, gan suffix bang `NIKO_REPLY_SUFFIX`, roi callback ve Telegram.
+Graph gọi `runtime.call_deep_agent(...)` đồng bộ, gắn suffix bằng `NIKO_REPLY_SUFFIX`, rồi callback về Telegram.
 
-## Che Do Two Agent
+## Chế Độ Two Agent
 
-Neu `NIKO_AGENT_MODE=two_agent`, flow hien tai:
+Nếu `NIKO_AGENT_MODE=two_agent`, flow hiện tại:
 
 ```text
 Telegram message
@@ -50,59 +50,59 @@ Telegram message
   -> Telegram reply
 ```
 
-`ChatReplyGraph` tinh `conversation_id` theo `chat_id` neu co, fallback ve `user_key`. Moi conversation chi co mot Deep job dang chay tai mot thoi diem.
+`ChatReplyGraph` tính `conversation_id` theo `chat_id` nếu có, fallback về `user_key`. Mỗi conversation chỉ có một Deep job đang chạy tại một thời điểm.
 
-## Route Hien Tai
+## Route Hiện Tại
 
-Router tra ve mot trong cac route sau:
+Router trả về một trong các route sau:
 
-- `busy_reply`: dang co Deep job active trong cung conversation.
-- `local_reply`: tin ngan co the tra loi bang rule local, vi du chao, cam on, ping, praise.
-- `deep_agent`: prompt co keyword/format can xu ly sau, vi du `phan tich`, `thiet ke`, `debug`, `viet code`, `memory`, `tool`, `mcp`, `telegram`, `github`, prompt dai, co newline hoac backtick.
-- `fast_agent`: vung xam khi co `NIKO_FAST_AGENT_COMMAND`; Fast Agent triage xem tra loi ngay hay day Deep.
-- `delayed_deep_agent`: vung xam nhung khong co Fast Agent; doi `NIKO_UNCERTAIN_DELAY_SECONDS` roi day Deep.
+- `busy_reply`: đang có Deep job active trong cùng conversation.
+- `local_reply`: tin ngắn có thể trả lời bằng rule local, ví dụ chào, cảm ơn, ping, praise.
+- `deep_agent`: prompt có keyword/format cần xử lý sâu, ví dụ `phân tích`, `thiết kế`, `debug`, `viết code`, `memory`, `tool`, `mcp`, `telegram`, `github`, prompt dài, có newline hoặc backtick.
+- `fast_agent`: vùng xám khi có `NIKO_FAST_AGENT_COMMAND`; Fast Agent triage xem trả lời ngay hay đẩy Deep.
+- `delayed_deep_agent`: vùng xám nhưng không có Fast Agent; đợi `NIKO_UNCERTAIN_DELAY_SECONDS` rồi đẩy Deep.
 
-## Vai Tro Cua Niko Fast
+## Vai Trò Của Niko Fast
 
-Niko Fast dung command trong `NIKO_FAST_AGENT_COMMAND`, nen nen chon model nhe va nhanh. Fast co cac task:
+Niko Fast dùng command trong `NIKO_FAST_AGENT_COMMAND`, nên nên chọn model nhẹ và nhanh. Fast có các task:
 
-- `triage`: phan loai JSON, khong nap `HOOK.md`, khong them `Meow`.
-- `reply`: tra loi truc tiep cho local route neu co Fast command.
-- `wait`: bao nguoi dung doi khi Deep vua bat dau.
-- `busy`: bao nguoi dung Deep van dang xu ly cau truoc.
-- `final`: bien output noi bo cua Deep thanh cau tra loi tu nhien cho nguoi dung.
-- `error`: bao loi gon neu Deep loi.
+- `triage`: phân loại JSON, không nạp `HOOK.md`, không thêm `Meow`.
+- `reply`: trả lời trực tiếp cho local route nếu có Fast command.
+- `wait`: báo người dùng đợi khi Deep vừa bắt đầu.
+- `busy`: báo người dùng Deep vẫn đang xử lý câu trước.
+- `final`: biến output nội bộ của Deep thành câu trả lời tự nhiên cho người dùng.
+- `error`: báo lỗi gọn nếu Deep lỗi.
 
-Fast triage chi hop le khi tra JSON:
+Fast triage chỉ hợp lệ khi trả JSON:
 
 ```json
 {"route":"reply_now","reply":"..."}
 ```
 
-hoac:
+hoặc:
 
 ```json
-{"route":"send_to_deep","reply":"Da anh doi em chut, cau nay em chuyen Niko Deep xu ly roi bao lai anh ngay."}
+{"route":"send_to_deep","reply":"Dạ anh đợi em chút, câu này em chuyển Niko Deep xử lý rồi báo lại anh ngay."}
 ```
 
-Neu Fast triage loi JSON hoac route khong hop le, graph fallback sang Deep.
+Nếu Fast triage lỗi JSON hoặc route không hợp lệ, graph fallback sang Deep.
 
-## Vai Tro Cua Niko Deep
+## Vai Trò Của Niko Deep
 
-Niko Deep dung `CLAUDE_DEEP_AGENT_COMMAND`. Neu bien nay de trong, runtime fallback ve `CLAUDE_CLI_COMMAND`.
+Niko Deep dùng `CLAUDE_DEEP_AGENT_COMMAND`. Nếu biến này để trống, runtime fallback về `CLAUDE_CLI_COMMAND`.
 
-Deep chay background thread khi route can xu ly sau. Trong luc Deep chay:
+Deep chạy background thread khi route cần xử lý sâu. Trong lúc Deep chạy:
 
-- Bot da gui wait reply cho nguoi dung.
-- Neu nguoi dung nhan them trong cung conversation, graph tra `busy_reply`.
-- Tin nhan them se duoc luu vao `DeepAgentJob.followups`.
-- Khi Deep xong, task `final` cua Fast se nhan cau hoi goc, output cua Deep, va cac followup gan nhat de compose cau tra loi cuoi.
+- Bot đã gửi wait reply cho người dùng.
+- Nếu người dùng nhắn thêm trong cùng conversation, graph trả `busy_reply`.
+- Tin nhắn thêm sẽ được lưu vào `DeepAgentJob.followups`.
+- Khi Deep xong, task `final` của Fast sẽ nhận câu hỏi gốc, output của Deep, và các followup gần nhất để compose câu trả lời cuối.
 
-## Hook Va Prompt
+## Hook Và Prompt
 
-`niko/HOOK.md` duoc nap qua `NIKO_PROMPT_HOOK_FILE`.
+`niko/HOOK.md` được nạp qua `NIKO_PROMPT_HOOK_FILE`.
 
-Hien tai hook duoc nap cho:
+Hiện tại hook được nạp cho:
 
 - Deep Agent.
 - Fast task `reply`.
@@ -111,11 +111,11 @@ Hien tai hook duoc nap cho:
 - Fast task `final`.
 - Fast task `error`.
 
-Hook khong nap cho Fast task `triage`, vi triage can JSON sach.
+Hook không nạp cho Fast task `triage`, vì triage cần JSON sạch.
 
-Identity context duoc chen neu `CHAT_IDENTITY_ENABLED=1`. Context nay chi noi bot biet nguoi dang chat la ai, khong phai memory dai han.
+Identity context được chèn nếu `CHAT_IDENTITY_ENABLED=1`. Context này chỉ nói bot biết người đang chat là ai, không phải memory dài hạn.
 
-## Luong Chi Tiet
+## Luồng Chi Tiết
 
 ```text
 User Telegram message
@@ -152,29 +152,29 @@ Deep background
   -> deliver reply through Telegram gateway
 ```
 
-## Gioi Han Hien Tai
+## Giới Hạn Hiện Tại
 
-- Chua co Working Memory rieng.
-- Chua co RAG/tai lieu co dinh.
-- Chua co Tool Router.
-- Chua co busy triage: khi Deep dang chay, tin moi trong cung conversation hien duoc xem la followup va tra busy reply.
-- Claude CLI chay trong `CLAUDE_WORKDIR`, hien la `niko/.runtime/claude_sandbox`, de han che viec CLI tu nhin thang vao toan bo repo.
+- Chưa có Working Memory riêng.
+- Chưa có RAG/tài liệu cố định.
+- Chưa có Tool Router.
+- Chưa có busy triage: khi Deep đang chạy, tin mới trong cùng conversation hiện được xem là followup và trả busy reply.
+- Claude CLI chạy trong `CLAUDE_WORKDIR`, hiện là `niko/.runtime/claude_sandbox`, để hạn chế việc CLI tự nhìn thẳng vào toàn bộ repo.
 
-## Test Lien Quan
+## Test Liên Quan
 
-Chay:
+Chạy:
 
 ```bash
 rtk python -X utf8 -m unittest discover
 ```
 
-Scenario chinh dang duoc test:
+Scenario chính đang được test:
 
-- Sticker/reply trong group khong tag bot thi bi bo qua.
-- `/id` trong group khong can tag van tra identity.
-- Keyword deep di Deep.
-- Vung xam goi Fast triage.
-- Fast `reply_now` khong mo Deep.
-- Fast `send_to_deep` mo Deep background va gui wait reply.
-- Deep xong di qua Fast final compose.
-- Deep dang ban thi di `busy_reply`.
+- Sticker/reply trong group không tag bot thì bị bỏ qua.
+- `/id` trong group không cần tag vẫn trả identity.
+- Keyword deep đi Deep.
+- Vùng xám gọi Fast triage.
+- Fast `reply_now` không mở Deep.
+- Fast `send_to_deep` mở Deep background và gửi wait reply.
+- Deep xong đi qua Fast final compose.
+- Deep đang bận thì đi `busy_reply`.
