@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -13,7 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from bots.telegram.sticker_picker import choose_sticker_file_id, load_sticker_config
-from niko.agent import NikoAgent
+from graphs.chat_reply import ChatReplyGraph
 from niko.chat_gateway import (
     format_identity_reply,
     parse_allowed_user_keys,
@@ -29,7 +29,7 @@ GROUP_MODE_ALL = "all"
 DEFAULT_TELEGRAM_MENTION_REPLIES = "1"
 DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "stickers/ducks.json"
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
-NIKO_AGENT = NikoAgent()
+CHAT_REPLY_GRAPH = ChatReplyGraph()
 
 
 class TelegramError(RuntimeError):
@@ -277,7 +277,7 @@ def handle_message(
         send_chat_action(token, chat_id)
 
     try:
-        NIKO_AGENT.handle_message(prompt, prompt_message, deliver_reply, notify_working)
+        CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)
     except Exception as exc:
         deliver_niko_answer(token, chat_id, prompt, prompt_message, f"Loi: {exc}")
 

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import subprocess
 import tempfile
 import time
@@ -13,29 +13,31 @@ from bots.telegram.bot import (
     maybe_send_sticker,
 )
 from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
-from niko.agent import (
-    DeepAgentJob,
+from graphs.chat_reply import ChatReplyGraph, DeepAgentJob
+from graphs.chat_reply.prompts import (
     FAST_AGENT_TASK_BUSY,
     FAST_AGENT_TASK_FINAL,
     FAST_AGENT_TASK_TRIAGE,
     FAST_AGENT_TASK_WAIT,
     FAST_DECISION_SEND_TO_DEEP,
-    NikoAgent,
-    build_niko_prompt,
     call_fast_agent,
-    deep_agent_command,
     ensure_reply_suffix,
     parse_fast_agent_decision,
-    run_cli,
     sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
-from niko.agent_router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
+from graphs.chat_reply.router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
+from niko.runtime import build_niko_prompt, deep_agent_command, run_cli
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.config import load_env_files
 
 
 class TelegramPromptTests(unittest.TestCase):
+    def test_niko_agent_shim_exports_chat_reply_graph(self):
+        from niko.agent import NikoAgent
+
+        self.assertIs(NikoAgent, ChatReplyGraph)
+
     def test_group_sticker_without_mention_is_ignored(self):
         message = {
             "sticker": {"file_id": "duck"},
@@ -121,15 +123,15 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = NikoAgent()
+        agent = ChatReplyGraph()
         delivered = []
 
         with patch.dict(
             os.environ,
             {"NIKO_FAST_AGENT_COMMAND": "fast -p", "NIKO_REPLY_SUFFIX": "Meow"},
             clear=False,
-        ), patch("niko.agent.call_deep_agent", return_value="DEEP RAW"), patch(
-            "niko.agent.call_fast_agent", return_value="FAST FINAL"
+        ), patch("niko.runtime.call_deep_agent", return_value="DEEP RAW"), patch(
+            "graphs.chat_reply.prompts.call_fast_agent", return_value="FAST FINAL"
         ) as fast_agent:
             agent.run_deep_agent_job("456", "phan tich giup anh", message, delivered.append)
 
@@ -145,7 +147,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = NikoAgent()
+        agent = ChatReplyGraph()
         conversation_id = agent.conversation_id_for(message)
         active_job = DeepAgentJob(conversation_id, message.user.key, "original prompt", time.time())
         agent.deep_jobs[conversation_id] = active_job
@@ -159,7 +161,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "NIKO_REPLY_SUFFIX": "Meow",
             },
             clear=False,
-        ), patch("niko.agent.call_fast_agent", return_value="FAST BUSY") as fast_agent:
+        ), patch("graphs.chat_reply.prompts.call_fast_agent", return_value="FAST BUSY") as fast_agent:
             route = agent.handle_message("them thong tin", message, delivered.append)
 
         self.assertEqual(route, ROUTE_BUSY_REPLY)
@@ -203,7 +205,7 @@ class TelegramPromptTests(unittest.TestCase):
                 },
                 clear=True,
             ), patch(
-                "niko.agent.run_cli",
+                "niko.runtime.run_cli",
                 return_value='{\"route\":\"reply_now\",\"reply\":\"Da anh\"}',
             ) as run:
                 call_fast_agent("hello", message, task=FAST_AGENT_TASK_TRIAGE)
@@ -220,7 +222,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = NikoAgent()
+        agent = ChatReplyGraph()
         delivered = []
 
         with patch.dict(
@@ -232,7 +234,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "niko.agent.call_fast_agent",
+            "graphs.chat_reply.prompts.call_fast_agent",
             return_value='{\"route\":\"reply_now\",\"reply\":\"Da em tra loi nhanh duoc anh.\"}',
         ) as fast_agent, patch.object(
             agent,
@@ -255,7 +257,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = NikoAgent()
+        agent = ChatReplyGraph()
         delivered = []
 
         with patch.dict(
@@ -267,7 +269,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "niko.agent.call_fast_agent",
+            "graphs.chat_reply.prompts.call_fast_agent",
             return_value='{\"route\":\"send_to_deep\",\"reply\":\"Da anh doi em chut\"}',
         ) as fast_agent, patch.object(
             agent,
@@ -290,7 +292,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = NikoAgent()
+        agent = ChatReplyGraph()
         delivered = []
 
         with patch.dict(
@@ -302,7 +304,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "niko.agent.call_fast_agent",
+            "graphs.chat_reply.prompts.call_fast_agent",
             side_effect=["khong phai json", "FAST WAIT"],
         ) as fast_agent, patch.object(
             agent,
@@ -436,7 +438,7 @@ class TelegramPromptTests(unittest.TestCase):
             workdir = Path(temp_dir) / "claude_sandbox"
             completed = subprocess.CompletedProcess([], 0, stdout="OK\n", stderr="")
             with patch.dict(os.environ, {"CLAUDE_WORKDIR": str(workdir)}, clear=False), patch(
-                "niko.agent.subprocess.run", return_value=completed
+                "niko.runtime.subprocess.run", return_value=completed
             ) as run:
                 self.assertEqual(run_cli("fcc-claude -p", "hello"), "OK")
 
