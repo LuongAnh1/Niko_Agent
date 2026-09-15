@@ -1,3 +1,1 @@
-from niko.agent import NikoAgent
-
-__all__ = ["NikoAgent"]
+"""Niko Agent package."""

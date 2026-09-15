@@ -1,38 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
-import os
-import shlex
-import shutil
-import subprocess
 import sys
-import threading
 import time
-from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any
 
-from niko.agent_router import (
-    ROUTE_BUSY_REPLY,
-    ROUTE_DELAYED_DEEP_AGENT,
-    ROUTE_FAST_AGENT,
-    ROUTE_LOCAL_REPLY,
-    decide_agent_route,
-)
-from niko.chat_gateway import build_identity_context
-from niko.config import env_flag, env_value, resolve_project_path
+from niko.graphs.chat_reply.router import ROUTE_DELAYED_DEEP_AGENT
+from niko.config import env_value
+import niko.runtime as runtime
 
 
-DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
-DEFAULT_CLAUDE_DEEP_AGENT_COMMAND = ""
-DEFAULT_CLAUDE_WORKDIR = ""
-DEFAULT_NIKO_PROMPT_HOOK_FILE = "niko/HOOK.md"
 DEFAULT_NIKO_REPLY_SUFFIX = "Meow"
 DEFAULT_TOOL_UNAVAILABLE_REPLY = (
     "Da hien tai em khong co quyen tu doc file hay quet thu muc. "
     "Neu anh muon em xem file/tai lieu nao, anh gui noi dung hoac de harness nap phan lien quan vao prompt giup em nhe."
 )
-AGENT_MODE_SINGLE = "single"
-AGENT_MODE_TWO_AGENT = "two_agent"
 DEFAULT_NIKO_DEEP_WAIT_REPLY = (
     "Da anh doi em chut, cau nay can phan tich ky hon nen em day sang Opus 5 roi bao lai anh ngay."
 )
@@ -51,124 +34,11 @@ FAST_AGENT_TASK_ERROR = "error"
 FAST_DECISION_REPLY_NOW = "reply_now"
 FAST_DECISION_SEND_TO_DEEP = "send_to_deep"
 
-ReplyCallback = Callable[[str], None]
-NotifyCallback = Callable[[], None]
-
-
-@dataclass
-class DeepAgentJob:
-    conversation_id: str
-    user_key: str
-    prompt: str
-    started_at: float
-    followups: list[str] = field(default_factory=list)
-
 
 @dataclass(frozen=True)
 class FastAgentDecision:
     route: str
     reply: str = ""
-
-
-def split_command(command: str) -> list[str]:
-    return shlex.split(command, posix=os.name != "nt")
-
-
-def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
-    args = split_command(os.path.expandvars(command))
-    if args:
-        args[0] = shutil.which(args[0]) or args[0]
-
-    if prompt is None:
-        return args
-
-    if any("{prompt}" in arg for arg in args):
-        return [arg.replace("{prompt}", prompt) for arg in args]
-
-    return [*args, prompt]
-
-
-def resolve_claude_workdir() -> Path | None:
-    raw_path = os.getenv("CLAUDE_WORKDIR", DEFAULT_CLAUDE_WORKDIR).strip()
-    if not raw_path:
-        return None
-
-    path = resolve_project_path(raw_path)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None = None) -> str:
-    if timeout_seconds is None:
-        timeout_seconds = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180"))
-
-    try:
-        result = subprocess.run(
-            build_cli_args(command, prompt),
-            cwd=resolve_claude_workdir(),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Khong tim thay lenh: {command}. Kiem tra PATH/env.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Lenh chay qua lau, da het timeout: {command}") from exc
-
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or "CLI tra ve loi khong ro."
-        raise RuntimeError(message)
-
-    return result.stdout.strip()
-
-
-def load_prompt_hook() -> str:
-    hook_file = env_value(
-        "NIKO_PROMPT_HOOK_FILE",
-        DEFAULT_NIKO_PROMPT_HOOK_FILE,
-        legacy_name="TELEGRAM_PROMPT_HOOK_FILE",
-    ).strip()
-    if not hook_file:
-        return ""
-
-    path = resolve_project_path(hook_file)
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Khong tim thay file hook: {path}") from exc
-
-
-def build_niko_prompt(
-    user_prompt: str,
-    gateway_message=None,
-    include_prompt_hook: bool = True,
-    prompt_label: str = "Tin nhan nguoi dung",
-) -> str:
-    hook = ""
-    if include_prompt_hook:
-        hook = load_prompt_hook()
-
-    identity_context = ""
-    if gateway_message is not None and env_flag("CHAT_IDENTITY_ENABLED", "1"):
-        identity_context = build_identity_context(gateway_message)
-
-    parts = []
-    if hook:
-        parts.append(hook)
-    if identity_context:
-        parts.append(identity_context)
-    if not parts:
-        return user_prompt
-
-    parts.append(f"{prompt_label}:\n{user_prompt}")
-    return "\n\n".join(parts)
-
-
-build_telegram_prompt = build_niko_prompt
-load_telegram_prompt_hook = load_prompt_hook
 
 
 def reply_suffix() -> str:
@@ -246,11 +116,6 @@ def ensure_reply_suffix(answer: str) -> str:
     return f"{answer}\n\n{suffix}"
 
 
-def two_agent_mode_enabled() -> bool:
-    mode = env_value("NIKO_AGENT_MODE", AGENT_MODE_SINGLE, legacy_name="TELEGRAM_AGENT_MODE").strip().lower()
-    return mode in {AGENT_MODE_TWO_AGENT, "dual", "2", "true", "on"}
-
-
 def fast_agent_command() -> str:
     return env_value("NIKO_FAST_AGENT_COMMAND", "", legacy_name="TELEGRAM_FAST_AGENT_COMMAND").strip()
 
@@ -268,7 +133,7 @@ def build_deep_wait_reply() -> str:
     return template.format()
 
 
-def build_deep_busy_reply(job: DeepAgentJob | None) -> str:
+def build_deep_busy_reply(job: Any | None) -> str:
     elapsed_seconds = int(time.time() - job.started_at) if job else 0
     elapsed_minutes = max(0, elapsed_seconds // 60)
     template = env_value(
@@ -352,7 +217,7 @@ def build_fast_agent_task_prompt(
     prompt: str,
     task: str = FAST_AGENT_TASK_REPLY,
     deep_answer: str | None = None,
-    active_job: DeepAgentJob | None = None,
+    active_job: Any | None = None,
 ) -> str:
     lines = [
         "Vai tro noi bo: em la Niko Fast, agent giao tiep truc tiep voi nguoi dung.",
@@ -436,20 +301,20 @@ def call_fast_agent(
     gateway_message,
     task: str = FAST_AGENT_TASK_REPLY,
     deep_answer: str | None = None,
-    active_job: DeepAgentJob | None = None,
+    active_job: Any | None = None,
 ) -> str:
     command = fast_agent_command()
     if not command:
         raise RuntimeError("Chua cau hinh NIKO_FAST_AGENT_COMMAND.")
 
     task_prompt = build_fast_agent_task_prompt(prompt, task, deep_answer=deep_answer, active_job=active_job)
-    fast_prompt = build_niko_prompt(
+    fast_prompt = runtime.build_niko_prompt(
         task_prompt,
         gateway_message,
         include_prompt_hook=task != FAST_AGENT_TASK_TRIAGE,
         prompt_label="Nhiem vu cua Niko Fast",
     )
-    return run_cli(command, fast_prompt, timeout_seconds=fast_agent_timeout_seconds()) or "(Khong co noi dung tra ve.)"
+    return runtime.run_cli(command, fast_prompt, timeout_seconds=fast_agent_timeout_seconds()) or "(Khong co noi dung tra ve.)"
 
 
 def try_call_fast_agent(
@@ -457,7 +322,7 @@ def try_call_fast_agent(
     gateway_message,
     task: str = FAST_AGENT_TASK_REPLY,
     deep_answer: str | None = None,
-    active_job: DeepAgentJob | None = None,
+    active_job: Any | None = None,
 ) -> str | None:
     if not fast_agent_command():
         return None
@@ -485,7 +350,7 @@ def try_call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecis
         return None
 
 
-def compose_deep_answer_for_user(prompt: str, gateway_message, deep_answer: str, active_job: DeepAgentJob | None) -> str:
+def compose_deep_answer_for_user(prompt: str, gateway_message, deep_answer: str, active_job: Any | None) -> str:
     clean_deep_answer = sanitize_tool_like_answer(strip_existing_reply_suffix(deep_answer))
     fast_answer = try_call_fast_agent(
         prompt,
@@ -497,195 +362,41 @@ def compose_deep_answer_for_user(prompt: str, gateway_message, deep_answer: str,
     return fast_answer or clean_deep_answer or "(Khong co noi dung tra ve.)"
 
 
-def deep_agent_command() -> str:
-    command = os.getenv("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
-    if command:
-        return command
-    return os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
-
-
-def call_deep_agent(prompt: str, gateway_message) -> str:
-    deep_prompt = build_niko_prompt(prompt, gateway_message, include_prompt_hook=True)
-    return call_claude(deep_prompt, deep_agent_command())
-
-
-def call_claude(prompt: str, command: str | None = None) -> str:
-    command = command or os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
-    return run_cli(command, prompt) or "(Khong co noi dung tra ve.)"
-
-
-class NikoAgent:
-    def __init__(self) -> None:
-        self.deep_jobs: dict[str, DeepAgentJob] = {}
-        self.deep_jobs_lock = threading.Lock()
-        self.deep_agent_lock = threading.Lock()
-
-    def conversation_id_for(self, gateway_message) -> str:
-        return str(gateway_message.chat_id or gateway_message.user.key)
-
-    def get_active_deep_job(self, conversation_id: str) -> DeepAgentJob | None:
-        with self.deep_jobs_lock:
-            return self.deep_jobs.get(conversation_id)
-
-    def has_active_deep_job(self, conversation_id: str) -> bool:
-        return self.get_active_deep_job(conversation_id) is not None
-
-    def add_deep_job_followup(self, conversation_id: str, prompt: str) -> DeepAgentJob | None:
-        with self.deep_jobs_lock:
-            job = self.deep_jobs.get(conversation_id)
-            if job and prompt.strip():
-                job.followups.append(prompt.strip())
-            return job
-
-    def start_deep_agent_job(
-        self,
-        conversation_id: str,
-        prompt: str,
-        gateway_message,
-        deliver_reply: ReplyCallback,
-        notify_working: NotifyCallback | None = None,
-    ) -> bool:
-        with self.deep_jobs_lock:
-            if conversation_id in self.deep_jobs:
-                return False
-            self.deep_jobs[conversation_id] = DeepAgentJob(
-                conversation_id,
-                gateway_message.user.key,
-                prompt,
-                time.time(),
-            )
-
-        thread = threading.Thread(
-            target=self.run_deep_agent_job,
-            args=(conversation_id, prompt, gateway_message, deliver_reply, notify_working),
-            daemon=True,
-        )
-        thread.start()
-        return True
-
-    def run_deep_agent_job(
-        self,
-        conversation_id: str,
-        prompt: str,
-        gateway_message,
-        deliver_reply: ReplyCallback,
-        notify_working: NotifyCallback | None = None,
-    ) -> None:
-        try:
-            with self.deep_agent_lock:
-                if notify_working:
-                    notify_working()
-                deep_answer = call_deep_agent(prompt, gateway_message)
-
-            active_job = self.get_active_deep_job(conversation_id)
-            answer = compose_deep_answer_for_user(prompt, gateway_message, deep_answer, active_job)
-            deliver_reply(ensure_reply_suffix(answer))
-        except Exception as exc:
-            active_job = self.get_active_deep_job(conversation_id)
-            error_text = f"Loi deep agent: {exc}"
-            answer = try_call_fast_agent(
-                prompt,
-                gateway_message,
-                task=FAST_AGENT_TASK_ERROR,
-                deep_answer=error_text,
-                active_job=active_job,
-            )
-            deliver_reply(ensure_reply_suffix(answer or error_text))
-        finally:
-            with self.deep_jobs_lock:
-                self.deep_jobs.pop(conversation_id, None)
-
-    def handoff_to_deep_agent(
-        self,
-        conversation_id: str,
-        prompt: str,
-        gateway_message,
-        deliver_reply: ReplyCallback,
-        notify_working: NotifyCallback | None = None,
-        wait_reply: str | None = None,
-    ) -> None:
-        started = self.start_deep_agent_job(conversation_id, prompt, gateway_message, deliver_reply, notify_working)
-        if started:
-            answer = wait_reply or try_call_fast_agent(prompt, gateway_message, task=FAST_AGENT_TASK_WAIT)
-            deliver_reply(ensure_reply_suffix(answer or build_deep_wait_reply()))
-        else:
-            active_job = self.add_deep_job_followup(conversation_id, prompt)
-            answer = try_call_fast_agent(
-                prompt,
-                gateway_message,
-                task=FAST_AGENT_TASK_BUSY,
-                active_job=active_job,
-            )
-            deliver_reply(ensure_reply_suffix(answer or build_deep_busy_reply(active_job)))
-
-    def handle_message(
-        self,
-        prompt: str,
-        gateway_message,
-        deliver_reply: ReplyCallback,
-        notify_working: NotifyCallback | None = None,
-    ) -> str:
-        if two_agent_mode_enabled():
-            return self.handle_two_agent_message(prompt, gateway_message, deliver_reply, notify_working)
-
-        if notify_working:
-            notify_working()
-        answer = ensure_reply_suffix(call_deep_agent(prompt, gateway_message))
-        deliver_reply(answer)
-        return "deep_agent"
-
-    def handle_two_agent_message(
-        self,
-        prompt: str,
-        gateway_message,
-        deliver_reply: ReplyCallback,
-        notify_working: NotifyCallback | None = None,
-    ) -> str:
-        conversation_id = self.conversation_id_for(gateway_message)
-        route = decide_agent_route(
-            prompt,
-            deep_job_active=self.has_active_deep_job(conversation_id),
-            fast_agent_available=bool(fast_agent_command()),
-        )
-        print(f"Agent route: {route.kind} ({route.reason})")
-
-        if route.kind == ROUTE_BUSY_REPLY:
-            active_job = self.add_deep_job_followup(conversation_id, prompt)
-            answer = try_call_fast_agent(
-                prompt,
-                gateway_message,
-                task=FAST_AGENT_TASK_BUSY,
-                active_job=active_job,
-            )
-            deliver_reply(ensure_reply_suffix(answer or build_deep_busy_reply(active_job)))
-            return route.kind
-
-        if route.kind == ROUTE_LOCAL_REPLY:
-            answer = try_call_fast_agent(prompt, gateway_message, task=FAST_AGENT_TASK_REPLY)
-            deliver_reply(ensure_reply_suffix(answer or route.reply))
-            return route.kind
-
-        if route.kind == ROUTE_FAST_AGENT:
-            if notify_working:
-                notify_working()
-            decision = try_call_fast_agent_decision(prompt, gateway_message)
-            if decision:
-                print(f"Fast triage: {decision.route}")
-            if decision and decision.route == FAST_DECISION_REPLY_NOW and decision.reply:
-                deliver_reply(ensure_reply_suffix(decision.reply))
-                return route.kind
-            if decision and decision.route == FAST_DECISION_SEND_TO_DEEP:
-                self.handoff_to_deep_agent(
-                    conversation_id,
-                    prompt,
-                    gateway_message,
-                    deliver_reply,
-                    notify_working,
-                    wait_reply=decision.reply,
-                )
-                return route.kind
-            print("Fast agent khong co cau tra loi truc tiep hop le, chuyen sang deep agent.", file=sys.stderr)
-
-        delay_before_deep_agent_if_needed(route.kind)
-        self.handoff_to_deep_agent(conversation_id, prompt, gateway_message, deliver_reply, notify_working)
-        return route.kind
+__all__ = [
+    "DEFAULT_NIKO_DEEP_BUSY_REPLY",
+    "DEFAULT_NIKO_DEEP_WAIT_REPLY",
+    "DEFAULT_NIKO_REPLY_SUFFIX",
+    "DEFAULT_NIKO_UNCERTAIN_DELAY_SECONDS",
+    "DEFAULT_TOOL_UNAVAILABLE_REPLY",
+    "FAST_AGENT_TASK_BUSY",
+    "FAST_AGENT_TASK_ERROR",
+    "FAST_AGENT_TASK_FINAL",
+    "FAST_AGENT_TASK_REPLY",
+    "FAST_AGENT_TASK_TRIAGE",
+    "FAST_AGENT_TASK_WAIT",
+    "FAST_DECISION_REPLY_NOW",
+    "FAST_DECISION_SEND_TO_DEEP",
+    "FastAgentDecision",
+    "build_deep_busy_reply",
+    "build_deep_wait_reply",
+    "build_fast_agent_task_prompt",
+    "call_fast_agent",
+    "call_fast_agent_decision",
+    "compose_deep_answer_for_user",
+    "delay_before_deep_agent_if_needed",
+    "ensure_reply_suffix",
+    "extract_json_object",
+    "fast_agent_command",
+    "fast_agent_timeout_seconds",
+    "is_tool_call_dict",
+    "looks_like_fake_tool_call",
+    "parse_fast_agent_decision",
+    "reply_suffix",
+    "sanitize_tool_like_answer",
+    "strip_existing_reply_suffix",
+    "strip_json_code_fence",
+    "truncate_text",
+    "try_call_fast_agent",
+    "try_call_fast_agent_decision",
+    "uncertain_delay_seconds",
+]
