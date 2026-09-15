@@ -2,46 +2,46 @@
 
 ![Niko Agent logo](assets/niko-logo.png)
 
-Niko Agent dung Claude CLI (`fcc-claude`) thay cho viec goi API LLM truc tiep. Bot Telegram chi la gateway; workflow tra loi chat nam trong `niko/graphs/chat_reply/`, con `niko/runtime.py` giu phan goi Claude CLI va hook/persona.
+Niko Agent dùng Claude CLI (`fcc-claude`) thay cho việc gọi API LLM trực tiếp. Bot Telegram chỉ là gateway; workflow trả lời chat nằm trong `niko/graphs/chat_reply/`, còn `niko/runtime.py` giữ phần gọi Claude CLI và hook/persona.
 
-## Cau Truc
+## Cấu Trúc
 
 ```text
-niko/runtime.py              # Claude CLI runtime, prompt hook, command config, deep call
-niko/graphs/chat_reply/      # Chat reply graph: route, fast triage, deep handoff, final compose
-niko/.env.example            # Cau hinh rieng cua Niko runtime/agent
-niko/.runtime/               # Vung chay tam cua Niko, khong commit
-niko/HOOK.md                 # Persona/hook nap vao Niko
-bots/telegram/               # Telegram gateway: polling, mention, /id, sticker, gui/nhan tin
-bots/telegram/stickers/ducks.json          # Mapping mood cho sticker Duck cua Telegram
+niko/runtime.py                         # Claude CLI runtime, prompt hook, command config, deep call
+niko/graphs/chat_reply/                 # Chat reply graph: route, fast triage, deep handoff, final compose
+niko/.env.example                       # Cấu hình riêng của Niko runtime/agent
+niko/.runtime/                          # Vùng chạy tạm của Niko, không commit
+niko/HOOK.md                            # Persona/hook nạp vào Niko
+bots/telegram/                          # Telegram gateway: polling, mention, /id, sticker, gửi/nhận tin
+bots/telegram/stickers/ducks.json       # Mapping mood cho sticker Duck của Telegram
 ```
 
-## Tai Lieu
+## Tài Liệu
 
-- docs/architecture.md: tong quan kien truc va ranh gioi module.
-- docs/telegram-chat-flow.md: luong xu ly tin nhan Telegram voi hai agent.
-- AGENTS.md: context ngan cho Codex khi mo phien chat moi.
+- `docs/architecture.md`: tổng quan kiến trúc và ranh giới module.
+- `docs/telegram-chat-flow.md`: luồng xử lý tin nhắn Telegram với hai agent.
+- `AGENTS.md`: context ngắn cho Codex khi mở phiên chat mới.
 
-## Chay Local
+## Chạy Local
 
-1. Tao bot Telegram bang [@BotFather](https://t.me/BotFather) va lay token.
-2. Copy `.env.example` thanh `.env`, dien cau hinh chung cho Claude/identity.
-3. Copy `niko/.env.example` thanh `niko/.env`, dien cau hinh rieng cua Niko.
-4. Copy `bots/telegram/.env.example` thanh `bots/telegram/.env`, dien cau hinh Telegram.
-5. Cai va cau hinh Free Claude Code/FCC. Neu `fcc-claude` tro qua FCC thi chay `fcc-server` truoc.
-6. Chay bot:
+1. Tạo bot Telegram bằng [@BotFather](https://t.me/BotFather) và lấy token.
+2. Copy `.env.example` thành `.env`, điền cấu hình chung cho Claude/identity.
+3. Copy `niko/.env.example` thành `niko/.env`, điền cấu hình riêng của Niko.
+4. Copy `bots/telegram/.env.example` thành `bots/telegram/.env`, điền cấu hình Telegram.
+5. Cài và cấu hình Free Claude Code/FCC. Nếu `fcc-claude` trỏ qua FCC thì chạy `fcc-server` trước.
+6. Chạy bot:
 
 ```bash
 python -m bots.telegram.bot
 ```
 
-## Lay ID
+## Lấy ID
 
-Dung `/id` trong private chat hoac `/id@TenBot` trong group de lay `chat_id` va `user_key`. Trong group, mac dinh bot chi xu ly tin nhan co tag `@TenBot`. Khi tra loi, bot se mention nguoi vua goi neu `TELEGRAM_MENTION_REPLIES=1`.
+Dùng `/id` trong private chat hoặc `/id@TenBot` trong group để lấy `chat_id` và `user_key`. Trong group, mặc định bot chỉ xử lý tin nhắn có tag `@TenBot`. Khi trả lời, bot sẽ mention người vừa gọi nếu `TELEGRAM_MENTION_REPLIES=1`.
 
 ## Env
 
-Root `.env` la cau hinh chung cua he thong:
+Root `.env` là cấu hình chung của hệ thống:
 
 ```env
 CLAUDE_CLI_COMMAND=fcc-claude -p
@@ -53,7 +53,7 @@ CHAT_ALLOWED_USER_KEYS=
 CHAT_USER_ALIASES=telegram:123456789=Anh A
 ```
 
-`niko/.env` la cau hinh rieng cua Niko:
+`niko/.env` là cấu hình riêng của Niko:
 
 ```env
 NIKO_AGENT_MODE=two_agent
@@ -64,7 +64,7 @@ NIKO_PROMPT_HOOK_FILE=niko/HOOK.md
 NIKO_REPLY_SUFFIX=Meow
 ```
 
-`bots/telegram/.env` chi la cau hinh gateway Telegram:
+`bots/telegram/.env` chỉ là cấu hình gateway Telegram:
 
 ```env
 TELEGRAM_BOT_TOKEN=token_cua_bot
@@ -74,26 +74,26 @@ TELEGRAM_MENTION_REPLIES=1
 TELEGRAM_STICKERS_ENABLED=1
 ```
 
-Thu tu load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Bien moi truong that cua he dieu hanh van duoc uu tien hon file `.env`.
+Thứ tự load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Biến môi trường thật của hệ điều hành vẫn được ưu tiên hơn file `.env`.
 
 ## Hai Agent
 
-Bat `NIKO_AGENT_MODE=two_agent` de tach vai tro:
+Bật `NIKO_AGENT_MODE=two_agent` để tách vai trò:
 
 ```text
 Telegram gateway -> niko.graphs.chat_reply -> Niko Fast / Niko Deep -> niko.graphs.chat_reply -> Telegram gateway
 ```
 
-Niko Fast la mat giao tiep nhanh va lop triage cho cac cau hoi khong chac. Neu Fast thay co the tra loi ngay, Fast tra loi truc tiep. Neu Fast thay can phan tich, can tool/memory/tai lieu, hoac khong chac, Niko Deep chay background; Fast gui cau bao doi/bao ban trong luc cho.
+Niko Fast là mặt giao tiếp nhanh và lớp triage cho các câu hỏi không chắc. Nếu Fast thấy có thể trả lời ngay, Fast trả lời trực tiếp. Nếu Fast thấy cần phân tích, cần tool/memory/tài liệu, hoặc không chắc, Niko Deep chạy background; Fast gửi câu báo đợi/báo bận trong lúc chờ.
 
-Khi Niko Deep xu ly xong, ket qua noi bo se quay lai Niko Fast truoc. Fast compose thanh cau tra loi tu nhien cho nguoi dung, roi gateway moi gui ra chat.
+Khi Niko Deep xử lý xong, kết quả nội bộ sẽ quay lại Niko Fast trước. Fast compose thành câu trả lời tự nhiên cho người dùng, rồi gateway mới gửi ra chat.
 
-`NIKO_FAST_AGENT_COMMAND` nen tro toi model nhe/nhanh. De trong thi he thong fallback ve rule/template local cho wait/busy va gui ket qua deep truc tiep. Deep agent dung `CLAUDE_DEEP_AGENT_COMMAND`; neu de trong thi fallback ve `CLAUDE_CLI_COMMAND`.
+`NIKO_FAST_AGENT_COMMAND` nên trỏ tới model nhẹ/nhanh. Để trống thì hệ thống fallback về rule/template local cho wait/busy và gửi kết quả deep trực tiếp. Deep agent dùng `CLAUDE_DEEP_AGENT_COMMAND`; nếu để trống thì fallback về `CLAUDE_CLI_COMMAND`.
 
-## Sua Hook
+## Sửa Hook
 
-Muon doi giong van thi sua `niko/HOOK.md` va mo Pull Request. Khong can sua script Python.
+Muốn đổi giọng văn thì sửa `niko/HOOK.md` và mở Pull Request. Không cần sửa script Python.
 
 ## PR
 
-Tao branch rieng, sua hook/code, mo Pull Request vao `main`. `main` la nhanh chinh, owner duyet va merge.
+Tạo branch riêng, sửa hook/code, mở Pull Request vào `main`. `main` là nhánh chính, owner duyệt và merge.

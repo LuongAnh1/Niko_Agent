@@ -1,51 +1,51 @@
 # Niko Agent Context
 
-Day la project Python cho Niko Agent. Niko dung Claude CLI (`fcc-claude`) thay cho viec goi API LLM truc tiep.
+This is a Python project for Niko Agent. Niko uses Claude CLI (`fcc-claude`) instead of calling an LLM API directly.
 
 ## Current Architecture
 
-- `bots/telegram/` la gateway Telegram: polling, parse message, auth, mention filter, `/id`, send reply, send sticker.
-- `niko/graphs/chat_reply/` la graph nghiep vu chat: route tin nhan, goi Niko Fast, day Niko Deep, quan ly deep job background, compose final reply.
-- `niko/runtime.py` la runtime goi Claude CLI: doc env command, nap `niko/HOOK.md`, chen identity context, resolve `CLAUDE_WORKDIR`.
-- `niko/chat_gateway.py` chuan hoa identity/message chung cho cac cong chat.
-- `bots/telegram/stickers/ducks.json` la local sticker picker config cho Telegram Duck.
+- `bots/telegram/` is the Telegram gateway: polling, message parsing, auth, mention filtering, `/id`, replies, and stickers.
+- `niko/graphs/chat_reply/` is the chat business graph: route messages, call Niko Fast, hand off to Niko Deep, manage background deep jobs, and compose final replies.
+- `niko/runtime.py` is the Claude CLI runtime: read command env, load `niko/HOOK.md`, inject identity context, and resolve `CLAUDE_WORKDIR`.
+- `niko/chat_gateway.py` normalizes cross-channel identity and message data.
+- `bots/telegram/stickers/ducks.json` is the local Telegram Duck sticker picker config.
 
 ## Important Docs
 
-- `docs/architecture.md`: tong quan bo cuc repo va ranh gioi module.
-- `docs/telegram-chat-flow.md`: luong xu ly tin nhan Telegram voi hai agent.
-- `README.md`: huong dan chay local va env ngan gon.
+- `docs/architecture.md`: repo layout and module boundaries.
+- `docs/telegram-chat-flow.md`: Telegram message flow with the two-agent design.
+- `README.md`: short local setup and env guide.
 
 ## Current Chat Flow
 
-Telegram gateway khong tu quyet dinh LLM. Gateway convert message ve `ChatGatewayMessage`, sau do goi:
+The Telegram gateway does not decide which LLM path to use. It converts incoming Telegram messages into `ChatGatewayMessage`, then calls:
 
 ```python
 from niko.graphs.chat_reply import ChatReplyGraph
 ```
 
-`ChatReplyGraph` xu ly `single` hoac `two_agent` theo `NIKO_AGENT_MODE`.
+`ChatReplyGraph` runs either `single` or `two_agent` mode according to `NIKO_AGENT_MODE`.
 
-Trong `two_agent`:
+In `two_agent` mode:
 
-- Local rule tra loi nhanh cho greeting/thanks/ping/praise.
-- Keyword/prompt dai/newline/backtick di Deep.
-- Gray zone di Niko Fast triage neu co `NIKO_FAST_AGENT_COMMAND`.
-- Fast `reply_now` tra loi ngay.
-- Fast `send_to_deep` tao Deep background job va gui wait reply.
-- Khi Deep xong, output noi bo quay lai Fast task `final` de compose cau tra loi cuoi.
-- Neu Deep dang ban trong cung conversation, tin moi duoc them vao `DeepAgentJob.followups` va bot tra `busy_reply`.
+- Local rules answer simple greeting/thanks/ping/praise messages quickly.
+- Deep keywords, long prompts, newlines, or backticks go to Niko Deep.
+- Gray-zone prompts go to Niko Fast triage when `NIKO_FAST_AGENT_COMMAND` is configured.
+- Fast `reply_now` replies immediately.
+- Fast `send_to_deep` starts a Deep background job and sends a wait reply.
+- When Deep finishes, its internal output goes back through the Fast `final` task to compose the final user-facing reply.
+- If Deep is already busy in the same conversation, new messages are appended to `DeepAgentJob.followups` and the bot returns `busy_reply`.
 
 ## Runtime Notes
 
-- `CLAUDE_WORKDIR` mac dinh nen tro vao `niko/.runtime/claude_sandbox` de Claude CLI khong tu nhin thang vao toan repo.
-- Hien chua co Working Memory, RAG, Tool Router hay Memory Layer rieng.
-- `HOOK.md` duoc nap cho Deep va cac task Fast reply/wait/busy/final/error. Fast triage JSON khong nap hook.
-- Khong tao lai `niko/agent.py` hay `niko/agent_router.py`; graph hien nam trong `niko/graphs/chat_reply/`.
+- `CLAUDE_WORKDIR` should default to `niko/.runtime/claude_sandbox` so Claude CLI does not inspect the whole repo by default.
+- The project does not yet have a dedicated Working Memory, RAG layer, Tool Router, or Memory Layer.
+- `HOOK.md` is loaded for Deep and Fast reply/wait/busy/final/error tasks. Fast JSON triage intentionally skips the hook.
+- Do not recreate `niko/agent.py` or `niko/agent_router.py`; the active graph lives under `niko/graphs/chat_reply/`.
 
 ## Commands
 
-Dung `rtk` cho shell commands trong workspace nay.
+Use `rtk` for shell commands in this workspace.
 
 ```bash
 rtk python -X utf8 -m unittest discover

@@ -1,8 +1,8 @@
-# Docs
+# Tài Liệu
 
-Tai lieu nhanh cho Niko Agent:
+Tài liệu nhanh cho Niko Agent:
 
-- [Architecture](architecture.md): bo cuc repo va ranh gioi giua gateway, graph, runtime.
-- [Telegram Chat Flow](telegram-chat-flow.md): luong xu ly tin nhan Telegram voi Niko Fast va Niko Deep.
+- [Kiến trúc](architecture.md): bố cục repo và ranh giới giữa gateway, graph, runtime.
+- [Luồng chat Telegram](telegram-chat-flow.md): luồng xử lý tin nhắn Telegram với Niko Fast và Niko Deep.
 
-Neu dung Codex o phien chat moi, xem them [AGENTS.md](../AGENTS.md) o root repo.
+Nếu dùng Codex ở phiên chat mới, xem thêm [AGENTS.md](../AGENTS.md) ở root repo.
