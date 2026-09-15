@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import json
@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Any
 
-from graphs.chat_reply.router import ROUTE_DELAYED_DEEP_AGENT
+from niko.graphs.chat_reply.router import ROUTE_DELAYED_DEEP_AGENT
 from niko.config import env_value
 import niko.runtime as runtime
 

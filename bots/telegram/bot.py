@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -13,7 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from bots.telegram.sticker_picker import choose_sticker_file_id, load_sticker_config
-from graphs.chat_reply import ChatReplyGraph
+from niko.graphs.chat_reply import ChatReplyGraph
 from niko.chat_gateway import (
     format_identity_reply,
     parse_allowed_user_keys,

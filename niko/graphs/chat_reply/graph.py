@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 import sys
@@ -6,8 +6,8 @@ import threading
 import time
 from typing import Callable
 
-import graphs.chat_reply.prompts as prompts
-from graphs.chat_reply.router import (
+import niko.graphs.chat_reply.prompts as prompts
+from niko.graphs.chat_reply.router import (
     ROUTE_BUSY_REPLY,
     ROUTE_DELAYED_DEEP_AGENT,
     ROUTE_FAST_AGENT,

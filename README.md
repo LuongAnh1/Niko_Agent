@@ -1,21 +1,19 @@
-﻿# Niko Agent
+# Niko Agent
 
 ![Niko Agent logo](assets/niko-logo.png)
 
-Niko Agent dung Claude CLI (`fcc-claude`) thay cho viec goi API LLM truc tiep. Bot Telegram chi la gateway; workflow tra loi chat nam trong `graphs/chat_reply/`, con `niko/` giu phan runtime goi Claude CLI va hook/persona.
+Niko Agent dung Claude CLI (`fcc-claude`) thay cho viec goi API LLM truc tiep. Bot Telegram chi la gateway; workflow tra loi chat nam trong `niko/graphs/chat_reply/`, con `niko/runtime.py` giu phan goi Claude CLI va hook/persona.
 
 ## Cau Truc
 
 ```text
-graphs/chat_reply/    # Chat reply graph: route, fast triage, deep handoff, final compose
-niko/runtime.py       # Claude CLI runtime, prompt hook, command config, deep call
-niko/agent.py         # Compatibility facade cho import cu
-niko/agent_router.py  # Compatibility shim cho router cu
-niko/.env.example     # Cau hinh rieng cua Niko runtime/agent
-niko/.runtime/        # Vung chay tam cua Niko, khong commit
-niko/HOOK.md          # Persona/hook nap vao Niko
-bots/telegram/        # Telegram gateway: polling, mention, /id, sticker, gui/nhan tin
-stickers/ducks.json   # Mapping mood cho sticker Duck
+niko/runtime.py              # Claude CLI runtime, prompt hook, command config, deep call
+niko/graphs/chat_reply/      # Chat reply graph: route, fast triage, deep handoff, final compose
+niko/.env.example            # Cau hinh rieng cua Niko runtime/agent
+niko/.runtime/               # Vung chay tam cua Niko, khong commit
+niko/HOOK.md                 # Persona/hook nap vao Niko
+bots/telegram/               # Telegram gateway: polling, mention, /id, sticker, gui/nhan tin
+stickers/ducks.json          # Mapping mood cho sticker Duck
 ```
 
 ## Chay Local
@@ -77,7 +75,7 @@ Thu tu load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Bien moi tr
 Bat `NIKO_AGENT_MODE=two_agent` de tach vai tro:
 
 ```text
-Telegram gateway -> graphs/chat_reply -> Niko Fast / Niko Deep -> graphs/chat_reply -> Telegram gateway
+Telegram gateway -> niko.graphs.chat_reply -> Niko Fast / Niko Deep -> niko.graphs.chat_reply -> Telegram gateway
 ```
 
 Niko Fast la mat giao tiep nhanh va lop triage cho cac cau hoi khong chac. Neu Fast thay co the tra loi ngay, Fast tra loi truc tiep. Neu Fast thay can phan tich, can tool/memory/tai lieu, hoac khong chac, Niko Deep chay background; Fast gui cau bao doi/bao ban trong luc cho.

@@ -1,7 +1,6 @@
-﻿import unittest
+import unittest
 
-from graphs.chat_reply import router as graph_router
-from graphs.chat_reply.router import (
+from niko.graphs.chat_reply.router import (
     ROUTE_BUSY_REPLY,
     ROUTE_DEEP_AGENT,
     ROUTE_DELAYED_DEEP_AGENT,
@@ -13,10 +12,6 @@ from graphs.chat_reply.router import (
 
 
 class AgentRouterTests(unittest.TestCase):
-    def test_legacy_router_shim_exports_graph_router(self):
-        from niko import agent_router as legacy_router
-
-        self.assertIs(legacy_router.decide_agent_route, graph_router.decide_agent_route)
 
     def test_active_deep_job_returns_busy_reply(self):
         route = decide_agent_route("anh xem giup em tiep", deep_job_active=True)

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import subprocess
 import tempfile
 import time
@@ -13,8 +13,8 @@ from bots.telegram.bot import (
     maybe_send_sticker,
 )
 from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
-from graphs.chat_reply import ChatReplyGraph, DeepAgentJob
-from graphs.chat_reply.prompts import (
+from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
+from niko.graphs.chat_reply.prompts import (
     FAST_AGENT_TASK_BUSY,
     FAST_AGENT_TASK_FINAL,
     FAST_AGENT_TASK_TRIAGE,
@@ -26,18 +26,13 @@ from graphs.chat_reply.prompts import (
     sanitize_tool_like_answer,
     uncertain_delay_seconds,
 )
-from graphs.chat_reply.router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
+from niko.graphs.chat_reply.router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
 from niko.runtime import build_niko_prompt, deep_agent_command, run_cli
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.config import load_env_files
 
 
 class TelegramPromptTests(unittest.TestCase):
-    def test_niko_agent_shim_exports_chat_reply_graph(self):
-        from niko.agent import NikoAgent
-
-        self.assertIs(NikoAgent, ChatReplyGraph)
-
     def test_group_sticker_without_mention_is_ignored(self):
         message = {
             "sticker": {"file_id": "duck"},
@@ -131,7 +126,7 @@ class TelegramPromptTests(unittest.TestCase):
             {"NIKO_FAST_AGENT_COMMAND": "fast -p", "NIKO_REPLY_SUFFIX": "Meow"},
             clear=False,
         ), patch("niko.runtime.call_deep_agent", return_value="DEEP RAW"), patch(
-            "graphs.chat_reply.prompts.call_fast_agent", return_value="FAST FINAL"
+            "niko.graphs.chat_reply.prompts.call_fast_agent", return_value="FAST FINAL"
         ) as fast_agent:
             agent.run_deep_agent_job("456", "phan tich giup anh", message, delivered.append)
 
@@ -161,7 +156,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "NIKO_REPLY_SUFFIX": "Meow",
             },
             clear=False,
-        ), patch("graphs.chat_reply.prompts.call_fast_agent", return_value="FAST BUSY") as fast_agent:
+        ), patch("niko.graphs.chat_reply.prompts.call_fast_agent", return_value="FAST BUSY") as fast_agent:
             route = agent.handle_message("them thong tin", message, delivered.append)
 
         self.assertEqual(route, ROUTE_BUSY_REPLY)
@@ -234,7 +229,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "graphs.chat_reply.prompts.call_fast_agent",
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
             return_value='{\"route\":\"reply_now\",\"reply\":\"Da em tra loi nhanh duoc anh.\"}',
         ) as fast_agent, patch.object(
             agent,
@@ -269,7 +264,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "graphs.chat_reply.prompts.call_fast_agent",
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
             return_value='{\"route\":\"send_to_deep\",\"reply\":\"Da anh doi em chut\"}',
         ) as fast_agent, patch.object(
             agent,
@@ -304,7 +299,7 @@ class TelegramPromptTests(unittest.TestCase):
             },
             clear=True,
         ), patch(
-            "graphs.chat_reply.prompts.call_fast_agent",
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
             side_effect=["khong phai json", "FAST WAIT"],
         ) as fast_agent, patch.object(
             agent,

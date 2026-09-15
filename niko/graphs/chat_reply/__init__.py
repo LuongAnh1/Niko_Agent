@@ -1,4 +1,4 @@
-﻿from graphs.chat_reply.graph import (
+from niko.graphs.chat_reply.graph import (
     AGENT_MODE_SINGLE,
     AGENT_MODE_TWO_AGENT,
     ChatReplyGraph,
@@ -7,7 +7,7 @@
     ReplyCallback,
     two_agent_mode_enabled,
 )
-from graphs.chat_reply.router import (
+from niko.graphs.chat_reply.router import (
     AgentRoute,
     ROUTE_BUSY_REPLY,
     ROUTE_DEEP_AGENT,
