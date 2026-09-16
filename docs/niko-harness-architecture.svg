@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" refX="9" viewBox="0 0 10 10" orient="auto-start-reverse" markerWidth="8" refY="5" markerHeight="8">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" />
+    </marker>
+    <marker id="arrowBlue" refX="9" viewBox="0 0 10 10" orient="auto-start-reverse" markerWidth="8" refY="5" markerHeight="8">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+    </marker>
+    <filter y="-10%" width="120%" id="shadow" height="120%" x="-10%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12" />
+    </filter>
+    <style>.bg{fill:#f8fafc}.panel{fill:#fff;stroke:#cbd5e1;stroke-width:2;filter:url(#shadow)}.panel-title{font-family:Arial,sans-serif;font-size:26px;font-weight:700;fill:#0f172a}.section-title{font-family:Arial,sans-serif;font-size:18px;font-weight:700;fill:#334155}.label{font-family:Arial,sans-serif;font-size:17px;font-weight:700;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:13px;font-weight:500;fill:#475569}.tiny{font-family:Arial,sans-serif;font-size:12px;font-weight:500;fill:#64748b}.box{fill:#fff;stroke:#94a3b8;stroke-width:2}.blue{fill:#eff6ff;stroke:#3b82f6}.green{fill:#ecfdf5;stroke:#10b981}.orange{fill:#fff7ed;stroke:#f97316}.purple{fill:#f5f3ff;stroke:#8b5cf6}.rose{fill:#fff1f2;stroke:#f43f5e}.slate{fill:#f1f5f9;stroke:#64748b}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.arrow-blue{stroke:#2563eb;stroke-width:2.5;fill:none;marker-end:url(#arrowBlue)}.dash{stroke-dasharray:9 7}</style>
+  </defs>
+  <rect rx="0" class="bg" width="1600" y="0" x="0" height="900" />
+  <text y="58" class="panel-title" x="64">Niko Harness Architecture</text>
+  <text y="86" class="small" x="64">General framework for channels, business graphs, agent runs, shared services, and Eval/Ops feedback.</text>
+  <rect rx="24" class="panel" width="1048" y="120" x="42" height="610" />
+  <text y="160" class="section-title" x="70">Runtime Path: request -&gt; route use case -&gt; run graph -&gt; send response</text>
+  <rect rx="14" class="box blue" width="170" y="200" x="70" height="165" />
+  <text y="232" class="label" x="95">Channels</text>
+  <text y="266" class="small" x="95">Telegram</text>
+  <text y="292" class="small" x="95">Zalo</text>
+  <text y="318" class="small" x="95">Web / API</text>
+  <text y="344" class="tiny" x="95">Users enter from many ports</text>
+  <rect rx="14" class="box green" width="210" y="200" x="310" height="165" />
+  <text y="232" class="label" x="335">Gateway / Adapter</text>
+  <text y="266" class="small" x="335">parse message</text>
+  <text y="292" class="small" x="335">auth / mention</text>
+  <text y="318" class="small" x="335">normalize input</text>
+  <text y="344" class="tiny" x="335">Does not choose the LLM</text>
+  <rect rx="14" class="box orange" width="225" y="200" x="590" height="165" />
+  <text y="232" class="label" x="615">Use-case Router</text>
+  <text y="266" class="small" x="615">select business flow</text>
+  <text y="292" class="small" x="615">graph registry</text>
+  <text y="318" class="small" x="615">graph versioning</text>
+  <text y="344" class="tiny" x="615">Chat, QA, task, code...</text>
+  <rect rx="14" class="box blue" width="180" y="200" x="875" height="165" />
+  <text y="232" class="label" x="900">Response Adapter</text>
+  <text y="266" class="small" x="900">format reply</text>
+  <text y="292" class="small" x="900">mention user</text>
+  <text y="318" class="small" x="900">send sticker/file</text>
+  <text y="344" class="tiny" x="900">Return to correct channel</text>
+  <path d="M240 282 H305" class="arrow" />
+  <path d="M520 282 H585" class="arrow" />
+  <path d="M815 282 H870" class="arrow" />
+  <rect rx="20" class="box purple" width="820" y="420" x="150" height="250" />
+  <text y="456" class="label" x="180">Graph Runtime / Orchestrator</text>
+  <text y="484" class="small" x="180">Runs graphs, calls subgraphs, manages short-lived state, timeout, retry, background jobs, and approvals.</text>
+  <rect rx="12" class="box" width="210" y="520" x="185" height="105" />
+  <text y="550" class="label" x="205">Chat Reply Graph</text>
+  <text y="578" class="small" x="205">Fast triage</text>
+  <text y="603" class="small" x="205">Deep answer</text>
+  <rect rx="12" class="box" width="210" y="520" x="430" height="105" />
+  <text y="550" class="label" x="450">Document QA Graph</text>
+  <text y="578" class="small" x="450">retrieve docs</text>
+  <text y="603" class="small" x="450">answer with citation</text>
+  <rect rx="12" class="box" width="245" y="520" x="675" height="105" />
+  <text y="550" class="label" x="695">Task Automation Graph</text>
+  <text y="578" class="small" x="695">plan</text>
+  <text y="603" class="small" x="695">tool execute + verify</text>
+  <path d="M702 365 V417" class="arrow" />
+  <path d="M965 365 C965 395 970 400 970 430 V500" class="arrow" />
+  <rect rx="22" class="panel" width="1048" y="760" x="42" height="98" />
+  <text y="792" class="section-title" x="70">Shared Services used by every graph</text>
+  <rect rx="10" class="box slate" width="175" y="810" x="70" height="35" />
+  <text y="833" class="small" x="90">Model Runtime</text>
+  <rect rx="10" class="box slate" width="150" y="810" x="270" height="35" />
+  <text y="833" class="small" x="292">Tool Runtime</text>
+  <rect rx="10" class="box slate" width="150" y="810" x="445" height="35" />
+  <text y="833" class="small" x="472">Memory Layer</text>
+  <rect rx="10" class="box slate" width="150" y="810" x="620" height="35" />
+  <text y="833" class="small" x="652">RAG / KB</text>
+  <rect rx="10" class="box slate" width="240" y="810" x="795" height="35" />
+  <text y="833" class="small" x="818">Observability / Trace Store</text>
+  <path d="M560 670 V758" class="arrow dash" />
+  <rect rx="24" class="panel" width="405" y="120" x="1135" height="335" />
+  <text y="160" class="section-title" x="1165">Agent Run Anatomy</text>
+  <text y="188" class="small" x="1165">A node inside a graph may be one short-lived agent run.</text>
+  <rect rx="12" class="box green" width="145" y="220" x="1165" height="58" />
+  <text y="255" class="small" x="1188">Input + Context</text>
+  <rect rx="12" class="box orange" width="145" y="220" x="1360" height="58" />
+  <text y="255" class="small" x="1387">LLM Agent</text>
+  <rect rx="12" class="box purple" width="160" y="325" x="1262" height="58" />
+  <text y="360" class="small" x="1290">Tool / Memory</text>
+  <path d="M1310 249 H1355" class="arrow" />
+  <path d="M1432 278 C1432 315 1415 325 1390 325" class="arrow" />
+  <path d="M1262 354 C1210 354 1205 300 1235 282" class="arrow" />
+  <rect rx="24" class="panel" width="405" y="500" x="1135" height="358" />
+  <text y="540" class="section-title" x="1165">Eval / LLMOps Feedback Loop</text>
+  <rect rx="12" class="box rose" width="145" y="575" x="1165" height="72" />
+  <text y="605" class="label" x="1193">Trace</text>
+  <text y="630" class="tiny" x="1185">input, output, tool, latency</text>
+  <rect rx="12" class="box rose" width="145" y="575" x="1360" height="72" />
+  <text y="605" class="label" x="1392">Eval</text>
+  <text y="630" class="tiny" x="1384">judge, regression</text>
+  <rect rx="12" class="box rose" width="145" y="700" x="1165" height="72" />
+  <text y="730" class="label" x="1182">Diagnose</text>
+  <text y="755" class="tiny" x="1184">why broken?</text>
+  <rect rx="12" class="box rose" width="145" y="700" x="1360" height="72" />
+  <text y="730" class="label" x="1386">Improve</text>
+  <text y="755" class="tiny" x="1377">prompt, graph, model</text>
+  <path d="M1310 611 H1355" class="arrow-blue" />
+  <path d="M1432 647 V695" class="arrow-blue" />
+  <path d="M1360 736 H1315" class="arrow-blue" />
+  <path d="M1238 700 V652" class="arrow-blue" />
+  <path d="M1135 625 C1000 625 1015 520 920 520" class="arrow-blue dash" />
+  <path d="M1360 772 C1230 835 1095 725 815 365" class="arrow-blue dash" />
+  <text y="604" class="tiny" x="1010">every run emits trace</text>
+  <text y="705" class="tiny" x="1016">eval does not patch runtime directly</text>
+  <text y="724" class="tiny" x="1016">it creates controlled changes</text>
+  <text y="884" class="tiny" x="64">Read it as: Harness is the platform; Graph is a business workflow; Agent Run is a short-lived node inside a graph.</text>
+</svg>
