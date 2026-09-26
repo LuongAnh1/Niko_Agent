@@ -1,6 +1,6 @@
 # Luồng Xử Lý Chat Telegram
 
-Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Kiến trúc đang chạy theo hướng hai agent: Niko Fast để phản hồi nhanh/triage, Niko Deep để xử lý việc cần suy nghĩ kỹ hơn.
+Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; phần route, memory, trace và deep job nằm trong `ChatReplyGraph`.
 
 ## Thành Phần
 
@@ -8,38 +8,40 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 - `niko.chat_gateway`: chuẩn hóa message Telegram thành `ChatGatewayMessage`.
 - `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối flow chat.
 - `niko.graphs.chat_reply.router`: rule router local/deep/fast/busy.
-- `niko.graphs.chat_reply.prompts`: prompt task cho Niko Fast.
-- `niko.runtime`: gọi Claude CLI cho Fast/Deep thông qua env command.
+- `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
+- `niko.runtime`: gọi Claude CLI cho Deep agent và inject memory context.
+- `niko.harness.trace`: ghi JSONL trace.
+- `niko.memory`: lưu chat log, semantic facts, episodic events.
 
-## Luồng Gateway Telegram
+## Gateway Telegram
 
-`bots/telegram/bot.py` chỉ làm cổng vào/ra:
+`bots/telegram/bot.py` xử lý các việc liên quan Telegram:
 
-1. Long polling Telegram bằng `getUpdates`.
+1. Long polling bằng `getUpdates`.
 2. Lấy `message` từ update.
-3. Convert sang `ChatGatewayMessage` bằng `telegram_message_to_gateway`.
-4. Nếu là `/id` hoặc `/whoami` đúng cho bot hiện tại thì trả identity ngay, không cần tag bot trong group.
-5. Nếu là group và `TELEGRAM_GROUP_MODE=mentions`, chỉ xử lý message có tag `@TenBot`.
+3. Convert sang `ChatGatewayMessage`.
+4. Nếu là `/id` hoặc `/whoami` đúng bot hiện tại thì trả identity ngay.
+5. Nếu là group và `TELEGRAM_GROUP_MODE=mentions`, chỉ xử lý message có tag bot.
 6. Kiểm tra `TELEGRAM_ALLOWED_CHAT_IDS` và `CHAT_ALLOWED_USER_KEYS`.
 7. Tạo callback `deliver_reply` và `notify_working`.
-8. Gọi `CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)`.
-9. Khi graph trả lời, gateway gửi message, mention người gọi nếu bật `TELEGRAM_MENTION_REPLIES=1`, và có thể gửi sticker Duck nếu bật sticker.
+8. Gọi `CHAT_REPLY_GRAPH.handle_message(...)`.
+9. Khi graph trả lời, gateway gửi message và có thể gửi sticker nền nếu bật sticker.
 
-Gateway không quyết định dùng Fast hay Deep. Quyết định đó nằm trong `ChatReplyGraph`.
+Gateway không quyết định dùng local/Fast/Deep. Nó cũng không retrieve memory.
 
 ## Chế Độ Single Agent
 
-Nếu `NIKO_AGENT_MODE=single`, flow rất ngắn:
+Nếu `NIKO_AGENT_MODE=single`:
 
 ```text
-Telegram -> ChatReplyGraph -> Niko Deep -> Telegram
+Telegram -> ChatReplyGraph -> Deep Agent -> Telegram
 ```
 
-Graph gọi `runtime.call_deep_agent(...)` đồng bộ, gắn suffix bằng `NIKO_REPLY_SUFFIX`, rồi callback về Telegram.
+Graph gọi `runtime.call_deep_agent(...)` đồng bộ. Runtime nạp hook, identity context và memory context nếu bật.
 
 ## Chế Độ Two Agent
 
-Nếu `NIKO_AGENT_MODE=two_agent`, flow hiện tại:
+Nếu `NIKO_AGENT_MODE=two_agent`:
 
 ```text
 Telegram message
@@ -50,27 +52,32 @@ Telegram message
   -> Telegram reply
 ```
 
-`ChatReplyGraph` tính `conversation_id` theo `chat_id` nếu có, fallback về `user_key`. Mỗi conversation chỉ có một Deep job đang chạy tại một thời điểm.
+`conversation_id` ưu tiên `chat_id`, fallback về `user_key`. Mỗi conversation chỉ có một Deep job active tại một thời điểm.
 
 ## Route Hiện Tại
 
-Router trả về một trong các route sau:
+- `local_reply`: câu rất ngắn có thể trả lời bằng rule local, ví dụ chào, cảm ơn, ping.
+- `fast_agent`: vùng xám khi có Fast Agent; Fast quyết định `reply_now` hoặc `send_to_deep`.
+- `deep_agent`: câu cần xử lý sâu, ví dụ có keyword `phân tích`, `thiết kế`, `debug`, `memory`, `fact`, `tool`, `github`, prompt dài, newline hoặc backtick.
+- `busy_reply`: conversation đang có Deep job active.
+- `delayed_deep_agent`: vùng xám nhưng không có Fast Agent; delay rồi đẩy Deep.
 
-- `busy_reply`: đang có Deep job active trong cùng conversation.
-- `local_reply`: tin ngắn có thể trả lời bằng rule local, ví dụ chào, cảm ơn, ping, praise.
-- `deep_agent`: prompt có keyword/format cần xử lý sâu, ví dụ `phân tích`, `thiết kế`, `debug`, `viết code`, `memory`, `tool`, `mcp`, `telegram`, `github`, prompt dài, có newline hoặc backtick.
-- `fast_agent`: vùng xám khi có `NIKO_FAST_AGENT_COMMAND`; Fast Agent triage xem trả lời ngay hay đẩy Deep.
-- `delayed_deep_agent`: vùng xám nhưng không có Fast Agent; đợi `NIKO_UNCERTAIN_DELAY_SECONDS` rồi đẩy Deep.
+Trên dashboard:
 
-## Vai Trò Của Niko Fast
+- `local_reply` đi tuyến `Gateway -> Router -> Reply`.
+- `fast_agent` với `reply_now` đi tuyến `Gateway -> Router -> Fast Agent -> Reply`.
+- `deep_agent` đi tuyến `Gateway -> Router -> Memory Gate -> Loop/Deep -> Reply`.
+- `busy_reply` đi tuyến `Gateway -> Router -> Reply`.
 
-Niko Fast dùng command trong `NIKO_FAST_AGENT_COMMAND`, nên nên chọn model nhẹ và nhanh. Fast có các task:
+## Vai Trò Của Fast Agent
 
-- `triage`: phân loại JSON, không nạp `HOOK.md`, không thêm `Meow`.
-- `reply`: trả lời trực tiếp cho local route nếu có Fast command.
-- `wait`: báo người dùng đợi khi Deep vừa bắt đầu.
-- `busy`: báo người dùng Deep vẫn đang xử lý câu trước.
-- `final`: biến output nội bộ của Deep thành câu trả lời tự nhiên cho người dùng.
+Fast Agent dùng `NIKO_FAST_AGENT_COMMAND`. Fast nên dùng model nhẹ/nhanh và có các task:
+
+- `triage`: phân loại JSON, không nạp hook, không thêm suffix.
+- `reply`: trả lời cho local/fast reply nếu cần.
+- `wait`: hiện không còn là logic chính cho wait; graph có fallback wait text.
+- `busy`: báo Deep đang xử lý câu trước.
+- `final`: compose output Deep thành câu trả lời tự nhiên.
 - `error`: báo lỗi gọn nếu Deep lỗi.
 
 Fast triage chỉ hợp lệ khi trả JSON:
@@ -82,38 +89,65 @@ Fast triage chỉ hợp lệ khi trả JSON:
 hoặc:
 
 ```json
-{"route":"send_to_deep","reply":"Dạ anh đợi em chút, câu này em chuyển Niko Deep xử lý rồi báo lại anh ngay."}
+{"route":"send_to_deep","reply":"Dạ anh đợi em chút, câu này cần thêm thời gian xử lý."}
 ```
 
 Nếu Fast triage lỗi JSON hoặc route không hợp lệ, graph fallback sang Deep.
 
-## Vai Trò Của Niko Deep
+## Vai Trò Của Deep Agent
 
-Niko Deep dùng `CLAUDE_DEEP_AGENT_COMMAND`. Nếu biến này để trống, runtime fallback về `CLAUDE_CLI_COMMAND`.
+Deep Agent dùng `CLAUDE_DEEP_AGENT_COMMAND`. Nếu biến này để trống, runtime fallback về `CLAUDE_CLI_COMMAND`.
 
-Deep chạy background thread khi route cần xử lý sâu. Trong lúc Deep chạy:
+Deep chạy background thread khi route cần xử lý sâu:
 
-- Bot đã gửi wait reply cho người dùng.
-- Nếu người dùng nhắn thêm trong cùng conversation, graph trả `busy_reply`.
-- Tin nhắn thêm sẽ được lưu vào `DeepAgentJob.followups`.
-- Khi Deep xong, task `final` của Fast sẽ nhận câu hỏi gốc, output của Deep, và các followup gần nhất để compose câu trả lời cuối.
+1. Graph reserve deep job.
+2. Graph gửi wait reply trước rồi mới start thread để tránh đảo thứ tự Telegram.
+3. Runtime retrieve memory context.
+4. Runtime build prompt với hook, identity context và memory context.
+5. Runtime gọi `fcc-claude`.
+6. Kết quả Deep được đưa qua Fast `final` nếu có Fast command.
+7. Graph gửi final reply.
+8. Graph ghi `chat_log`, `episodes`, trace events.
 
-## Hook Và Prompt
+Nếu người dùng nhắn thêm khi Deep đang chạy, graph trả `busy_reply` và lưu followup vào `DeepAgentJob.followups`.
 
-`niko/HOOK.md` được nạp qua `NIKO_PROMPT_HOOK_FILE`.
+## Memory Trong Flow
 
-Hiện tại hook được nạp cho:
+Fast triage không nhận memory context để tránh làm hỏng JSON.
 
-- Deep Agent.
-- Fast task `reply`.
-- Fast task `wait`.
-- Fast task `busy`.
-- Fast task `final`.
-- Fast task `error`.
+Deep agent nhận memory context khi:
 
-Hook không nạp cho Fast task `triage`, vì triage cần JSON sạch.
+- `NIKO_MEMORY_ENABLED=1`
+- `NIKO_MEMORY_RETRIEVAL_ENABLED=1`
 
-Identity context được chèn nếu `CHAT_IDENTITY_ENABLED=1`. Context này chỉ nói bot biết người đang chat là ai, không phải memory dài hạn.
+Retrieval hiện tại:
+
+- Nếu hỏi kiểu “có fact nào”, store có thể list/search facts.
+- Các câu thường dùng `search_facts` và `search_episodes`.
+- Context được format thành block `Semantic memory / facts` và `Episodic memory / events`.
+
+Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
+
+## Trace Events Chính
+
+Mỗi turn có thể có các event:
+
+- `turn_start`
+- `route_decision`
+- `fast_triage_started`
+- `fast_triage_finished`
+- `deep_job_queued`
+- `deep_job_started`
+- `memory_retrieval`
+- `deep_agent_call_started`
+- `deep_agent_call_finished`
+- `wait_reply_delivered`
+- `memory_write_chat_log`
+- `memory_write_episode`
+- `turn_end`
+- `reply_delivery_error`
+
+Dashboard đọc các event này để hiển thị live harness graph và trace tail.
 
 ## Luồng Chi Tiết
 
@@ -125,56 +159,62 @@ User Telegram message
      -> group mention filter
      -> chat/user auth
      -> ChatReplyGraph.handle_message
+        -> write turn_start + incoming chat log
+        -> decide route
 
-ChatReplyGraph
-  -> single mode?
-     -> Deep sync -> reply
-  -> two_agent mode
-     -> active Deep job?
-        -> busy_reply -> Fast busy or fallback busy text
-     -> local rule?
-        -> local_reply -> Fast reply or fallback local text
-     -> deep keyword?
-        -> deep_agent -> start Deep background -> Fast wait or fallback wait text
-     -> Fast available?
-        -> fast_agent -> Fast triage
-           -> reply_now -> reply immediately
-           -> send_to_deep -> start Deep background -> wait reply
-           -> invalid -> fallback Deep background
-     -> no Fast
-        -> delayed_deep_agent -> delay -> Deep background
+Route:
+  local_reply
+    -> reply immediately
 
-Deep background
-  -> runtime.call_deep_agent
-  -> prompts.compose_deep_answer_for_user
-     -> Fast final if available
-     -> fallback raw Deep answer
-  -> deliver reply through Telegram gateway
+  fast_agent
+    -> Fast triage
+       -> reply_now
+          -> reply immediately
+       -> send_to_deep
+          -> wait reply
+          -> Deep background
+
+  deep_agent / delayed_deep_agent
+    -> wait reply
+    -> Deep background
+
+  busy_reply
+    -> add followup
+    -> reply busy
+
+Deep background:
+  -> retrieve memory context
+  -> call fcc-claude
+  -> Fast final compose if available
+  -> final reply
+  -> write episode
+  -> turn_end
 ```
 
 ## Giới Hạn Hiện Tại
 
-- Chưa có Working Memory riêng.
-- Chưa có RAG/tài liệu cố định.
-- Chưa có Tool Router.
-- Chưa có busy triage: khi Deep đang chạy, tin mới trong cùng conversation hiện được xem là followup và trả busy reply.
-- Claude CLI chạy trong `CLAUDE_WORKDIR`, hiện là `niko/.runtime/claude_sandbox`, để hạn chế việc CLI tự nhìn thẳng vào toàn bộ repo.
+- Tool router chưa hoàn chỉnh.
+- Loop mới là khung/slot trên dashboard, chưa phải multi-step planner thực thụ.
+- Semantic facts chủ yếu thêm thủ công.
+- Episodic memory mới tóm tắt deep job.
+- Retrieval còn dựa trên text search, chưa có embedding/rerank/Knowledge Graph.
 
 ## Test Liên Quan
 
-Chạy:
-
 ```bash
-rtk python -X utf8 -m unittest discover
+python -m unittest discover
 ```
 
 Scenario chính đang được test:
 
-- Sticker/reply trong group không tag bot thì bị bỏ qua.
+- Group message không tag bot thì bị bỏ qua.
 - `/id` trong group không cần tag vẫn trả identity.
 - Keyword deep đi Deep.
 - Vùng xám gọi Fast triage.
 - Fast `reply_now` không mở Deep.
 - Fast `send_to_deep` mở Deep background và gửi wait reply.
+- Wait reply được gửi trước khi thread Deep start.
 - Deep xong đi qua Fast final compose.
 - Deep đang bận thì đi `busy_reply`.
+- Deep prompt có thể nhận memory context từ SQLite.
+- Deep job hoàn tất ghi chat log, episodic memory và trace JSONL.
