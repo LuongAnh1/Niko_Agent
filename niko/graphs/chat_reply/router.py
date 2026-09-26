@@ -20,6 +20,7 @@ class AgentRoute:
 
 ACK_VALUES = {"ok", "oke", "okay", "umk", "uk", "uh", "uhm", "vang", "da"}
 GREETING_KEYWORDS = ("chao", "hello", "hi", "alo", "em oi", "niko oi")
+MAX_LOCAL_GREETING_WORDS = 5
 THANKS_KEYWORDS = ("cam on", "thanks", "thank you", "thank")
 PRAISE_KEYWORDS = (
     "tot lam",
@@ -45,6 +46,17 @@ DEEP_KEYWORDS = (
     "trien khai",
     "cau hinh",
     "memory",
+    "mem",
+    "bo nho",
+    "nho",
+    "semantic",
+    "episodic",
+    "fact",
+    "facts",
+    "su that",
+    "biet gi ve",
+    "lan truoc",
+    "hom truoc",
     "tool",
     "mcp",
     "api",
@@ -95,7 +107,11 @@ def build_local_reply(normalized_prompt: str) -> str:
     if compact == "ping" or compact.startswith("ping "):
         return "D\u1ea1 em c\u00f2n \u0111\u00e2y anh."
 
-    if len(compact) <= 60 and any(contains_keyword(compact, keyword) for keyword in GREETING_KEYWORDS):
+    if (
+        len(compact) <= 60
+        and len(compact.split()) <= MAX_LOCAL_GREETING_WORDS
+        and any(contains_keyword(compact, keyword) for keyword in GREETING_KEYWORDS)
+    ):
         return "D\u1ea1 em \u0111\u00e2y anh."
 
     if len(compact) <= 90 and any(contains_keyword(compact, keyword) for keyword in THANKS_KEYWORDS):
@@ -129,13 +145,15 @@ def contains_keyword(normalized_text: str, keyword: str) -> bool:
 
 def normalize_text(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(char for char in decomposed if not unicodedata.combining(char))
+    normalized = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return normalized.replace("đ", "d")
 
 
 __all__ = [
     "ACK_VALUES",
     "DEEP_KEYWORDS",
     "GREETING_KEYWORDS",
+    "MAX_LOCAL_GREETING_WORDS",
     "PRAISE_KEYWORDS",
     "ROUTE_BUSY_REPLY",
     "ROUTE_DEEP_AGENT",

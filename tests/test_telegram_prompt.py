@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -8,18 +9,22 @@ from unittest.mock import patch
 
 from bots.telegram.bot import (
     STICKER_SET_CACHE,
+    TelegramError,
     format_reply_for_recipient,
     handle_message,
     maybe_send_sticker,
+    prepare_long_polling,
+    send_chat_action,
+    telegram_request,
 )
 from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.prompts import (
-    FAST_AGENT_TASK_BUSY,
     FAST_AGENT_TASK_FINAL,
     FAST_AGENT_TASK_TRIAGE,
-    FAST_AGENT_TASK_WAIT,
     FAST_DECISION_SEND_TO_DEEP,
+    build_deep_busy_reply,
+    build_deep_wait_reply,
     call_fast_agent,
     ensure_reply_suffix,
     parse_fast_agent_decision,
@@ -27,12 +32,36 @@ from niko.graphs.chat_reply.prompts import (
     uncertain_delay_seconds,
 )
 from niko.graphs.chat_reply.router import ROUTE_BUSY_REPLY, ROUTE_FAST_AGENT
+from niko.harness.trace import TraceLogger
+from niko.memory.store import MemoryStore
 from niko.runtime import build_niko_prompt, deep_agent_command, run_cli
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.config import load_env_files
 
 
 class TelegramPromptTests(unittest.TestCase):
+    def setUp(self):
+        self._state_dir = tempfile.TemporaryDirectory()
+        state_path = Path(self._state_dir.name)
+        self.memory_store = MemoryStore(state_path / "memory.sqlite3")
+        self.trace_logger = TraceLogger(state_path / "traces", enabled=True)
+        self._env_patch = patch.dict(
+            os.environ,
+            {
+                "NIKO_STATE_DIR": str(state_path),
+                "NIKO_MEMORY_WRITE_ENABLED": "0",
+            },
+            clear=False,
+        )
+        self._env_patch.start()
+
+    def tearDown(self):
+        self._env_patch.stop()
+        self._state_dir.cleanup()
+
+    def make_agent(self) -> ChatReplyGraph:
+        return ChatReplyGraph(memory_store=self.memory_store, trace_logger=self.trace_logger)
+
     def test_group_sticker_without_mention_is_ignored(self):
         message = {
             "sticker": {"file_id": "duck"},
@@ -89,6 +118,39 @@ class TelegramPromptTests(unittest.TestCase):
             handle_message("token", message, set(), set(), {}, "NikoBot")
 
         send_message.assert_not_called()
+
+    def test_telegram_request_converts_timeout_to_telegram_error(self):
+        with patch("bots.telegram.bot.urlopen", side_effect=TimeoutError("slow network")):
+            with self.assertRaises(TelegramError):
+                telegram_request("token", "getMe", {}, timeout_seconds=5)
+
+    def test_prepare_long_polling_warns_instead_of_crashing_after_timeout(self):
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_STARTUP_RETRIES": "1", "TELEGRAM_STARTUP_RETRY_DELAY_SECONDS": "0"},
+            clear=False,
+        ), patch(
+            "bots.telegram.bot.telegram_request",
+            side_effect=TelegramError("timeout"),
+        ) as request, patch("bots.telegram.bot.time.sleep") as sleep:
+            prepare_long_polling("token")
+
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_not_called()
+
+    def test_send_chat_action_uses_short_timeout(self):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS": "2"}, clear=False), patch(
+            "bots.telegram.bot.telegram_request"
+        ) as request:
+            send_chat_action("token", 123)
+
+        request.assert_called_once_with(
+            "token",
+            "sendChatAction",
+            {"chat_id": 123, "action": "typing"},
+            timeout_seconds=2,
+        )
+
     def test_group_mention_gets_reply_with_user_mention(self):
         message = {
             "text": "@NikoBot alo",
@@ -118,7 +180,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = ChatReplyGraph()
+        agent = self.make_agent()
         delivered = []
 
         with patch.dict(
@@ -134,7 +196,72 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_FINAL)
         self.assertEqual(fast_agent.call_args.kwargs["deep_answer"], "DEEP RAW")
 
-    def test_busy_deep_job_uses_fast_agent_and_tracks_followup(self):
+    def test_deep_agent_result_is_logged_as_episode(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        delivered = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            agent = ChatReplyGraph(memory_store=store, trace_logger=trace_logger)
+
+            with patch.dict(
+                os.environ,
+                {"NIKO_FAST_AGENT_COMMAND": "fast -p", "NIKO_REPLY_SUFFIX": "Meow", "NIKO_MEMORY_WRITE_ENABLED": "1"},
+                clear=False,
+            ), patch("niko.runtime.call_deep_agent", return_value="DEEP RAW"), patch(
+                "niko.graphs.chat_reply.prompts.call_fast_agent", return_value="FAST FINAL"
+            ):
+                agent.run_deep_agent_job("456", "phan tich giup anh", message, delivered.append)
+
+            snapshot = store.snapshot()
+
+        self.assertEqual(delivered, ["FAST FINAL\n\nMeow"])
+        self.assertEqual(snapshot["counts"]["episodes"], 1)
+        self.assertEqual(snapshot["counts"]["chat_log"], 1)
+        self.assertIn("phan tich giup anh", snapshot["episodes"][0]["summary"])
+
+    def test_deep_agent_delivery_error_does_not_generate_contradictory_error_reply(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            agent = ChatReplyGraph(memory_store=store, trace_logger=trace_logger)
+
+            def failing_delivery(_answer: str) -> None:
+                raise RuntimeError("Telegram request timeout o method sendMessage.")
+
+            with patch.dict(
+                os.environ,
+                {"NIKO_FAST_AGENT_COMMAND": "fast -p", "NIKO_REPLY_SUFFIX": "Meow", "NIKO_MEMORY_WRITE_ENABLED": "1"},
+                clear=False,
+            ), patch("niko.runtime.call_deep_agent", return_value="DEEP RAW"), patch(
+                "niko.graphs.chat_reply.prompts.call_fast_agent", return_value="FAST FINAL"
+            ) as fast_agent:
+                agent.run_deep_agent_job("456", "phan tich giup anh", message, failing_delivery)
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        self.assertEqual(snapshot["counts"]["chat_log"], 1)
+        self.assertEqual(snapshot["chat_log"][0]["content"], "FAST FINAL\n\nMeow")
+        self.assertEqual(fast_agent.call_count, 1)
+        self.assertTrue(any(event.get("kind") == "reply_delivery_error" for event in events))
+
+    def test_busy_deep_job_uses_deterministic_reply_and_tracks_followup(self):
         message = telegram_message_to_gateway(
             {
                 "text": "them thong tin",
@@ -142,7 +269,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = ChatReplyGraph()
+        agent = self.make_agent()
         conversation_id = agent.conversation_id_for(message)
         active_job = DeepAgentJob(conversation_id, message.user.key, "original prompt", time.time())
         agent.deep_jobs[conversation_id] = active_job
@@ -156,14 +283,13 @@ class TelegramPromptTests(unittest.TestCase):
                 "NIKO_REPLY_SUFFIX": "Meow",
             },
             clear=False,
-        ), patch("niko.graphs.chat_reply.prompts.call_fast_agent", return_value="FAST BUSY") as fast_agent:
+        ), patch("niko.graphs.chat_reply.prompts.call_fast_agent") as fast_agent:
             route = agent.handle_message("them thong tin", message, delivered.append)
 
         self.assertEqual(route, ROUTE_BUSY_REPLY)
-        self.assertEqual(delivered, ["FAST BUSY\n\nMeow"])
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_busy_reply(active_job))])
         self.assertEqual(active_job.followups, ["them thong tin"])
-        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_BUSY)
-        self.assertIs(fast_agent.call_args.kwargs["active_job"], active_job)
+        fast_agent.assert_not_called()
 
     def test_fast_agent_decision_parses_json_fence_and_suffix(self):
         raw_answer = (
@@ -217,7 +343,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = ChatReplyGraph()
+        agent = self.make_agent()
         delivered = []
 
         with patch.dict(
@@ -233,7 +359,7 @@ class TelegramPromptTests(unittest.TestCase):
             return_value='{\"route\":\"reply_now\",\"reply\":\"Da em tra loi nhanh duoc anh.\"}',
         ) as fast_agent, patch.object(
             agent,
-            "start_deep_agent_job",
+            "_start_deep_agent_thread",
             return_value=True,
         ) as start_deep:
             route = agent.handle_message("thoi tiet dep khong", message, delivered.append)
@@ -244,6 +370,45 @@ class TelegramPromptTests(unittest.TestCase):
         fast_agent.assert_called_once()
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_TRIAGE)
 
+    def test_fast_triage_does_not_wait_for_slow_notify_working(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "thoi tiet dep khong",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+        notify_started = threading.Event()
+        notify_release = threading.Event()
+
+        def slow_notify():
+            notify_started.set()
+            notify_release.wait(timeout=1)
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
+            return_value='{\"route\":\"reply_now\",\"reply\":\"Da em tra loi nhanh duoc anh.\"}',
+        ):
+            started_at = time.perf_counter()
+            route = agent.handle_message("thoi tiet dep khong", message, delivered.append, slow_notify)
+            elapsed = time.perf_counter() - started_at
+            notify_release.set()
+
+        self.assertTrue(notify_started.wait(timeout=1))
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(delivered, ["Da em tra loi nhanh duoc anh.\n\nMeow"])
+
     def test_fast_triage_can_handoff_to_deep(self):
         message = telegram_message_to_gateway(
             {
@@ -252,7 +417,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = ChatReplyGraph()
+        agent = self.make_agent()
         delivered = []
 
         with patch.dict(
@@ -268,7 +433,7 @@ class TelegramPromptTests(unittest.TestCase):
             return_value='{\"route\":\"send_to_deep\",\"reply\":\"Da anh doi em chut\"}',
         ) as fast_agent, patch.object(
             agent,
-            "start_deep_agent_job",
+            "_start_deep_agent_thread",
             return_value=True,
         ) as start_deep:
             route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
@@ -279,6 +444,41 @@ class TelegramPromptTests(unittest.TestCase):
         fast_agent.assert_called_once()
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_TRIAGE)
 
+    def test_deep_handoff_delivers_wait_reply_before_starting_thread(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "can phan tich giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        def assert_wait_already_delivered(*_args, **_kwargs):
+            self.assertEqual(delivered, ["Da anh doi em chut\n\nMeow"])
+
+        with patch.dict(
+            os.environ,
+            {"NIKO_REPLY_SUFFIX": "Meow"},
+            clear=False,
+        ), patch.object(
+            agent,
+            "_start_deep_agent_thread",
+            side_effect=assert_wait_already_delivered,
+        ) as start_deep:
+            agent.handoff_to_deep_agent(
+                "456",
+                "can phan tich giup anh",
+                message,
+                delivered.append,
+                wait_reply="Da anh doi em chut",
+                trace_id="trace-1",
+            )
+
+        self.assertEqual(delivered, ["Da anh doi em chut\n\nMeow"])
+        start_deep.assert_called_once()
+
     def test_invalid_fast_triage_falls_back_to_deep(self):
         message = telegram_message_to_gateway(
             {
@@ -287,7 +487,7 @@ class TelegramPromptTests(unittest.TestCase):
                 "chat": {"id": 456, "type": "private"},
             }
         )
-        agent = ChatReplyGraph()
+        agent = self.make_agent()
         delivered = []
 
         with patch.dict(
@@ -300,20 +500,20 @@ class TelegramPromptTests(unittest.TestCase):
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_fast_agent",
-            side_effect=["khong phai json", "FAST WAIT"],
+            side_effect=["khong phai json"],
         ) as fast_agent, patch.object(
             agent,
-            "start_deep_agent_job",
+            "_start_deep_agent_thread",
             return_value=True,
         ) as start_deep:
             route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
 
         self.assertEqual(route, ROUTE_FAST_AGENT)
-        self.assertEqual(delivered, ["FAST WAIT\n\nMeow"])
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
         start_deep.assert_called_once()
         self.assertEqual(
             [call.kwargs["task"] for call in fast_agent.call_args_list],
-            [FAST_AGENT_TASK_TRIAGE, FAST_AGENT_TASK_WAIT],
+            [FAST_AGENT_TASK_TRIAGE],
         )
 
     def test_group_reply_can_use_html_mention_when_username_missing(self):
@@ -519,8 +719,9 @@ class TelegramPromptTests(unittest.TestCase):
             "moods": {"happy": {"keywords": ["ok"], "emojis": [thumbs_up]}},
         }
 
-        def fake_telegram_request(token, method, payload):
+        def fake_telegram_request(token, method, payload, timeout_seconds=None):
             calls.append((method, payload))
+            self.assertEqual(timeout_seconds, 5)
             if method == "getStickerSet":
                 return {"stickers": [{"file_id": "happy-duck", "emoji": thumbs_up}]}
             return {}
