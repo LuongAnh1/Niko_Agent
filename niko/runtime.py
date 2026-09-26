@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import sys
 import subprocess
 
 from niko.chat_gateway import build_identity_context
@@ -92,6 +93,7 @@ def build_niko_prompt(
     gateway_message=None,
     include_prompt_hook: bool = True,
     prompt_label: str = "Tin nhan nguoi dung",
+    memory_context: str = "",
 ) -> str:
     hook = ""
     if include_prompt_hook:
@@ -106,6 +108,8 @@ def build_niko_prompt(
         parts.append(hook)
     if identity_context:
         parts.append(identity_context)
+    if memory_context.strip():
+        parts.append(memory_context.strip())
     if not parts:
         return user_prompt
 
@@ -124,8 +128,34 @@ def deep_agent_command() -> str:
     return os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
 
 
-def call_deep_agent(prompt: str, gateway_message) -> str:
-    deep_prompt = build_niko_prompt(prompt, gateway_message, include_prompt_hook=True)
+def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, trace_logger=None) -> str:
+    memory_context = ""
+    try:
+        from niko.harness.trace import default_trace_logger
+        from niko.memory.context import retrieve_memory_context
+
+        retrieved_memory = retrieve_memory_context(prompt, gateway_message)
+        memory_context = retrieved_memory.text
+        if trace_id:
+            logger = trace_logger or default_trace_logger()
+            logger.event(trace_id, "memory_retrieval", retrieved_memory.to_meta())
+    except Exception as exc:
+        if trace_id:
+            try:
+                from niko.harness.trace import default_trace_logger
+
+                logger = trace_logger or default_trace_logger()
+                logger.event(trace_id, "memory_retrieval_error", {"error": str(exc)})
+            except Exception:
+                pass
+        print(f"Khong nap duoc memory context: {exc}", file=sys.stderr)
+
+    deep_prompt = build_niko_prompt(
+        prompt,
+        gateway_message,
+        include_prompt_hook=True,
+        memory_context=memory_context,
+    )
     return call_claude(deep_prompt, deep_agent_command())
 
 
