@@ -2,46 +2,69 @@
 
 ![Niko Agent logo](assets/niko-logo.png)
 
-Niko Agent dùng Claude CLI (`fcc-claude`) thay cho việc gọi API LLM trực tiếp. Bot Telegram chỉ là gateway; workflow trả lời chat nằm trong `niko/graphs/chat_reply/`, còn `niko/runtime.py` giữ phần gọi Claude CLI và hook/persona.
+Niko Agent là một AI agent harness chạy local. Repo này tập trung vào việc có một hệ thống chạy thật để quan sát luồng agent, ghi trace, lưu memory cơ bản, rồi dùng baseline đó làm nền cho hướng cải tiến Semantic/Episodic Memory.
 
-## Cấu Trúc
+Điểm quan trọng: Niko không gọi trực tiếp API LLM trong code. Runtime hiện tại gọi Claude CLI/FCC qua `fcc-claude` trên máy local.
+
+## Niko Hiện Có Gì
+
+- Telegram gateway: nhận/gửi tin qua Telegram, hỗ trợ group mention, `/id`, `/whoami`, allowlist, sticker.
+- Two-agent chat flow:
+  - Fast agent: phản hồi nhanh, triage, hoặc compose câu trả lời cuối.
+  - Deep agent: xử lý tác vụ cần suy nghĩ lâu hơn qua `fcc-claude`.
+- Harness tracing: ghi JSONL event theo từng turn.
+- SQLite memory baseline:
+  - `chat_log`: lịch sử hội thoại đã xử lý.
+  - `facts`: Semantic Memory thủ công/baseline.
+  - `episodes`: Episodic Memory sinh ra sau deep job.
+- Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts.
+
+## Cấu Trúc Chính
 
 ```text
-niko/runtime.py                         # Claude CLI runtime, prompt hook, command config, deep call
-niko/graphs/chat_reply/                 # Chat reply graph: route, fast triage, deep handoff, final compose
-niko/.env.example                       # Cấu hình riêng của Niko runtime/agent
-niko/.runtime/                          # Vùng chạy tạm của Niko, không commit
-niko/HOOK.md                            # Persona/hook nạp vào Niko
-bots/telegram/                          # Telegram gateway: polling, mention, /id, sticker, gửi/nhận tin
-bots/telegram/stickers/ducks.json       # Mapping mood cho sticker Duck của Telegram
+bots/telegram/                  # Telegram gateway
+niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
+niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
+niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
+niko/harness/trace.py            # Trace JSONL
+niko/memory/store.py             # SQLite memory store
+niko/memory/context.py           # Retrieve memory context cho Deep agent
+niko/ops/dashboard.py            # Mini Niko Ops dashboard
+niko/HOOK.md                     # Persona/hook của Niko
+niko/.runtime/                   # Runtime state, không commit
+docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
 ```
 
-## Tài Liệu
+## Chạy Nhanh
 
-- `docs/architecture.md`: tổng quan kiến trúc và ranh giới module.
-- `docs/telegram-chat-flow.md`: luồng xử lý tin nhắn Telegram với hai agent.
-- `AGENTS.md`: context ngắn cho Codex khi mở phiên chat mới.
+1. Cài và cấu hình FCC/Claude CLI để lệnh `fcc-claude` chạy được.
+2. Copy các file env mẫu:
 
-## Chạy Local
+```bash
+copy .env.example .env
+copy niko\.env.example niko\.env
+copy bots\telegram\.env.example bots\telegram\.env
+```
 
-1. Tạo bot Telegram bằng [@BotFather](https://t.me/BotFather) và lấy token.
-2. Copy `.env.example` thành `.env`, điền cấu hình chung cho Claude/identity.
-3. Copy `niko/.env.example` thành `niko/.env`, điền cấu hình riêng của Niko.
-4. Copy `bots/telegram/.env.example` thành `bots/telegram/.env`, điền cấu hình Telegram.
-5. Cài và cấu hình Free Claude Code/FCC. Nếu `fcc-claude` trỏ qua FCC thì chạy `fcc-server` trước.
-6. Chạy bot:
+3. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
+4. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
+5. Chạy bot:
 
 ```bash
 python -m bots.telegram.bot
 ```
 
-## Lấy ID
+6. Chạy dashboard quan sát:
 
-Dùng `/id` trong private chat hoặc `/id@TenBot` trong group để lấy `chat_id` và `user_key`. Trong group, mặc định bot chỉ xử lý tin nhắn có tag `@TenBot`. Khi trả lời, bot sẽ mention người vừa gọi nếu `TELEGRAM_MENTION_REPLIES=1`.
+```bash
+python -m niko.ops.dashboard
+```
 
-## Env
+Dashboard mặc định: `http://127.0.0.1:7777`
 
-Root `.env` là cấu hình chung của hệ thống:
+## Cấu Hình Tối Thiểu
+
+Root `.env`:
 
 ```env
 CLAUDE_CLI_COMMAND=fcc-claude -p
@@ -53,7 +76,7 @@ CHAT_ALLOWED_USER_KEYS=
 CHAT_USER_ALIASES=telegram:123456789=Anh A
 ```
 
-`niko/.env` là cấu hình riêng của Niko:
+`niko/.env`:
 
 ```env
 NIKO_AGENT_MODE=two_agent
@@ -62,9 +85,17 @@ NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
 NIKO_UNCERTAIN_DELAY_SECONDS=3
 NIKO_PROMPT_HOOK_FILE=niko/HOOK.md
 NIKO_REPLY_SUFFIX=Meow
+NIKO_STATE_DIR=niko/.runtime
+NIKO_TRACE_ENABLED=1
+NIKO_MEMORY_ENABLED=1
+NIKO_MEMORY_RETRIEVAL_ENABLED=1
+NIKO_MEMORY_WRITE_ENABLED=1
+NIKO_MEMORY_TOP_K=4
+NIKO_OPS_HOST=127.0.0.1
+NIKO_OPS_PORT=7777
 ```
 
-`bots/telegram/.env` chỉ là cấu hình gateway Telegram:
+`bots/telegram/.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=token_cua_bot
@@ -72,28 +103,56 @@ TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
 TELEGRAM_GROUP_MODE=mentions
 TELEGRAM_MENTION_REPLIES=1
 TELEGRAM_STICKERS_ENABLED=1
+TELEGRAM_STICKER_TIMEOUT_SECONDS=5
 ```
 
 Thứ tự load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Biến môi trường thật của hệ điều hành vẫn được ưu tiên hơn file `.env`.
 
-## Hai Agent
+## Demo Baseline
 
-Bật `NIKO_AGENT_MODE=two_agent` để tách vai trò:
+Các kịch bản demo nhanh:
 
-```text
-Telegram gateway -> niko.graphs.chat_reply -> Niko Fast / Niko Deep -> niko.graphs.chat_reply -> Telegram gateway
+- Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> Router -> Reply` hoặc `Gateway -> Router -> Fast Agent -> Reply`.
+- Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
+- Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
+- Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`, `turn_end`.
+
+Chi tiết hơn xem [docs/demo-guide.md](docs/demo-guide.md).
+
+## Tài Liệu
+
+- [Kiến trúc](docs/architecture.md)
+- [Luồng chat Telegram](docs/telegram-chat-flow.md)
+- [Harness Memory & Ops](docs/niko-harness-memory-ops.md)
+- [Demo Guide](docs/demo-guide.md)
+- [Memory Roadmap](docs/memory-roadmap.md)
+
+## Ranh Giới Baseline
+
+Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại cố ý đơn giản để phục vụ demo và đo điểm yếu:
+
+- Semantic facts chủ yếu thêm thủ công qua dashboard.
+- Retrieval là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
+- Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
+- Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.
+- Lakehouse/Knowledge Graph sẽ là hướng cải tiến sau, đọc dữ liệu từ SQLite/JSONL baseline.
+
+## Test
+
+```bash
+python -m unittest discover
 ```
 
-Niko Fast là mặt giao tiếp nhanh và lớp triage cho các câu hỏi không chắc. Nếu Fast thấy có thể trả lời ngay, Fast trả lời trực tiếp. Nếu Fast thấy cần phân tích, cần tool/memory/tài liệu, hoặc không chắc, Niko Deep chạy background; Fast gửi câu báo đợi/báo bận trong lúc chờ.
+Nếu chạy qua Codex/RTK:
 
-Khi Niko Deep xử lý xong, kết quả nội bộ sẽ quay lại Niko Fast trước. Fast compose thành câu trả lời tự nhiên cho người dùng, rồi gateway mới gửi ra chat.
+```bash
+rtk python -m unittest discover
+```
 
-`NIKO_FAST_AGENT_COMMAND` nên trỏ tới model nhẹ/nhanh. Để trống thì hệ thống fallback về rule/template local cho wait/busy và gửi kết quả deep trực tiếp. Deep agent dùng `CLAUDE_DEEP_AGENT_COMMAND`; nếu để trống thì fallback về `CLAUDE_CLI_COMMAND`.
+## Ghi Chú Phát Triển
 
-## Sửa Hook
-
-Muốn đổi giọng văn thì sửa `niko/HOOK.md` và mở Pull Request. Không cần sửa script Python.
-
-## PR
-
-Tạo branch riêng, sửa hook/code, mở Pull Request vào `main`. `main` là nhánh chính, owner duyệt và merge.
+- Telegram gateway chỉ nên là cổng vào/ra, không chứa logic memory/LLM.
+- Logic điều phối nằm trong `niko/graphs/chat_reply/`.
+- Runtime gọi LLM nằm trong `niko/runtime.py`.
+- Memory/trace/dashboard là harness baseline, không nên trộn vào gateway.
+- `niko/.runtime/` là dữ liệu chạy local và không commit.

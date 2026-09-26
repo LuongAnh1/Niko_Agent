@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from html import escape as html_escape
 from pathlib import Path
@@ -28,6 +29,11 @@ GROUP_MODE_MENTIONS = "mentions"
 GROUP_MODE_ALL = "all"
 DEFAULT_TELEGRAM_MENTION_REPLIES = "1"
 DEFAULT_TELEGRAM_STICKER_CONFIG_FILE = "bots/telegram/stickers/ducks.json"
+DEFAULT_TELEGRAM_REQUEST_TIMEOUT_SECONDS = 75
+DEFAULT_TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS = 5
+DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS = 5
+DEFAULT_TELEGRAM_STARTUP_RETRIES = 2
+DEFAULT_TELEGRAM_STARTUP_RETRY_DELAY_SECONDS = 3.0
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
 CHAT_REPLY_GRAPH = ChatReplyGraph()
 
@@ -36,7 +42,56 @@ class TelegramError(RuntimeError):
     pass
 
 
-def telegram_request(token: str, method: str, payload: dict) -> dict:
+def telegram_request_timeout_seconds() -> int:
+    raw_value = os.getenv("TELEGRAM_REQUEST_TIMEOUT_SECONDS", str(DEFAULT_TELEGRAM_REQUEST_TIMEOUT_SECONDS)).strip()
+    try:
+        return max(5, int(raw_value))
+    except ValueError:
+        return DEFAULT_TELEGRAM_REQUEST_TIMEOUT_SECONDS
+
+
+def telegram_chat_action_timeout_seconds() -> int:
+    raw_value = os.getenv(
+        "TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS",
+        str(DEFAULT_TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS),
+    ).strip()
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS
+
+
+def telegram_sticker_timeout_seconds() -> int:
+    raw_value = os.getenv(
+        "TELEGRAM_STICKER_TIMEOUT_SECONDS",
+        str(DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS),
+    ).strip()
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS
+
+
+def telegram_startup_retries() -> int:
+    raw_value = os.getenv("TELEGRAM_STARTUP_RETRIES", str(DEFAULT_TELEGRAM_STARTUP_RETRIES)).strip()
+    try:
+        return max(0, int(raw_value))
+    except ValueError:
+        return DEFAULT_TELEGRAM_STARTUP_RETRIES
+
+
+def telegram_startup_retry_delay_seconds() -> float:
+    raw_value = os.getenv(
+        "TELEGRAM_STARTUP_RETRY_DELAY_SECONDS",
+        str(DEFAULT_TELEGRAM_STARTUP_RETRY_DELAY_SECONDS),
+    ).strip()
+    try:
+        return max(0.0, float(raw_value))
+    except ValueError:
+        return DEFAULT_TELEGRAM_STARTUP_RETRY_DELAY_SECONDS
+
+
+def telegram_request(token: str, method: str, payload: dict, timeout_seconds: int | None = None) -> dict:
     url = f"https://api.telegram.org/bot{token}/{method}"
     body = json.dumps(payload).encode("utf-8")
     request = Request(
@@ -47,11 +102,13 @@ def telegram_request(token: str, method: str, payload: dict) -> dict:
     )
 
     try:
-        with urlopen(request, timeout=75) as response:
+        with urlopen(request, timeout=timeout_seconds or telegram_request_timeout_seconds()) as response:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise TelegramError(f"Telegram HTTP {exc.code}: {detail}") from exc
+    except TimeoutError as exc:
+        raise TelegramError(f"Telegram request timeout o method {method}.") from exc
     except URLError as exc:
         raise TelegramError(f"Loi ket noi Telegram: {exc.reason}") from exc
 
@@ -109,7 +166,12 @@ def send_reply(token: str, chat_id: int, text: str, gateway_message) -> None:
 
 
 def send_chat_action(token: str, chat_id: int, action: str = "typing") -> None:
-    telegram_request(token, "sendChatAction", {"chat_id": chat_id, "action": action})
+    telegram_request(
+        token,
+        "sendChatAction",
+        {"chat_id": chat_id, "action": action},
+        timeout_seconds=telegram_chat_action_timeout_seconds(),
+    )
 
 
 def split_text(text: str, max_length: int) -> list[str]:
@@ -139,7 +201,28 @@ def parse_allowed_chat_ids() -> set[int]:
 
 def prepare_long_polling(token: str) -> None:
     drop_pending = os.getenv("TELEGRAM_DROP_PENDING_UPDATES", "0").strip() == "1"
-    telegram_request(token, "deleteWebhook", {"drop_pending_updates": drop_pending})
+    max_retries = telegram_startup_retries()
+    for attempt in range(max_retries + 1):
+        try:
+            telegram_request(token, "deleteWebhook", {"drop_pending_updates": drop_pending})
+            return
+        except TelegramError as exc:
+            if attempt >= max_retries:
+                print(
+                    "Canh bao: khong goi duoc deleteWebhook luc khoi dong. "
+                    f"Bot van tiep tuc long polling, loi gan nhat: {exc}",
+                    file=sys.stderr,
+                )
+                return
+
+            delay_seconds = telegram_startup_retry_delay_seconds()
+            print(
+                "Canh bao: deleteWebhook bi loi, thu lai "
+                f"{attempt + 1}/{max_retries} sau {delay_seconds:g}s: {exc}",
+                file=sys.stderr,
+            )
+            if delay_seconds > 0:
+                time.sleep(delay_seconds)
 
 
 def get_bot_username(token: str) -> str:
@@ -199,15 +282,20 @@ def load_effective_sticker_config() -> dict:
     return config
 
 
-def get_sticker_set_stickers(token: str, set_name: str) -> list[dict]:
+def get_sticker_set_stickers(token: str, set_name: str, timeout_seconds: int | None = None) -> list[dict]:
     if set_name not in STICKER_SET_CACHE:
-        result = telegram_request(token, "getStickerSet", {"name": set_name})
+        result = telegram_request(token, "getStickerSet", {"name": set_name}, timeout_seconds=timeout_seconds)
         STICKER_SET_CACHE[set_name] = result.get("stickers", [])
     return STICKER_SET_CACHE[set_name]
 
 
-def send_sticker(token: str, chat_id: int, sticker_file_id: str) -> None:
-    telegram_request(token, "sendSticker", {"chat_id": chat_id, "sticker": sticker_file_id})
+def send_sticker(token: str, chat_id: int, sticker_file_id: str, timeout_seconds: int | None = None) -> None:
+    telegram_request(
+        token,
+        "sendSticker",
+        {"chat_id": chat_id, "sticker": sticker_file_id},
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
@@ -220,17 +308,30 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
         if not set_name:
             return
 
-        stickers = get_sticker_set_stickers(token, set_name)
+        timeout_seconds = telegram_sticker_timeout_seconds()
+        stickers = get_sticker_set_stickers(token, set_name, timeout_seconds=timeout_seconds)
         sticker_file_id = choose_sticker_file_id(stickers, config, f"{user_prompt}\n{answer}")
         if sticker_file_id:
-            send_sticker(token, chat_id, sticker_file_id)
+            send_sticker(token, chat_id, sticker_file_id, timeout_seconds=timeout_seconds)
     except Exception as exc:
         print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
 
 
+def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
+    if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
+        return
+
+    thread = threading.Thread(
+        target=maybe_send_sticker,
+        args=(token, chat_id, user_prompt, answer),
+        daemon=True,
+    )
+    thread.start()
+
+
 def deliver_niko_answer(token: str, chat_id: int, prompt: str, prompt_message, answer: str) -> None:
     send_reply(token, chat_id, answer, prompt_message)
-    maybe_send_sticker(token, chat_id, prompt, answer)
+    maybe_send_sticker_async(token, chat_id, prompt, answer)
 
 
 def handle_message(
