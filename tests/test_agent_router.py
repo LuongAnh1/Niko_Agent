@@ -24,6 +24,21 @@ class AgentRouterTests(unittest.TestCase):
         self.assertEqual(route.kind, ROUTE_LOCAL_REPLY)
         self.assertTrue(route.reply)
 
+    def test_contextual_greeting_uses_fast_agent_when_available(self):
+        route = decide_agent_route("u anh chao niko nhe lau lam ko gap", fast_agent_available=True)
+
+        self.assertEqual(route.kind, ROUTE_FAST_AGENT)
+
+    def test_memory_fact_question_routes_to_deep_agent(self):
+        route = decide_agent_route("co fact nao ve ve ngoai khong?", fast_agent_available=True)
+
+        self.assertEqual(route.kind, ROUTE_DEEP_AGENT)
+
+    def test_memory_truth_question_routes_to_deep_agent(self):
+        route = decide_agent_route("co su that nao ve ve ngoai em dang luu?", fast_agent_available=True)
+
+        self.assertEqual(route.kind, ROUTE_DEEP_AGENT)
+
     def test_short_praise_returns_local_reply(self):
         route = decide_agent_route("tot lam")
 
