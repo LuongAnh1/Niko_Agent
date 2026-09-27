@@ -124,6 +124,7 @@ Chi tiết hơn xem [docs/demo-guide.md](docs/demo-guide.md).
 - [Kiến trúc](docs/architecture.md)
 - [Luồng chat Telegram](docs/telegram-chat-flow.md)
 - [Harness Memory & Ops](docs/niko-harness-memory-ops.md)
+- [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo-guide.md)
 - [Memory Roadmap](docs/memory-roadmap.md)
 
