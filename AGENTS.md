@@ -1,53 +1,200 @@
-# Niko Agent Context
+# Niko Agent Working Context
 
-This is a Python project for Niko Agent. Niko uses Claude CLI (`fcc-claude`) instead of calling an LLM API directly.
+This repo is a local Python AI agent harness for Niko Agent. Niko does not call an
+LLM API directly from the application code. The current runtime shells out to
+Claude/FCC through `fcc-claude` on the developer's machine.
 
-## Current Architecture
+When talking to the project owner, use Vietnamese, refer to yourself as "em",
+and refer to the user as "anh".
 
-- `bots/telegram/` is the Telegram gateway: polling, message parsing, auth, mention filtering, `/id`, replies, and stickers.
-- `niko/graphs/chat_reply/` is the chat business graph: route messages, call Niko Fast, hand off to Niko Deep, manage background deep jobs, and compose final replies.
-- `niko/runtime.py` is the Claude CLI runtime: read command env, load `niko/HOOK.md`, inject identity context, and resolve `CLAUDE_WORKDIR`.
-- `niko/chat_gateway.py` normalizes cross-channel identity and message data.
-- `bots/telegram/stickers/ducks.json` is the local Telegram Duck sticker picker config.
+## Current Goal Of The Repo
 
-## Important Docs
+Niko Agent is the runnable baseline for a graduation-project direction about
+agent memory. The repo should first prove that a real harness can receive a
+Telegram message, route the turn, call a local LLM runtime, record traces, store
+basic memory, and show the run in an ops dashboard.
 
-- `docs/architecture.md`: repo layout and module boundaries.
-- `docs/telegram-chat-flow.md`: Telegram message flow with the two-agent design.
-- `README.md`: short local setup and env guide.
+This repo is not the final lakehouse/knowledge-graph system yet. SQLite memory
+and JSONL traces are intentionally simple baseline data. Later work can export
+or transform them into a Semantic/Episodic Memory pipeline, lakehouse, graph
+schema, and graph mining layer.
 
-## Current Chat Flow
+## Architecture Map
 
-The Telegram gateway does not decide which LLM path to use. It converts incoming Telegram messages into `ChatGatewayMessage`, then calls:
+- `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
+  auth/allowlist, mention filtering, `/id`, `/whoami`, replies, and stickers.
+  Keep this layer thin. It should not own memory, routing, or LLM policy.
+- `niko/chat_gateway.py`: Normalizes channel-specific messages into
+  `ChatGatewayMessage` and identity context.
+- `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
+  replies, Fast/Deep handoff, background deep jobs, busy replies, followups,
+  final reply composition, memory writes, and trace events.
+- `niko/runtime.py`: Claude CLI runtime. Loads env, reads `niko/HOOK.md`,
+  injects identity/memory context, resolves `CLAUDE_WORKDIR`, and calls
+  `fcc-claude`.
+- `niko/harness/trace.py`: JSONL trace logger. Default trace path is
+  `niko/.runtime/traces/YYYY-MM-DD.jsonl`.
+- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, and
+  `episodes`. Uses FTS5 when available, with LIKE fallback.
+- `niko/memory/context.py`: Retrieves semantic/episodic memory and formats the
+  memory context injected into the Deep agent.
+- `niko/ops/dashboard.py`: Mini Niko Ops dashboard. Runs locally with stdlib
+  Python and exposes trace/memory/chat views plus simple memory APIs.
+- `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
+  prompts, except for Fast JSON triage.
+- `niko/.runtime/`: Local runtime state. Do not commit it.
+- `docs/`: Architecture, flow, memory/ops, demo, and roadmap documents.
+
+## Chat Flow
+
+The Telegram gateway converts each accepted Telegram message into
+`ChatGatewayMessage`, then calls:
 
 ```python
 from niko.graphs.chat_reply import ChatReplyGraph
 ```
 
-`ChatReplyGraph` runs either `single` or `two_agent` mode according to `NIKO_AGENT_MODE`.
+`ChatReplyGraph` runs either `single` or `two_agent` mode according to
+`NIKO_AGENT_MODE`.
 
 In `two_agent` mode:
 
-- Local rules answer simple greeting/thanks/ping/praise messages quickly.
-- Deep keywords, long prompts, newlines, or backticks go to Niko Deep.
-- Gray-zone prompts go to Niko Fast triage when `NIKO_FAST_AGENT_COMMAND` is configured.
+- Local rules answer simple greetings/thanks/ping/praise messages quickly.
+- Deep keywords, long prompts, newlines, or code blocks route to Niko Deep.
+- Gray-zone prompts can route to Niko Fast triage when
+  `NIKO_FAST_AGENT_COMMAND` is configured.
 - Fast `reply_now` replies immediately.
-- Fast `send_to_deep` starts a Deep background job and sends a wait reply.
-- When Deep finishes, its internal output goes back through the Fast `final` task to compose the final user-facing reply.
-- If Deep is already busy in the same conversation, new messages are appended to `DeepAgentJob.followups` and the bot returns `busy_reply`.
+- Fast `send_to_deep` queues a Deep background job and sends a wait reply.
+- Deep receives memory context only when memory retrieval is enabled.
+- When Deep finishes, the result can pass through Fast final composition before
+  being sent to the user.
+- If Deep is already busy in the same conversation, new messages are appended to
+  the active job followups and the bot returns `busy_reply`.
 
-## Runtime Notes
+Fast JSON triage intentionally does not receive memory context. This keeps the
+router decision output clean and easier to parse.
 
-- `CLAUDE_WORKDIR` should default to `niko/.runtime/claude_sandbox` so Claude CLI does not inspect the whole repo by default.
-- The project does not yet have a dedicated Working Memory, RAG layer, Tool Router, or Memory Layer.
-- `HOOK.md` is loaded for Deep and Fast reply/wait/busy/final/error tasks. Fast JSON triage intentionally skips the hook.
-- Do not recreate `niko/agent.py` or `niko/agent_router.py`; the active graph lives under `niko/graphs/chat_reply/`.
+## Memory Baseline
 
-## Commands
+SQLite currently stores three groups of data:
+
+- `chat_log`: operational conversation log for user/assistant messages.
+- `facts`: Semantic Memory baseline, mostly manually added facts/rules/context.
+- `episodes`: Episodic Memory baseline, mostly completed Deep jobs and followups.
+
+Important boundaries:
+
+- `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
+  operational log that can later feed analysis.
+- Semantic extraction is not mature yet. Facts are mainly added through Ops/API.
+- Episodic records are basic summaries of deep work, not rich event models yet.
+- Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
+  reasoning.
+- Tool/Loop is represented in the dashboard as an intended harness slot, but it
+  is not a complete tool router yet.
+
+## Trace And Ops Dashboard
+
+Trace events are JSONL and should make a turn observable. Typical events include
+`turn_start`, `route_decision`, `memory_retrieval`, `memory_write_chat_log`,
+`memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
+`deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
+
+Run the dashboard locally:
+
+```bash
+rtk python -m niko.ops.dashboard
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:7777
+```
+
+Dashboard graph semantics:
+
+- `Gateway -> Router -> Reply`: local or busy reply.
+- `Gateway -> Router -> Fast Agent -> Reply`: Fast reply path.
+- `Gateway -> Router -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep path.
+- `Memory Gate -> Memory Records`: retrieval from facts/episodes.
+- `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
+
+## Important Docs
+
+- `README.md`: high-level setup and baseline explanation.
+- `docs/architecture.md`: repo layout, module boundaries, and runtime state.
+- `docs/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
+- `docs/niko-harness-memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/demo-guide.md`: demo script for showing the harness to a supervisor.
+- `docs/memory-roadmap.md`: path from baseline memory to lakehouse/KG work.
+
+## Environment And State
+
+Env loading order:
+
+```text
+root .env -> niko/.env -> bots/telegram/.env -> real OS environment wins
+```
+
+Core variables:
+
+```env
+CLAUDE_CLI_COMMAND=fcc-claude -p
+CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
+CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
+NIKO_AGENT_MODE=two_agent
+NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
+NIKO_STATE_DIR=niko/.runtime
+NIKO_TRACE_ENABLED=1
+NIKO_MEMORY_ENABLED=1
+NIKO_MEMORY_RETRIEVAL_ENABLED=1
+NIKO_MEMORY_WRITE_ENABLED=1
+NIKO_MEMORY_TOP_K=4
+NIKO_OPS_HOST=127.0.0.1
+NIKO_OPS_PORT=7777
+```
+
+Do not reveal or commit secrets from `.env` files, Telegram tokens, runtime
+SQLite data, or trace contents that may contain private conversation data.
+
+## Development Commands
 
 Use `rtk` for shell commands in this workspace.
 
 ```bash
-rtk python -X utf8 -m unittest discover
+rtk python -m pytest
 rtk python -m bots.telegram.bot
+rtk python -m niko.ops.dashboard
 ```
+
+If calling PowerShell cmdlets through `rtk`, invoke PowerShell explicitly:
+
+```bash
+rtk powershell -NoProfile -Command "Get-Content -Raw -LiteralPath 'AGENTS.md'"
+```
+
+## Code Navigation
+
+This repo has a `.codegraph/` index. When trying to understand or locate code,
+use CodeGraph before broad grep/search:
+
+```bash
+rtk codegraph explore "ChatReplyGraph MemoryStore TraceLogger dashboard"
+```
+
+Use `rg`/`rg --files` for plain text search or file listing when CodeGraph is
+not relevant.
+
+## Editing Rules For Future Sessions
+
+- Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
+- Put routing/agent-loop behavior in `niko/graphs/chat_reply/`.
+- Put CLI/LLM invocation details in `niko/runtime.py`.
+- Put memory persistence/retrieval in `niko/memory/`.
+- Put observability-only behavior in `niko/harness/` or `niko/ops/`.
+- Do not recreate old entry points such as `niko/agent.py` or
+  `niko/agent_router.py`; the active graph is under `niko/graphs/chat_reply/`.
+- Keep `niko/.runtime/` out of git.
+- Prefer small, test-covered changes. Existing tests cover routing, Telegram
+  prompt behavior, memory store, trace logger, and dashboard snapshot.
