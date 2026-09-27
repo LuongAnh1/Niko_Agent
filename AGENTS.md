@@ -19,6 +19,11 @@ and JSONL traces are intentionally simple baseline data. Later work can export
 or transform them into a Semantic/Episodic Memory pipeline, lakehouse, graph
 schema, and graph mining layer.
 
+The current business direction is to keep Telegram as the conversation gateway
+and introduce Jira as a future task/business-data gateway. The important story is
+that Niko should eventually analyze real task/issue data rather than only the
+scattered text a user pastes into chat.
+
 ## Architecture Map
 
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
@@ -43,7 +48,8 @@ schema, and graph mining layer.
 - `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
   prompts, except for Fast JSON triage.
 - `niko/.runtime/`: Local runtime state. Do not commit it.
-- `docs/`: Architecture, flow, memory/ops, demo, and roadmap documents.
+- `docs/`: Architecture, flow, memory/ops, business-domain, demo, and roadmap
+  documents.
 
 ## Chat Flow
 
@@ -93,6 +99,30 @@ Important boundaries:
 - Tool/Loop is represented in the dashboard as an intended harness slot, but it
   is not a complete tool router yet.
 
+## Business Domains And Future Jira Gateway
+
+Docs under `docs/business-domains/` describe the product/business framing:
+
+- Telegram is the current real-time conversation gateway.
+- Jira is the planned task/issue gateway for Phase 2.
+- Memory upgrade work should explain why reading scattered prompt text is not
+  enough for task analysis.
+
+Expected Phase 2 story:
+
+```text
+User asks about a Jira issue key
+  -> Niko parses the issue key
+  -> Loop/tool slot fetches issue/comment/changelog/component data
+  -> context is normalized
+  -> Deep agent analyzes with evidence
+  -> trace/ops records the run
+```
+
+The issue key can come from Jira Cloud Free, a mock Jira JSON fixture, or a
+public dataset. Do not make a paid Jira subscription a requirement for the first
+demo.
+
 ## Trace And Ops Dashboard
 
 Trace events are JSONL and should make a turn observable. Typical events include
@@ -126,6 +156,8 @@ Dashboard graph semantics:
 - `docs/architecture.md`: repo layout, module boundaries, and runtime state.
 - `docs/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
 - `docs/niko-harness-memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
+  memory upgrade business context.
 - `docs/demo-guide.md`: demo script for showing the harness to a supervisor.
 - `docs/memory-roadmap.md`: path from baseline memory to lakehouse/KG work.
 
