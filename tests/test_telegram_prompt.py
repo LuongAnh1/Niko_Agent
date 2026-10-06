@@ -21,8 +21,10 @@ from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.prompts import (
     FAST_AGENT_TASK_FINAL,
+    FAST_AGENT_TASK_REPLY,
     FAST_AGENT_TASK_TRIAGE,
     FAST_DECISION_SEND_TO_DEEP,
+    FastAgentDecision,
     build_deep_busy_reply,
     build_deep_wait_reply,
     call_fast_agent,
@@ -370,6 +372,85 @@ class TelegramPromptTests(unittest.TestCase):
         fast_agent.assert_called_once()
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_TRIAGE)
 
+    def test_decision_model_reply_now_uses_fast_reply_model(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "thoi tiet dep khong",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_decision_model",
+            return_value=FastAgentDecision(
+                route="reply_now",
+                provider="ollama_nimble",
+                confidence=0.9,
+                label="reply_now",
+            ),
+        ) as decision_model, patch(
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
+            return_value="Da em tra loi nhanh duoc anh.",
+        ) as fast_agent, patch.object(
+            agent,
+            "_start_deep_agent_thread",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("thoi tiet dep khong", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, ["Da em tra loi nhanh duoc anh.\n\nMeow"])
+        start_deep.assert_not_called()
+        decision_model.assert_called_once()
+        fast_agent.assert_called_once()
+        self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_REPLY)
+
+    def test_decision_model_can_handoff_to_deep_without_fable(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "nen lam cach nao day anh nhi",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_decision_model",
+            return_value=FastAgentDecision(route="send_to_deep", provider="ollama_nimble"),
+        ) as decision_model, patch.object(
+            agent,
+            "_start_deep_agent_thread",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
+        start_deep.assert_called_once()
+        decision_model.assert_called_once()
+
     def test_fast_triage_does_not_wait_for_slow_notify_working(self):
         message = telegram_message_to_gateway(
             {
@@ -515,6 +596,40 @@ class TelegramPromptTests(unittest.TestCase):
             [call.kwargs["task"] for call in fast_agent.call_args_list],
             [FAST_AGENT_TASK_TRIAGE],
         )
+
+    def test_decision_model_error_falls_back_to_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "nen lam cach nao day anh nhi",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            },
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_decision_model",
+            side_effect=RuntimeError("ollama down"),
+        ) as decision_model, patch.object(
+            agent,
+            "_start_deep_agent_thread",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("nen lam cach nao day anh nhi", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
+        start_deep.assert_called_once()
+        decision_model.assert_called_once()
 
     def test_group_reply_can_use_html_mention_when_username_missing(self):
         message = telegram_message_to_gateway(

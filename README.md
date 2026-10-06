@@ -23,6 +23,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 
 ```text
 bots/telegram/                  # Telegram gateway
+bots/decision_model/            # Ollama/Nimble decision scripts cho fast triage
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
@@ -80,6 +81,11 @@ CHAT_USER_ALIASES=telegram:123456789=Anh A
 
 ```env
 NIKO_AGENT_MODE=two_agent
+NIKO_DECISION_MODEL_ENABLED=1
+NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
+NIKO_DECISION_MODEL_NAME=nimble
+NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
+NIKO_DECISION_MODEL_KEEP_ALIVE=-1
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
 NIKO_UNCERTAIN_DELAY_SECONDS=3
@@ -93,6 +99,12 @@ NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_TOP_K=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
+```
+
+Warm up Nimble decision model de giu model loaded den khi stop Ollama:
+
+```bash
+rtk python -m bots.decision_model.warmup
 ```
 
 `bots/telegram/.env`:
