@@ -21,7 +21,8 @@ Telegram
   -> ChatGatewayMessage
   -> ChatReplyGraph
      -> local rule
-     -> Fast Agent triage/reply/final
+     -> Ollama/Nimble decision triage
+     -> Fast Agent reply/final
      -> Deep Agent background
         -> Memory retrieval
         -> fcc-claude local runtime
@@ -49,6 +50,10 @@ Trong đó `Tool Slot` mới là vị trí dự kiến cho vòng sau, chưa ph�
 
 ```text
 bots/
+  decision_model/
+    client.py          # Ollama /v1/systemone client cho Nimble decision model
+    triage.py          # Mapping prompt Telegram sang reply_now/send_to_deep
+    warmup.py          # Giu Nimble loaded voi keep_alive=-1
   telegram/
     bot.py             # Telegram gateway: polling, auth, mention filter, /id, reply, sticker
     sticker_picker.py  # Local sticker picker cho Telegram Duck
@@ -115,6 +120,11 @@ Root `.env` giữ cấu hình chung:
 `niko/.env` giữ cấu hình agent/harness:
 
 - `NIKO_AGENT_MODE`
+- `NIKO_DECISION_MODEL_ENABLED`
+- `NIKO_DECISION_MODEL_BASE_URL`
+- `NIKO_DECISION_MODEL_NAME`
+- `NIKO_DECISION_MODEL_TIMEOUT_SECONDS`
+- `NIKO_DECISION_MODEL_KEEP_ALIVE`
 - `NIKO_FAST_AGENT_COMMAND`
 - `NIKO_FAST_AGENT_TIMEOUT_SECONDS`
 - `NIKO_UNCERTAIN_DELAY_SECONDS`

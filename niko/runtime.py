@@ -1,3 +1,10 @@
+"""Runtime gọi LLM local của Niko.
+
+Ứng dụng không gọi API LLM trực tiếp. Nó build prompt có persona, identity và
+memory context rồi shell out sang CLI đã cấu hình (`fcc-claude` hiện tại).
+Nhờ vậy Telegram/graph không cần biết chi tiết model, workdir hay command line.
+"""
+
 from __future__ import annotations
 
 import os
@@ -18,10 +25,12 @@ DEFAULT_NIKO_PROMPT_HOOK_FILE = "niko/HOOK.md"
 
 
 def split_command(command: str) -> list[str]:
+    """Tách command theo luật shell phù hợp Windows/POSIX."""
     return shlex.split(command, posix=os.name != "nt")
 
 
 def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
+    """Build argv cuối cùng; prompt có thể append cuối command hoặc thay `{prompt}`."""
     args = split_command(os.path.expandvars(command))
     if args:
         args[0] = shutil.which(args[0]) or args[0]
@@ -36,6 +45,7 @@ def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
 
 
 def resolve_claude_workdir() -> Path | None:
+    """Tạo workdir riêng cho CLI nếu cấu hình, tránh chạy thẳng trên repo root."""
     raw_path = os.getenv("CLAUDE_WORKDIR", DEFAULT_CLAUDE_WORKDIR).strip()
     if not raw_path:
         return None
@@ -46,6 +56,7 @@ def resolve_claude_workdir() -> Path | None:
 
 
 def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None = None) -> str:
+    """Chạy một CLI LLM và chuẩn hóa lỗi thành RuntimeError dễ trace."""
     if timeout_seconds is None:
         timeout_seconds = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180"))
 
@@ -73,6 +84,7 @@ def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None
 
 
 def load_prompt_hook() -> str:
+    """Đọc persona/hook của Niko từ file cấu hình."""
     hook_file = env_value(
         "NIKO_PROMPT_HOOK_FILE",
         DEFAULT_NIKO_PROMPT_HOOK_FILE,
@@ -95,6 +107,7 @@ def build_niko_prompt(
     prompt_label: str = "Tin nhan nguoi dung",
     memory_context: str = "",
 ) -> str:
+    """Ghép prompt theo thứ tự: hook -> identity -> memory -> nhiệm vụ hiện tại."""
     hook = ""
     if include_prompt_hook:
         hook = load_prompt_hook()
@@ -122,6 +135,7 @@ load_telegram_prompt_hook = load_prompt_hook
 
 
 def deep_agent_command() -> str:
+    """Deep có command riêng; nếu trống thì dùng command Claude mặc định."""
     command = os.getenv("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
     if command:
         return command
@@ -129,6 +143,7 @@ def deep_agent_command() -> str:
 
 
 def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, trace_logger=None) -> str:
+    """Gọi Deep agent kèm memory context và ghi trace retrieval nếu có."""
     memory_context = ""
     try:
         from niko.harness.trace import default_trace_logger

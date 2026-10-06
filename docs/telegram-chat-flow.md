@@ -57,10 +57,10 @@ Telegram message
 ## Route Hiện Tại
 
 - `local_reply`: câu rất ngắn có thể trả lời bằng rule local, ví dụ chào, cảm ơn, ping.
-- `fast_agent`: vùng xám khi có Fast Agent; Fast quyết định `reply_now` hoặc `send_to_deep`.
+- `fast_agent`: vùng xám khi có decision model; Nimble local quyết định `reply_now` hoặc `send_to_deep`.
 - `deep_agent`: câu cần xử lý sâu, ví dụ có keyword `phân tích`, `thiết kế`, `debug`, `memory`, `fact`, `tool`, `github`, prompt dài, newline hoặc backtick.
 - `busy_reply`: conversation đang có Deep job active.
-- `delayed_deep_agent`: vùng xám nhưng không có Fast Agent; delay rồi đẩy Deep.
+- `delayed_deep_agent`: vùng xám nhưng không có triage model/Fast Agent; delay rồi đẩy Deep.
 
 Trên dashboard:
 
@@ -69,18 +69,26 @@ Trên dashboard:
 - `deep_agent` đi tuyến `Gateway -> Router -> Memory Gate -> Loop/Deep -> Reply`.
 - `busy_reply` đi tuyến `Gateway -> Router -> Reply`.
 
-## Vai Trò Của Fast Agent
+## Vai Trò Của Decision Model Và Fast Agent
 
-Fast Agent dùng `NIKO_FAST_AGENT_COMMAND`. Fast nên dùng model nhẹ/nhanh và có các task:
+Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm triage local. Chạy warmup:
 
-- `triage`: phân loại JSON, không nạp hook, không thêm suffix.
+```bash
+rtk python -m bots.decision_model.warmup
+```
+
+Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, Ollama giữ model loaded cho tới khi `ollama stop nimble` hoặc restart Ollama.
+
+Fast Agent dùng `NIKO_FAST_AGENT_COMMAND` để sinh ngôn ngữ khi cần. Fast nên dùng model nhẹ/nhanh và có các task:
+
+- `triage`: legacy fallback nếu decision model chưa bật.
 - `reply`: trả lời cho local/fast reply nếu cần.
 - `wait`: hiện không còn là logic chính cho wait; graph có fallback wait text.
 - `busy`: báo Deep đang xử lý câu trước.
 - `final`: compose output Deep thành câu trả lời tự nhiên.
 - `error`: báo lỗi gọn nếu Deep lỗi.
 
-Fast triage chỉ hợp lệ khi trả JSON:
+Legacy Fast triage chỉ hợp lệ khi trả JSON:
 
 ```json
 {"route":"reply_now","reply":"..."}
@@ -92,7 +100,7 @@ hoặc:
 {"route":"send_to_deep","reply":"Dạ anh đợi em chút, câu này cần thêm thời gian xử lý."}
 ```
 
-Nếu Fast triage lỗi JSON hoặc route không hợp lệ, graph fallback sang Deep.
+Nếu Nimble hoặc legacy Fast triage lỗi, timeout, hoặc route không hợp lệ, graph fallback sang Deep.
 
 ## Vai Trò Của Deep Agent
 

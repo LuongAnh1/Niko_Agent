@@ -1,3 +1,9 @@
+"""Chọn sticker Telegram theo mood đơn giản.
+
+Sticker là lớp trang trí phía gateway, không ảnh hưởng route hay memory. File
+này chỉ nhận text + config JSON, tìm mood theo keyword rồi chọn file_id phù hợp.
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,10 +17,12 @@ StickerChooser = Callable[[list[Any]], Any]
 
 
 def load_sticker_config(path: Path) -> dict[str, Any]:
+    """Đọc mapping mood/keyword/sticker từ JSON trong repo."""
     return json.loads(path.read_text(encoding='utf-8'))
 
 
 def detect_sticker_mood(text: str, config: dict[str, Any]) -> str | None:
+    """Tìm mood đầu tiên khớp theo thứ tự ưu tiên cấu hình."""
     normalized_text = normalize_text(text)
     moods = config.get('moods', {})
     for mood in config.get('mood_priority', moods.keys()):
@@ -32,6 +40,7 @@ def choose_sticker_file_id(
     source_text: str,
     chooser: StickerChooser | None = None,
 ) -> str | None:
+    """Trả về file_id để gửi, hoặc None nếu mode/config không muốn gửi."""
     mode = str(config.get('mode', 'smart')).strip().lower()
     if mode in {'off', '0', 'false', 'no'}:
         return None
@@ -52,6 +61,7 @@ def choose_sticker_for_mood(
     mood: str,
     chooser: StickerChooser,
 ) -> str | None:
+    """Ưu tiên file_id khai báo tay, rồi fallback sang emoji của sticker set."""
     moods = config.get('moods', {})
     rule = moods.get(mood, {})
 
@@ -94,5 +104,6 @@ def extract_sticker_file_id(sticker: Any) -> str | None:
 
 
 def normalize_text(text: str) -> str:
+    """Normalize để keyword tiếng Việt không phụ thuộc dấu/hoa thường."""
     decomposed = unicodedata.normalize('NFKD', text.casefold())
     return ''.join(char for char in decomposed if not unicodedata.combining(char))

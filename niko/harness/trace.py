@@ -1,3 +1,11 @@
+"""Trace JSONL cho từng turn của Niko.
+
+Trace là lớp quan sát, không tham gia quyết định agent. Mỗi turn có
+`turn_start`, các event nhỏ ở giữa, rồi `turn_end`; dashboard đọc lại JSONL này
+để vẽ flow và debug. Ghi file dùng lock vì Deep job và callback có thể chạy ở
+nhiều thread.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,6 +40,8 @@ def truncate_trace_text(value: Any, limit: int = MAX_TRACE_TEXT_LENGTH) -> str:
 
 @dataclass(frozen=True)
 class TraceTurn:
+    """Metadata tối thiểu để các event sau gắn về cùng một turn."""
+
     turn_id: str
     conversation_id: str
     user_key: str
@@ -39,6 +49,8 @@ class TraceTurn:
 
 
 class TraceLogger:
+    """Append-only JSONL logger cho ops dashboard và debug local."""
+
     def __init__(self, trace_dir: str | Path | None = None, enabled: bool | None = None) -> None:
         self.trace_dir = Path(trace_dir) if trace_dir is not None else default_state_dir() / "traces"
         self.enabled = env_flag("NIKO_TRACE_ENABLED", "1") if enabled is None else enabled
@@ -47,6 +59,7 @@ class TraceLogger:
             self.trace_dir.mkdir(parents=True, exist_ok=True)
 
     def turn_start(self, conversation_id: str, user_key: str, prompt: str, gateway_message=None) -> TraceTurn:
+        """Mở một turn mới và ghi prompt/gateway metadata đã truncate."""
         turn = TraceTurn(
             turn_id=str(uuid.uuid4()),
             conversation_id=conversation_id,
@@ -67,6 +80,7 @@ class TraceLogger:
         return turn
 
     def event(self, turn_id: str | None, kind: str, data: dict[str, Any] | None = None) -> None:
+        """Ghi một mốc quan sát nhỏ trong turn."""
         self._write(
             {
                 "type": "event",
@@ -84,6 +98,7 @@ class TraceLogger:
         status: str = "ok",
         data: dict[str, Any] | None = None,
     ) -> None:
+        """Đóng turn với reply/status cuối cùng để dashboard đọc nhanh."""
         payload = {
             "type": "turn_end",
             "turn_id": turn_id or "",
@@ -95,6 +110,7 @@ class TraceLogger:
         self._write(payload)
 
     def read_events(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Đọc ngược từ file mới nhất để dashboard lấy snapshot gần đây."""
         if not self.trace_dir.exists():
             return []
 
@@ -117,6 +133,7 @@ class TraceLogger:
         return events
 
     def _write(self, payload: dict[str, Any]) -> None:
+        """Append một dòng JSON; lock giữ line không bị xen giữa các thread."""
         if not self.enabled:
             return
         with self._lock:
@@ -143,6 +160,7 @@ _DEFAULT_TRACE_LOGGER_LOCK = threading.Lock()
 
 
 def default_trace_logger() -> TraceLogger:
+    """Singleton theo state dir hiện tại; đổi env thì tạo logger mới."""
     global _DEFAULT_TRACE_LOGGER
     with _DEFAULT_TRACE_LOGGER_LOCK:
         trace_dir = default_state_dir() / "traces"

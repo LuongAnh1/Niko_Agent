@@ -1,13 +1,24 @@
+"""Prompt và helper cho lớp Fast/decision quanh Deep agent.
+
+Tên file vẫn là `prompts` vì nó giữ prompt task cho Fable/Fast, nhưng hiện
+triage chính có thể đến từ Nimble local. Graph gọi các hàm ở đây để:
+
+  - sanitize câu trả lời trước khi gửi Telegram
+  - gọi Fable cho reply nhanh/final compose khi cần
+  - gọi decision model hoặc legacy Fable triage
+  - tạo wait/busy/error text nhất quán
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import sys
 import time
 from typing import Any
 
 from niko.graphs.chat_reply.router import ROUTE_DELAYED_DEEP_AGENT
-from niko.config import env_value
+from niko.config import env_flag, env_value
 import niko.runtime as runtime
 
 
@@ -37,8 +48,16 @@ FAST_DECISION_SEND_TO_DEEP = "send_to_deep"
 
 @dataclass(frozen=True)
 class FastAgentDecision:
+    """Quyết định route sau triage, kèm metadata nếu provider có trả."""
+
     route: str
     reply: str = ""
+    confidence: float | None = None
+    label: str = ""
+    probabilities: dict[str, float] = field(default_factory=dict)
+    provider: str = ""
+    model: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 def reply_suffix() -> str:
@@ -46,6 +65,7 @@ def reply_suffix() -> str:
 
 
 def strip_existing_reply_suffix(answer: str) -> str:
+    """Bỏ suffix cũ trước khi parse JSON hoặc compose lại câu trả lời."""
     suffix = reply_suffix()
     stripped = answer.strip()
     if suffix and stripped.lower().endswith(suffix.lower()):
@@ -54,6 +74,7 @@ def strip_existing_reply_suffix(answer: str) -> str:
 
 
 def is_tool_call_dict(value) -> bool:
+    """Nhận diện tool-call giả dạng JSON để không gửi raw tool payload cho user."""
     if not isinstance(value, dict):
         return False
 
@@ -98,6 +119,7 @@ def looks_like_fake_tool_call(answer: str) -> bool:
 
 
 def sanitize_tool_like_answer(answer: str) -> str:
+    """Nếu model bịa tool-call trong lúc harness chưa cấp tool thì trả lời an toàn."""
     if looks_like_fake_tool_call(answer):
         return env_value(
             "NIKO_TOOL_UNAVAILABLE_REPLY",
@@ -108,6 +130,7 @@ def sanitize_tool_like_answer(answer: str) -> str:
 
 
 def ensure_reply_suffix(answer: str) -> str:
+    """Gắn suffix persona đúng một lần sau khi đã sanitize output."""
     suffix = reply_suffix()
     answer = sanitize_tool_like_answer(answer).strip()
     if not suffix or answer.endswith(suffix):
@@ -118,6 +141,15 @@ def ensure_reply_suffix(answer: str) -> str:
 
 def fast_agent_command() -> str:
     return env_value("NIKO_FAST_AGENT_COMMAND", "", legacy_name="TELEGRAM_FAST_AGENT_COMMAND").strip()
+
+
+def decision_model_enabled() -> bool:
+    return env_flag("NIKO_DECISION_MODEL_ENABLED", "0")
+
+
+def fast_triage_available() -> bool:
+    """Vùng xám chỉ đi fast route khi có Nimble decision hoặc legacy Fast triage."""
+    return decision_model_enabled() or bool(fast_agent_command())
 
 
 def fast_agent_timeout_seconds() -> int:
@@ -134,6 +166,7 @@ def build_deep_wait_reply() -> str:
 
 
 def build_deep_busy_reply(job: Any | None) -> str:
+    """Reply khi conversation đang có Deep job active và message mới thành followup."""
     elapsed_seconds = int(time.time() - job.started_at) if job else 0
     elapsed_minutes = max(0, elapsed_seconds // 60)
     template = env_value(
@@ -157,6 +190,7 @@ def uncertain_delay_seconds() -> float:
 
 
 def delay_before_deep_agent_if_needed(route_kind: str) -> None:
+    """Delay nhỏ cho vùng uncertain không có fast agent, để UX bớt giật."""
     if route_kind != ROUTE_DELAYED_DEEP_AGENT:
         return
     delay_seconds = uncertain_delay_seconds()
@@ -183,6 +217,7 @@ def strip_json_code_fence(text: str) -> str:
 
 
 def extract_json_object(text: str) -> str:
+    """Legacy Fable triage có thể bọc JSON trong text/code fence; lấy object ra."""
     cleaned = strip_json_code_fence(strip_existing_reply_suffix(text))
     start = cleaned.find("{")
     end = cleaned.rfind("}")
@@ -192,6 +227,7 @@ def extract_json_object(text: str) -> str:
 
 
 def parse_fast_agent_decision(answer: str) -> FastAgentDecision:
+    """Parse JSON triage legacy từ Fable sang route nội bộ."""
     try:
         data = json.loads(extract_json_object(answer))
     except json.JSONDecodeError as exc:
@@ -210,7 +246,7 @@ def parse_fast_agent_decision(answer: str) -> FastAgentDecision:
 
     reply_value = data.get("reply", "")
     reply = "" if reply_value is None else str(reply_value).strip()
-    return FastAgentDecision(route=route, reply=reply)
+    return FastAgentDecision(route=route, reply=reply, provider="legacy_fast_agent")
 
 
 def build_fast_agent_task_prompt(
@@ -219,6 +255,7 @@ def build_fast_agent_task_prompt(
     deep_answer: str | None = None,
     active_job: Any | None = None,
 ) -> str:
+    """Tạo prompt nội bộ cho từng nhiệm vụ của Fable/Fast."""
     lines = [
         "Vai tro noi bo: em la Niko Fast, agent giao tiep truc tiep voi nguoi dung.",
         "Nguyen tac: tra loi ngan gon, le phep, goi nguoi dung la anh va xung em.",
@@ -303,6 +340,7 @@ def call_fast_agent(
     deep_answer: str | None = None,
     active_job: Any | None = None,
 ) -> str:
+    """Gọi Fable/Fast qua CLI; triage task không nạp HOOK để JSON sạch hơn."""
     command = fast_agent_command()
     if not command:
         raise RuntimeError("Chua cau hinh NIKO_FAST_AGENT_COMMAND.")
@@ -324,6 +362,7 @@ def try_call_fast_agent(
     deep_answer: str | None = None,
     active_job: Any | None = None,
 ) -> str | None:
+    """Wrapper mềm: lỗi Fast không được làm gãy luồng chính."""
     if not fast_agent_command():
         return None
 
@@ -335,12 +374,34 @@ def try_call_fast_agent(
 
 
 def call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecision:
+    """Ưu tiên Nimble local; fallback legacy là Fable trả JSON."""
+    if decision_model_enabled():
+        return call_decision_model(prompt, gateway_message)
+
     answer = call_fast_agent(prompt, gateway_message, task=FAST_AGENT_TASK_TRIAGE)
     return parse_fast_agent_decision(answer)
 
 
+def call_decision_model(prompt: str, gateway_message) -> FastAgentDecision:
+    """Adapter để graph không import trực tiếp package decision_model."""
+    from bots.decision_model.triage import decide_fast_route
+
+    decision = decide_fast_route(prompt, gateway_message)
+    return FastAgentDecision(
+        route=decision.route,
+        reply=decision.reply,
+        confidence=decision.confidence,
+        label=decision.label,
+        probabilities=decision.probabilities,
+        provider=decision.provider,
+        model=decision.model,
+        usage=decision.usage,
+    )
+
+
 def try_call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecision | None:
-    if not fast_agent_command():
+    """Triage lỗi thì trả None để graph tự handoff Deep."""
+    if not fast_triage_available():
         return None
 
     try:
@@ -351,6 +412,7 @@ def try_call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecis
 
 
 def compose_deep_answer_for_user(prompt: str, gateway_message, deep_answer: str, active_job: Any | None) -> str:
+    """Sau Deep, cho Fast compose lại nếu có; không có thì dùng raw Deep answer."""
     clean_deep_answer = sanitize_tool_like_answer(strip_existing_reply_suffix(deep_answer))
     fast_answer = try_call_fast_agent(
         prompt,
@@ -380,14 +442,17 @@ __all__ = [
     "build_deep_busy_reply",
     "build_deep_wait_reply",
     "build_fast_agent_task_prompt",
+    "call_decision_model",
     "call_fast_agent",
     "call_fast_agent_decision",
     "compose_deep_answer_for_user",
     "delay_before_deep_agent_if_needed",
     "ensure_reply_suffix",
     "extract_json_object",
+    "decision_model_enabled",
     "fast_agent_command",
     "fast_agent_timeout_seconds",
+    "fast_triage_available",
     "is_tool_call_dict",
     "looks_like_fake_tool_call",
     "parse_fast_agent_decision",

@@ -1,3 +1,11 @@
+"""SQLite memory baseline của Niko.
+
+Đây là lớp persistence đơn giản cho demo/harness: `chat_log` là log vận hành,
+`facts` là semantic memory thủ công, `episodes` là episodic summary sau Deep.
+Search dùng FTS5 nếu SQLite hỗ trợ, còn không thì fallback LIKE/normalize để
+repo vẫn chạy được trên máy dev phổ thông.
+"""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -57,6 +65,7 @@ def utc_now() -> str:
 
 
 def default_state_dir() -> Path:
+    """Thư mục runtime local; có thể đổi bằng `NIKO_STATE_DIR`."""
     raw_path = env_value("NIKO_STATE_DIR", DEFAULT_NIKO_STATE_DIR)
     path = resolve_project_path(raw_path)
     path.mkdir(parents=True, exist_ok=True)
@@ -82,6 +91,7 @@ def _json_loads(value: str | None) -> dict[str, Any]:
 
 
 def _words(query: str, limit: int = 12) -> list[str]:
+    """Rút các từ có ích cho FTS/LIKE, bỏ stopword chat phổ biến."""
     normalized_query = _normalize_for_search(query)
     words = re.findall(r"[\w]+", normalized_query, flags=re.UNICODE)
     seen: set[str] = set()
@@ -112,6 +122,8 @@ def _like_patterns(query: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Fact:
+    """Một semantic fact baseline, thường được thêm thủ công qua ops/API."""
+
     id: int
     subject: str
     content: str
@@ -132,6 +144,8 @@ class Fact:
 
 @dataclass(frozen=True)
 class Episode:
+    """Một episodic memory baseline, thường là summary sau Deep job."""
+
     id: int
     summary: str
     happened_at: str
@@ -151,6 +165,8 @@ class Episode:
 
 
 class MemoryStore:
+    """API SQLite thread-safe ở mức process cho chat log, facts và episodes."""
+
     def __init__(self, db_path: str | Path | None = None) -> None:
         self.db_path = Path(db_path) if db_path is not None else default_memory_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +174,7 @@ class MemoryStore:
         self.ensure_schema()
 
     def connect(self) -> sqlite3.Connection:
+        """Mỗi operation dùng connection ngắn hạn, WAL để đọc/ghi dễ thở hơn."""
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -174,6 +191,7 @@ class MemoryStore:
             conn.close()
 
     def ensure_schema(self) -> None:
+        """Tạo bảng/FTS idempotent, không chạy migration phức tạp ở baseline."""
         with self._lock, self.connection() as conn:
             conn.executescript(
                 """
@@ -212,6 +230,7 @@ class MemoryStore:
             self._ensure_fts(conn)
 
     def _ensure_fts(self, conn: sqlite3.Connection) -> None:
+        """Tạo FTS5 nếu có; thiếu FTS thì search sẽ tự fallback."""
         try:
             conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(subject, content)")
             conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(summary)")
@@ -251,6 +270,7 @@ class MemoryStore:
         source: str = "telegram",
         meta: dict[str, Any] | None = None,
     ) -> int:
+        """Ghi operational chat log; content rỗng được bỏ qua."""
         content = str(content).strip()
         if not content:
             return 0
@@ -271,6 +291,7 @@ class MemoryStore:
         source: str = "manual",
         meta: dict[str, Any] | None = None,
     ) -> int:
+        """Thêm fact thủ công và đồng bộ FTS nếu bảng FTS tồn tại."""
         subject = subject.strip()
         content = content.strip()
         if not subject or not content:
@@ -341,6 +362,7 @@ class MemoryStore:
             return [self._row_to_fact(row) for row in rows]
 
     def search_facts(self, query: str, top_k: int = 5) -> list[Fact]:
+        """Tìm facts bằng FTS trước, rồi LIKE/normalize fallback."""
         if not query.strip():
             return self.list_facts(top_k)
 
@@ -403,6 +425,7 @@ class MemoryStore:
         source: str = "niko",
         meta: dict[str, Any] | None = None,
     ) -> int:
+        """Thêm episode summary sau Deep job hoặc nguồn khác."""
         summary = summary.strip()
         if not summary:
             raise ValueError("summary is required")
@@ -435,6 +458,7 @@ class MemoryStore:
         return self.list_episodes(limit)
 
     def search_episodes(self, query: str, top_k: int = 5) -> list[Episode]:
+        """Tìm episode bằng FTS nếu có, fallback LIKE nếu không."""
         if not query.strip():
             return self.recent_episodes(top_k)
 
@@ -476,6 +500,7 @@ class MemoryStore:
         return [self._row_to_episode(row) for row in rows]
 
     def chat_history(self, session_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Lấy lịch sử một conversation theo thứ tự cũ -> mới."""
         with self._lock, self.connection() as conn:
             rows = conn.execute(
                 """
@@ -501,6 +526,7 @@ class MemoryStore:
             return [self._row_to_chat(row) for row in rows]
 
     def snapshot(self, limit: int = 20) -> dict[str, Any]:
+        """Payload tổng quan cho ops dashboard/API."""
         with self._lock, self.connection() as conn:
             fact_count = int(conn.execute("SELECT count(*) AS count FROM facts").fetchone()["count"])
             episode_count = int(conn.execute("SELECT count(*) AS count FROM episodes").fetchone()["count"])
@@ -586,6 +612,7 @@ _DEFAULT_MEMORY_STORE_LOCK = threading.Lock()
 
 
 def default_memory_store() -> MemoryStore:
+    """Singleton theo DB path hiện tại; đổi `NIKO_STATE_DIR` thì mở DB mới."""
     global _DEFAULT_MEMORY_STORE
     with _DEFAULT_MEMORY_STORE_LOCK:
         path = default_memory_db_path()

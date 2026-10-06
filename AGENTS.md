@@ -29,6 +29,10 @@ scattered text a user pastes into chat.
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
   auth/allowlist, mention filtering, `/id`, `/whoami`, replies, and stickers.
   Keep this layer thin. It should not own memory, routing, or LLM policy.
+- `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
+  `/v1/systemone` client, route-label mapping, and warmup script for keeping the
+  model loaded. This layer decides labels only; it should not generate free-form
+  user replies.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
@@ -51,6 +55,10 @@ scattered text a user pastes into chat.
 - `docs/`: Architecture, flow, memory/ops, business-domain, demo, and roadmap
   documents.
 
+Important current boundary: Niko has a runnable baseline harness, not a generic
+agent framework core yet. `ChatReplyGraph` is still a hand-written business graph
+for chat, not a reusable Node/Edge/Workflow engine like Waku's graph runtime.
+
 ## Chat Flow
 
 The Telegram gateway converts each accepted Telegram message into
@@ -67,18 +75,23 @@ In `two_agent` mode:
 
 - Local rules answer simple greetings/thanks/ping/praise messages quickly.
 - Deep keywords, long prompts, newlines, or code blocks route to Niko Deep.
-- Gray-zone prompts can route to Niko Fast triage when
-  `NIKO_FAST_AGENT_COMMAND` is configured.
-- Fast `reply_now` replies immediately.
-- Fast `send_to_deep` queues a Deep background job and sends a wait reply.
+- Gray-zone prompts can route to the local Ollama/Nimble decision model when
+  `NIKO_DECISION_MODEL_ENABLED=1`.
+- Nimble decision `reply_now` means the graph should answer quickly. If the
+  decision does not include reply text, the graph can call Niko Fast/Fable via
+  `NIKO_FAST_AGENT_COMMAND` to generate the quick reply.
+- Nimble decision `send_to_deep` queues a Deep background job and sends a wait
+  reply.
 - Deep receives memory context only when memory retrieval is enabled.
 - When Deep finishes, the result can pass through Fast final composition before
   being sent to the user.
 - If Deep is already busy in the same conversation, new messages are appended to
   the active job followups and the bot returns `busy_reply`.
 
-Fast JSON triage intentionally does not receive memory context. This keeps the
-router decision output clean and easier to parse.
+Nimble triage intentionally receives only prompt and light gateway metadata, not
+memory context. This keeps route decisions clean and fast. Legacy Fable JSON
+triage still exists as a fallback path when the decision model is disabled, but
+new triage work should prefer `bots/decision_model/`.
 
 ## Memory Baseline
 
@@ -176,6 +189,11 @@ CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
 CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
 NIKO_AGENT_MODE=two_agent
+NIKO_DECISION_MODEL_ENABLED=1
+NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
+NIKO_DECISION_MODEL_NAME=nimble
+NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
+NIKO_DECISION_MODEL_KEEP_ALIVE=-1
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_STATE_DIR=niko/.runtime
 NIKO_TRACE_ENABLED=1
@@ -196,6 +214,7 @@ Use `rtk` for shell commands in this workspace.
 
 ```bash
 rtk python -m pytest
+rtk python -m bots.decision_model.warmup
 rtk python -m bots.telegram.bot
 rtk python -m niko.ops.dashboard
 ```
@@ -221,6 +240,9 @@ not relevant.
 ## Editing Rules For Future Sessions
 
 - Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
+- Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the
+  Telegram gateway. Nimble is for route/label decisions, not free-form reply
+  generation.
 - Put routing/agent-loop behavior in `niko/graphs/chat_reply/`.
 - Put CLI/LLM invocation details in `niko/runtime.py`.
 - Put memory persistence/retrieval in `niko/memory/`.

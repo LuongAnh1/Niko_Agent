@@ -23,6 +23,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 
 ```text
 bots/telegram/                  # Telegram gateway
+bots/decision_model/            # Ollama/Nimble decision scripts cho fast triage
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
@@ -38,7 +39,15 @@ docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
 ## Chạy Nhanh
 
 1. Cài và cấu hình FCC/Claude CLI để lệnh `fcc-claude` chạy được.
-2. Copy các file env mẫu:
+2. Cài Ollama, bật Ollama server, rồi pull model Nimble dùng cho decision triage:
+
+```bash
+ollama pull nimble
+```
+
+Nếu anh dùng tag khác, ví dụ một bản quantized cụ thể, đổi `NIKO_DECISION_MODEL_NAME` trong `niko/.env` cho khớp.
+
+3. Copy các file env mẫu:
 
 ```bash
 copy .env.example .env
@@ -46,15 +55,24 @@ copy niko\.env.example niko\.env
 copy bots\telegram\.env.example bots\telegram\.env
 ```
 
-3. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
-4. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
-5. Chạy bot:
+4. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
+5. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
+6. Warm up Nimble để model được giữ loaded cho tới khi Ollama tắt:
+
+```bash
+rtk python -m bots.decision_model.warmup
+ollama ps
+```
+
+Nếu `ollama ps` hiện `nimble:latest` với thời gian giữ loaded là `Forever`, decision model đã sẵn sàng.
+
+7. Chạy bot:
 
 ```bash
 python -m bots.telegram.bot
 ```
 
-6. Chạy dashboard quan sát:
+8. Chạy dashboard quan sát:
 
 ```bash
 python -m niko.ops.dashboard
@@ -80,6 +98,11 @@ CHAT_USER_ALIASES=telegram:123456789=Anh A
 
 ```env
 NIKO_AGENT_MODE=two_agent
+NIKO_DECISION_MODEL_ENABLED=1
+NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
+NIKO_DECISION_MODEL_NAME=nimble
+NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
+NIKO_DECISION_MODEL_KEEP_ALIVE=-1
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
 NIKO_UNCERTAIN_DELAY_SECONDS=3
@@ -93,6 +116,15 @@ NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_TOP_K=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
+```
+
+Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
+phải pull sẵn trên máy. Lệnh warmup dưới đây gọi model một lần và gửi
+`keep_alive=-1`, nên model được giữ loaded cho tới khi anh tắt Ollama:
+
+```bash
+rtk python -m bots.decision_model.warmup
+ollama ps
 ```
 
 `bots/telegram/.env`:

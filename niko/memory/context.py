@@ -1,3 +1,11 @@
+"""Memory retrieval context cho Deep agent.
+
+Graph chỉ cần một đoạn text phụ trợ để nhét vào prompt Deep. File này quyết
+định lấy facts/episodes nào từ SQLite baseline và format chúng thành context.
+Nó chưa làm embedding, rerank hay graph reasoning; đây là tầng text retrieval
+đủ rõ để demo memory pipeline.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -60,6 +68,8 @@ FACT_INVENTORY_FILTER_STOPWORDS = {
 
 @dataclass(frozen=True)
 class RetrievedMemory:
+    """Kết quả retrieval gồm cả text prompt và record raw để trace."""
+
     text: str
     facts: list[Fact]
     episodes: list[Episode]
@@ -96,6 +106,7 @@ def retrieve_memory_context(
     gateway_message=None,
     store: MemoryStore | None = None,
 ) -> RetrievedMemory:
+    """Truy xuất facts/episodes liên quan cho một prompt."""
     if not memory_retrieval_enabled():
         return RetrievedMemory(text="", facts=[], episodes=[], enabled=False)
 
@@ -103,6 +114,7 @@ def retrieve_memory_context(
     top_k = memory_top_k()
     fact_inventory = asks_for_fact_inventory(prompt)
     episode_inventory = asks_for_episode_inventory(prompt)
+    # Câu hỏi "đang lưu fact nào" cần list inventory, không search theo chữ "fact".
     if fact_inventory and not fact_inventory_filter_words(prompt):
         facts = store.list_facts(top_k)
     else:
@@ -157,6 +169,7 @@ def format_memory_context(
     episodes: list[Episode],
     gateway_message=None,
 ) -> str:
+    """Format memory thành đoạn prompt phụ, luôn nhắc Deep ưu tiên message mới."""
     if not facts and not episodes:
         return ""
 
@@ -185,6 +198,7 @@ def format_memory_context(
 
 
 def compact_episode_summary(prompt: str, answer: str, followups: list[str] | None = None, limit: int = 900) -> str:
+    """Tóm tắt episode baseline sau Deep job; chưa phải event model giàu ngữ nghĩa."""
     pieces = [
         f"User asked: {prompt.strip()}",
         f"Niko answered: {answer.strip()}",
@@ -198,6 +212,7 @@ def compact_episode_summary(prompt: str, answer: str, followups: list[str] | Non
 
 
 def memory_write_enabled() -> bool:
+    """Memory write có thể tắt độc lập retrieval để test/demo sạch dữ liệu."""
     return memory_enabled() and os.getenv("NIKO_MEMORY_WRITE_ENABLED", "1").strip().lower() in {
         "1",
         "true",
