@@ -1,3 +1,11 @@
+"""Lớp chuyển đổi giữa gateway cụ thể và graph nghiệp vụ.
+
+Telegram có shape message riêng, sau này Jira/Zalo/CLI cũng sẽ có shape riêng.
+Graph chat không nên biết các chi tiết đó. File này tạo một ngôn ngữ chung:
+`ChatGatewayMessage` + `ChatIdentity`, đủ để runtime build prompt, memory ghi
+log, trace gắn user/chat, nhưng vẫn giữ gateway mỏng.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -6,6 +14,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ChatIdentity:
+    """Danh tính người gửi sau khi đã rời khỏi gateway cụ thể."""
+
     platform: str
     user_id: str = ""
     username: str = ""
@@ -16,6 +26,7 @@ class ChatIdentity:
 
     @property
     def key(self) -> str:
+        """Khóa ổn định để allowlist, alias, memory và trace cùng dùng."""
         if not self.user_id:
             return self.platform
         return f"{self.platform}:{self.user_id}"
@@ -28,11 +39,14 @@ class ChatIdentity:
 
     @property
     def label(self) -> str:
+        """Tên thân thiện nhất để đưa vào prompt/context."""
         return self.alias or self.display_name or self.mention or self.key
 
 
 @dataclass(frozen=True)
 class ChatGatewayMessage:
+    """Tin nhắn đã chuẩn hóa trước khi đi vào ChatReplyGraph."""
+
     platform: str
     chat_id: str
     chat_type: str
@@ -42,10 +56,12 @@ class ChatGatewayMessage:
     raw: dict[str, Any]
 
     def with_text(self, text: str) -> "ChatGatewayMessage":
+        """Giữ nguyên metadata nhưng thay text sau khi gateway lọc mention/command."""
         return replace(self, text=text)
 
 
 def parse_user_aliases(raw_value: str, default_platform: str = "telegram") -> dict[str, str]:
+    """Parse cấu hình alias dạng `telegram:123=Anh A;456=Anh B`."""
     aliases: dict[str, str] = {}
     normalized_value = raw_value.replace("\\n", ";").replace(",", ";")
     for item in normalized_value.split(";"):
@@ -65,6 +81,7 @@ def parse_user_aliases(raw_value: str, default_platform: str = "telegram") -> di
 
 
 def parse_allowed_user_keys(raw_value: str, default_platform: str = "telegram") -> set[str]:
+    """Parse allowlist người dùng theo cùng định dạng key mà ChatIdentity tạo."""
     allowed: set[str] = set()
     for item in raw_value.replace("\\n", ",").replace(";", ",").split(","):
         key = item.strip()
@@ -80,6 +97,7 @@ def telegram_message_to_gateway(
     message: dict[str, Any],
     aliases: dict[str, str] | None = None,
 ) -> ChatGatewayMessage:
+    """Chuyển raw Telegram update thành message trung lập cho graph."""
     aliases = aliases or {}
     sender = message.get("from") or {}
     chat = message.get("chat") or {}
@@ -109,6 +127,7 @@ def telegram_message_to_gateway(
 
 
 def format_identity_reply(message: ChatGatewayMessage) -> str:
+    """Phản hồi cho `/id` và `/whoami`, giúp owner lấy đúng allowlist key."""
     lines = [
         f"chat_id: {message.chat_id or '(unknown)'}",
         f"chat_type: {message.chat_type or '(unknown)'}",
@@ -124,6 +143,7 @@ def format_identity_reply(message: ChatGatewayMessage) -> str:
 
 
 def build_identity_context(message: ChatGatewayMessage) -> str:
+    """Context danh tính đưa vào prompt Deep/Fast khi bật CHAT_IDENTITY_ENABLED."""
     lines = [
         "Thong tin nguoi dang chat:",
         f"- gateway: {message.platform}",

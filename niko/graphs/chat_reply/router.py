@@ -1,3 +1,10 @@
+"""Router rẻ và deterministic trước khi gọi model.
+
+Router này chỉ dùng rule local: tin cực ngắn thì trả ngay, prompt rõ là việc
+sâu thì đưa Deep, còn vùng xám mới cần decision model/Fast. Mục tiêu là giữ
+chi phí thấp và tránh hỏi model cho những trường hợp hiển nhiên.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +20,8 @@ ROUTE_DELAYED_DEEP_AGENT = "delayed_deep_agent"
 
 @dataclass(frozen=True)
 class AgentRoute:
+    """Kết quả route đủ nhỏ để graph trace và hành động."""
+
     kind: str
     reply: str = ""
     reason: str = ""
@@ -79,6 +88,7 @@ def decide_agent_route(
     deep_job_active: bool = False,
     fast_agent_available: bool = False,
 ) -> AgentRoute:
+    """Chọn tuyến đầu tiên cho một message trước khi có triage model."""
     normalized = normalize_text(prompt)
     if deep_job_active:
         return AgentRoute(ROUTE_BUSY_REPLY, reason="deep_job_active")
@@ -97,6 +107,7 @@ def decide_agent_route(
 
 
 def build_local_reply(normalized_prompt: str) -> str:
+    """Các reply cứng cho small talk/ack rất ngắn."""
     compact = normalized_prompt.strip()
     if not compact:
         return ""
@@ -124,6 +135,7 @@ def build_local_reply(normalized_prompt: str) -> str:
 
 
 def should_use_deep_agent(prompt: str) -> bool:
+    """Heuristic bảo thủ: có dấu hiệu cần phân tích thì đi Deep luôn."""
     normalized = normalize_text(prompt)
     if len(normalized) >= 220:
         return True
@@ -135,6 +147,7 @@ def should_use_deep_agent(prompt: str) -> bool:
 
 
 def contains_keyword(normalized_text: str, keyword: str) -> bool:
+    """Keyword ngắn phải match theo token để tránh dính substring bừa."""
     normalized_keyword = normalize_text(keyword)
     if not normalized_keyword:
         return False
@@ -144,6 +157,7 @@ def contains_keyword(normalized_text: str, keyword: str) -> bool:
 
 
 def normalize_text(text: str) -> str:
+    """Bỏ dấu và casefold để rule tiếng Việt/Anh ổn định hơn."""
     decomposed = unicodedata.normalize("NFKD", text.casefold())
     normalized = "".join(char for char in decomposed if not unicodedata.combining(char))
     return normalized.replace("đ", "d")

@@ -1,3 +1,11 @@
+"""Telegram gateway cho Niko Agent.
+
+File này cố tình chỉ làm những việc thuộc Telegram: long polling, auth theo
+chat/user, lọc mention trong group, gửi reply/sticker và chuyển raw message
+thành `ChatGatewayMessage`. Mọi quyết định agent, memory, triage hay Deep job
+đều đi qua `ChatReplyGraph` để gateway không phình thành business logic.
+"""
+
 from __future__ import annotations
 
 import json
@@ -39,6 +47,8 @@ CHAT_REPLY_GRAPH = ChatReplyGraph()
 
 
 class TelegramError(RuntimeError):
+    """Lỗi Telegram API đã được đổi sang message nội bộ dễ log."""
+
     pass
 
 
@@ -92,6 +102,7 @@ def telegram_startup_retry_delay_seconds() -> float:
 
 
 def telegram_request(token: str, method: str, payload: dict, timeout_seconds: int | None = None) -> dict:
+    """Gọi Telegram Bot API bằng stdlib để bot không cần dependency HTTP ngoài."""
     url = f"https://api.telegram.org/bot{token}/{method}"
     body = json.dumps(payload).encode("utf-8")
     request = Request(
@@ -118,6 +129,7 @@ def telegram_request(token: str, method: str, payload: dict, timeout_seconds: in
 
 
 def send_message(token: str, chat_id: int, text: str, parse_mode: str | None = None) -> None:
+    """Gửi text, tự cắt theo giới hạn 4096 ký tự của Telegram."""
     chunks = split_text(text, MAX_TELEGRAM_MESSAGE_LENGTH)
     for chunk in chunks:
         payload = {"chat_id": chat_id, "text": chunk}
@@ -132,6 +144,7 @@ def recipient_mention_label(gateway_message) -> str:
 
 
 def recipient_mention(gateway_message) -> tuple[str, str | None]:
+    """Tính mention trong group; private chat không cần tag lại người gửi."""
     if gateway_message is None or not env_flag("TELEGRAM_MENTION_REPLIES", DEFAULT_TELEGRAM_MENTION_REPLIES):
         return "", None
     if gateway_message.chat_type not in {"group", "supergroup"}:
@@ -148,6 +161,7 @@ def recipient_mention(gateway_message) -> tuple[str, str | None]:
 
 
 def format_reply_for_recipient(text: str, gateway_message) -> tuple[str, str | None]:
+    """Gắn mention vào reply group mà vẫn escape HTML khi phải dùng tg://user."""
     mention, parse_mode = recipient_mention(gateway_message)
     if not mention:
         return text, None
@@ -175,6 +189,7 @@ def send_chat_action(token: str, chat_id: int, action: str = "typing") -> None:
 
 
 def split_text(text: str, max_length: int) -> list[str]:
+    """Cắt thẳng theo độ dài; đủ cho baseline vì Telegram tự giữ thứ tự gửi."""
     if len(text) <= max_length:
         return [text]
 
@@ -187,6 +202,7 @@ def split_text(text: str, max_length: int) -> list[str]:
 
 
 def parse_allowed_chat_ids() -> set[int]:
+    """Allowlist chat ở tầng Telegram; allowlist user nằm ở chat_gateway."""
     raw_value = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
     if not raw_value:
         return set()
@@ -200,6 +216,7 @@ def parse_allowed_chat_ids() -> set[int]:
 
 
 def prepare_long_polling(token: str) -> None:
+    """Gỡ webhook trước khi long polling để tránh Telegram giữ delivery cũ."""
     drop_pending = os.getenv("TELEGRAM_DROP_PENDING_UPDATES", "0").strip() == "1"
     max_retries = telegram_startup_retries()
     for attempt in range(max_retries + 1):
@@ -231,6 +248,7 @@ def get_bot_username(token: str) -> str:
 
 
 def is_command_for_bot(text: str, command: str, bot_username: str) -> bool:
+    """Nhận `/cmd` và `/cmd@BotName`, bỏ qua command gửi cho bot khác."""
     first_word = text.split(maxsplit=1)[0] if text else ""
     command_part, _, target = first_word.partition("@")
     return command_part == command and (not target or target.lower() == bot_username.lower())
@@ -253,6 +271,7 @@ def strip_bot_mentions(text: str, bot_username: str) -> str:
 
 
 def extract_group_prompt(message: dict, bot_username: str) -> str:
+    """Trong group, chỉ trả text khi policy group cho phép bot xử lý."""
     text = (message.get("text") or "").strip()
     if not is_group_chat(message):
         return text
@@ -268,6 +287,7 @@ def extract_group_prompt(message: dict, bot_username: str) -> str:
 
 
 def load_effective_sticker_config() -> dict:
+    """Nạp sticker config file rồi cho env override vài field hay đổi khi demo."""
     config_file = os.getenv("TELEGRAM_STICKER_CONFIG_FILE", DEFAULT_TELEGRAM_STICKER_CONFIG_FILE).strip()
     config = load_sticker_config(resolve_project_path(config_file))
 
@@ -283,6 +303,7 @@ def load_effective_sticker_config() -> dict:
 
 
 def get_sticker_set_stickers(token: str, set_name: str, timeout_seconds: int | None = None) -> list[dict]:
+    """Cache sticker set trong process để mỗi reply không gọi getStickerSet lại."""
     if set_name not in STICKER_SET_CACHE:
         result = telegram_request(token, "getStickerSet", {"name": set_name}, timeout_seconds=timeout_seconds)
         STICKER_SET_CACHE[set_name] = result.get("stickers", [])
@@ -299,6 +320,7 @@ def send_sticker(token: str, chat_id: int, sticker_file_id: str, timeout_seconds
 
 
 def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
+    """Sticker là hiệu ứng phụ vui vẻ: lỗi sticker không được làm hỏng reply chính."""
     if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
         return
 
@@ -330,6 +352,7 @@ def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer:
 
 
 def deliver_niko_answer(token: str, chat_id: int, prompt: str, prompt_message, answer: str) -> None:
+    """Một chỗ duy nhất cho reply cuối: text trước, sticker chạy nền sau."""
     send_reply(token, chat_id, answer, prompt_message)
     maybe_send_sticker_async(token, chat_id, prompt, answer)
 
@@ -342,6 +365,11 @@ def handle_message(
     user_aliases: dict[str, str],
     bot_username: str,
 ) -> None:
+    """Xử lý một Telegram message đã lấy từ polling.
+
+    Thứ tự này quan trọng: `/id` luôn hữu ích để cấu hình allowlist, group
+    mention được lọc trước, rồi mới kiểm tra auth và đẩy sang ChatReplyGraph.
+    """
     gateway_message = telegram_message_to_gateway(message, user_aliases)
     chat_id = message["chat"]["id"]
     raw_text = (message.get("text") or "").strip()
@@ -372,9 +400,11 @@ def handle_message(
         return
 
     def deliver_reply(answer: str) -> None:
+        # Graph chỉ biết callback này, không biết Telegram token/API.
         deliver_niko_answer(token, chat_id, prompt, prompt_message, answer)
 
     def notify_working() -> None:
+        # Typing indicator là tín hiệu UX, không nằm trong logic agent.
         send_chat_action(token, chat_id)
 
     try:
@@ -384,6 +414,7 @@ def handle_message(
 
 
 def main() -> int:
+    """Entrypoint long polling local cho Telegram bot."""
     load_env_files("telegram")
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
