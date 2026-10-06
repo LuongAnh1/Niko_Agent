@@ -1,11 +1,11 @@
 """Cấu hình dùng chung cho toàn harness.
 
 Repo này có nhiều entrypoint chạy độc lập: Telegram bot, ops dashboard,
-warmup script cho Nimble, test harness. Thay vì để mỗi entrypoint tự đoán
-đường dẫn và tự đọc `.env`, file này gom ba quy tắc nền:
+warmup script cho Nimble, test harness. Dashboard runtime config là nguồn cấu
+hình chính; `.env` chỉ còn vai trò bootstrap tối thiểu cho dashboard:
 
-  env files  root `.env` -> `niko/.env` -> `bots/<bot>/.env`
-  override   biến môi trường thật của OS luôn thắng file `.env`
+  env file   root `.env` cho `NIKO_OPS_*` và `NIKO_RUNTIME_CONFIG_FILE`
+  override   biến môi trường thật của OS luôn thắng runtime config
   paths      path tương đối luôn được neo vào repo root
 """
 
@@ -21,6 +21,7 @@ from typing import Any
 TRUE_VALUES = {"1", "true", "yes", "on"}
 RUNTIME_CONFIG_ENV = "NIKO_RUNTIME_CONFIG_FILE"
 DEFAULT_RUNTIME_CONFIG_FILE = "niko/.runtime/config.json"
+CHILD_ENV_KEEP_FILE_KEYS = {RUNTIME_CONFIG_ENV}
 
 _FILE_ENV_KEYS: set[str] = set()
 _FILE_ENV_VALUES: dict[str, str] = {}
@@ -147,13 +148,23 @@ def load_env_file(path: Path = Path(".env"), override_keys: set[str] | None = No
 
 
 def load_env_files(bot_name: str | None = None) -> None:
-    """Nạp chuỗi env theo đúng thứ tự vận hành của Niko."""
+    """Nạp root `.env` bootstrap; `bot_name` giữ lại để entrypoint cũ không gãy."""
     root = repo_root()
-    root_keys = load_env_file(root / ".env")
-    niko_keys = load_env_file(root / "niko" / ".env", override_keys=root_keys)
-    loaded_file_keys = root_keys | niko_keys
-    if bot_name:
-        load_env_file(root / "bots" / bot_name / ".env", override_keys=loaded_file_keys)
+    load_env_file(root / ".env")
+
+
+def runtime_subprocess_env() -> dict[str, str]:
+    """Env sạch cho process con: bỏ config legacy đọc từ `.env`.
+
+    Dashboard vẫn được phép nạp `.env` để bootstrap chính nó, nhưng bot con phải
+    đọc cấu hình chính từ runtime config. Nếu truyền nguyên `os.environ`, các key
+    do dashboard nạp từ `.env` sẽ bị process con hiểu nhầm là OS override.
+    """
+    env = os.environ.copy()
+    for key in _FILE_ENV_KEYS:
+        if key not in CHILD_ENV_KEEP_FILE_KEYS:
+            env.pop(key, None)
+    return env
 
 
 def _candidate_names(name: str, legacy_name: str | None = None) -> list[str]:
