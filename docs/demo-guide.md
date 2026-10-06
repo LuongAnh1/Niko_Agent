@@ -36,6 +36,11 @@ Mở dashboard:
 http://127.0.0.1:7777
 ```
 
+Trong tab Config, có thể chỉnh nhanh Nimble, sticker, memory, reply text và
+bật/tắt bot Telegram do dashboard start. Sau khi đổi cấu hình, bấm `Save`.
+Dashboard ghi vào `niko/.runtime/config.json`; secret như Telegram token vẫn ở
+`.env`.
+
 ## Kịch Bản 1: Local Reply
 
 Gửi Telegram:

@@ -17,7 +17,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `chat_log`: lịch sử hội thoại đã xử lý.
   - `facts`: Semantic Memory thủ công/baseline.
   - `episodes`: Episodic Memory sinh ra sau deep job.
-- Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts.
+- Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config.
 
 ## Cấu Trúc Chính
 
@@ -79,6 +79,10 @@ python -m niko.ops.dashboard
 ```
 
 Dashboard mặc định: `http://127.0.0.1:7777`
+
+Trong dashboard có tab `Config` để chỉnh các cấu hình vận hành như Nimble,
+sticker, memory, reply text và bật/tắt bot Telegram do dashboard quản lý.
+Secret/token vẫn để trong `.env`, không chỉnh trên dashboard.
 
 ## Cấu Hình Tối Thiểu
 
@@ -163,7 +167,10 @@ Sticker Telegram dùng Nimble local để chọn mood sau khi text reply đã g�
 Nimble chọn `no_sticker` hoặc lỗi/timeout, bot chỉ bỏ qua sticker và không
 fallback về keyword rule cũ.
 
-Thứ tự load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Biến môi trường thật của hệ điều hành vẫn được ưu tiên hơn file `.env`.
+Thứ tự load env file: root `.env` -> `niko/.env` -> `bots/telegram/.env`.
+Thứ tự cấu hình hiệu lực: OS env thật -> `niko/.runtime/config.json` do tab
+Config ghi -> env file -> default trong code. Nếu một key bị OS env khóa,
+dashboard vẫn hiển thị nhưng không ghi đè được.
 
 ## Demo Baseline
 

@@ -162,12 +162,17 @@ Root `.env` giữ cấu hình chung:
 - `TELEGRAM_STICKER_MODE`
 - `TELEGRAM_STICKER_TIMEOUT_SECONDS`
 
-Thứ tự load env hiện tại: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Biến môi trường thật của OS vẫn ưu tiên hơn file `.env`.
+Thứ tự load env file hiện tại: root `.env` -> `niko/.env` -> `bots/telegram/.env`.
+Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
+Thứ tự cấu hình hiệu lực là: OS env thật -> runtime config -> env file ->
+default trong code. Secret/token vẫn nằm ở `.env` hoặc OS env, không chỉnh trên
+dashboard.
 
 ## Dữ Liệu Runtime
 
 ```text
 niko/.runtime/
+  config.json                      # Runtime config do dashboard Config ghi
   niko_memory.sqlite3              # SQLite memory
   traces/YYYY-MM-DD.jsonl          # JSONL trace
   claude_sandbox/                  # CLAUDE_WORKDIR

@@ -3,16 +3,265 @@ from __future__ import annotations
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import subprocess
+import sys
+import threading
 from urllib.parse import parse_qs, urlparse
 from typing import Any
 
-from niko.config import env_value, load_env_files
+from niko.config import (
+    env_value,
+    env_value_with_source,
+    load_env_files,
+    read_runtime_config,
+    repo_root,
+    reset_runtime_config,
+    runtime_config_path,
+    update_runtime_config,
+)
 from niko.harness.trace import TraceLogger, default_trace_logger
 from niko.memory.store import MemoryStore, default_memory_store
 
 
 DEFAULT_OPS_HOST = "127.0.0.1"
 DEFAULT_OPS_PORT = 7777
+
+CONFIG_SECTIONS: list[dict[str, Any]] = [
+    {
+        "id": "runtime",
+        "title": "Runtime",
+        "description": "Bật/tắt bot Telegram và chọn mode điều phối chính.",
+        "fields": [
+            {
+                "name": "NIKO_AGENT_MODE",
+                "label": "Agent mode",
+                "type": "select",
+                "default": "two_agent",
+                "choices": ["two_agent", "single"],
+            },
+        ],
+    },
+    {
+        "id": "decision",
+        "title": "Decision Model",
+        "description": "Ollama/Nimble chỉ chọn label route, không sinh reply tự do.",
+        "fields": [
+            {"name": "NIKO_DECISION_MODEL_ENABLED", "label": "Enable Nimble triage", "type": "bool", "default": "1"},
+            {
+                "name": "NIKO_DECISION_MODEL_BASE_URL",
+                "label": "Ollama base URL",
+                "type": "text",
+                "default": "http://localhost:11434",
+            },
+            {"name": "NIKO_DECISION_MODEL_NAME", "label": "Model name", "type": "text", "default": "nimble"},
+            {
+                "name": "NIKO_DECISION_MODEL_TIMEOUT_SECONDS",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": "10",
+            },
+            {"name": "NIKO_DECISION_MODEL_KEEP_ALIVE", "label": "Keep alive", "type": "text", "default": "-1"},
+        ],
+    },
+    {
+        "id": "sticker",
+        "title": "Sticker",
+        "description": "Sticker chạy nền sau reply; Nimble chọn mood rồi map sang sticker Duck.",
+        "fields": [
+            {"name": "TELEGRAM_STICKERS_ENABLED", "label": "Enable stickers", "type": "bool", "default": "1"},
+            {
+                "name": "TELEGRAM_STICKER_DECISION_MODEL_ENABLED",
+                "label": "Enable sticker mood model",
+                "type": "bool",
+                "default": "1",
+            },
+            {
+                "name": "TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS",
+                "label": "Sticker model timeout",
+                "type": "number",
+                "default": "5",
+            },
+            {
+                "name": "TELEGRAM_STICKER_CONFIG_FILE",
+                "label": "Sticker config file",
+                "type": "text",
+                "default": "bots/telegram/stickers/ducks.json",
+            },
+            {"name": "TELEGRAM_STICKER_SET_NAME", "label": "Sticker set", "type": "text", "default": "UtyaDuck"},
+            {
+                "name": "TELEGRAM_STICKER_MODE",
+                "label": "Sticker mode",
+                "type": "select",
+                "default": "smart",
+                "choices": ["smart", "always", "off"],
+            },
+            {"name": "TELEGRAM_STICKER_TIMEOUT_SECONDS", "label": "Telegram sticker timeout", "type": "number", "default": "5"},
+        ],
+    },
+    {
+        "id": "memory",
+        "title": "Memory & Trace",
+        "description": "Bật/tắt memory baseline, retrieval và JSONL tracing.",
+        "fields": [
+            {"name": "NIKO_TRACE_ENABLED", "label": "Enable traces", "type": "bool", "default": "1"},
+            {"name": "NIKO_MEMORY_ENABLED", "label": "Enable memory", "type": "bool", "default": "1"},
+            {"name": "NIKO_MEMORY_RETRIEVAL_ENABLED", "label": "Enable retrieval", "type": "bool", "default": "1"},
+            {"name": "NIKO_MEMORY_WRITE_ENABLED", "label": "Enable memory writes", "type": "bool", "default": "1"},
+            {"name": "NIKO_MEMORY_TOP_K", "label": "Memory top K", "type": "number", "default": "4"},
+        ],
+    },
+    {
+        "id": "replies",
+        "title": "Replies",
+        "description": "Các câu trả lời vận hành thường chỉnh khi demo.",
+        "fields": [
+            {"name": "NIKO_REPLY_SUFFIX", "label": "Reply suffix", "type": "text", "default": "Meow"},
+            {"name": "NIKO_UNCERTAIN_DELAY_SECONDS", "label": "Uncertain delay", "type": "number", "default": "3"},
+            {
+                "name": "NIKO_DEEP_WAIT_REPLY",
+                "label": "Deep wait reply",
+                "type": "textarea",
+                "default": "Dạ anh đợi em chút, câu này cần thêm thời gian xử lý.",
+            },
+            {
+                "name": "NIKO_DEEP_BUSY_REPLY",
+                "label": "Deep busy reply",
+                "type": "textarea",
+                "default": "Dạ anh đợi em chút, em vẫn đang xử lý câu trước.",
+            },
+            {
+                "name": "NIKO_TOOL_UNAVAILABLE_REPLY",
+                "label": "Tool unavailable reply",
+                "type": "textarea",
+                "default": "Dạ hiện tại em chưa có tool này trong harness.",
+            },
+        ],
+    },
+]
+
+
+def config_field_index() -> dict[str, dict[str, Any]]:
+    return {field["name"]: field for section in CONFIG_SECTIONS for field in section["fields"]}
+
+
+def config_section_keys(section_id: str) -> list[str]:
+    for section in CONFIG_SECTIONS:
+        if section["id"] == section_id:
+            return [field["name"] for field in section["fields"]]
+    return []
+
+
+def normalize_config_value(field: dict[str, Any], value: Any) -> str:
+    field_type = field.get("type", "text")
+    if field_type == "bool":
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return "1"
+        if normalized in {"0", "false", "no", "off"}:
+            return "0"
+        raise ValueError(f"{field['name']} phải là boolean.")
+    if field_type == "number":
+        raw = str(value).strip()
+        try:
+            number = float(raw)
+        except ValueError as exc:
+            raise ValueError(f"{field['name']} phải là số.") from exc
+        if number.is_integer():
+            return str(int(number))
+        return str(number)
+    if field_type == "select":
+        raw = str(value).strip()
+        if raw not in field.get("choices", []):
+            raise ValueError(f"{field['name']} không nằm trong lựa chọn hợp lệ.")
+        return raw
+    return str(value)
+
+
+def validate_config_updates(values: dict[str, Any]) -> dict[str, str]:
+    fields = config_field_index()
+    updates: dict[str, str] = {}
+    for name, value in values.items():
+        if name not in fields:
+            raise ValueError(f"Không cho phép cấu hình key: {name}")
+        _, source, _ = env_value_with_source(name, fields[name].get("default", ""))
+        if source == "os":
+            raise ValueError(f"{name} đang bị khóa bởi OS env.")
+        updates[name] = normalize_config_value(fields[name], value)
+    return updates
+
+
+def config_snapshot(bot_manager: "TelegramBotProcessManager | None" = None) -> dict[str, Any]:
+    overrides = read_runtime_config()
+    sections: list[dict[str, Any]] = []
+    for section in CONFIG_SECTIONS:
+        fields = []
+        for field in section["fields"]:
+            value, source, effective_key = env_value_with_source(field["name"], field.get("default", ""))
+            fields.append(
+                {
+                    **field,
+                    "value": value,
+                    "source": source,
+                    "effective_key": effective_key,
+                    "editable": source != "os",
+                    "runtime_value": overrides.get(field["name"]),
+                }
+            )
+        sections.append({**section, "fields": fields})
+    return {
+        "path": str(runtime_config_path()),
+        "overrides": overrides,
+        "sections": sections,
+        "bot": bot_manager.status() if bot_manager is not None else {},
+    }
+
+
+class TelegramBotProcessManager:
+    """Quản lý bot Telegram do dashboard start; không đụng process chạy ngoài."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._process: subprocess.Popen | None = None
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            process = self._process
+            if process is None:
+                return {"managed": False, "running": False, "pid": None, "returncode": None}
+            return {
+                "managed": True,
+                "running": process.poll() is None,
+                "pid": process.pid,
+                "returncode": process.poll(),
+            }
+
+    def start(self) -> dict[str, Any]:
+        with self._lock:
+            if self._process is not None and self._process.poll() is None:
+                return self.status()
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            self._process = subprocess.Popen(
+                [sys.executable, "-m", "bots.telegram.bot"],
+                cwd=str(repo_root()),
+                env=os.environ.copy(),
+                creationflags=creationflags,
+            )
+            return self.status()
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            process = self._process
+            if process is None or process.poll() is not None:
+                return self.status()
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            return self.status()
 
 
 INDEX_HTML = """<!doctype html>
@@ -415,6 +664,58 @@ INDEX_HTML = """<!doctype html>
       justify-content: space-between;
       gap: var(--space-3);
     }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+    .tabs button.on {
+      border-color: var(--accent);
+      background: var(--surface-raised);
+      font-weight: 650;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(260px, 1fr));
+      gap: var(--space-3);
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+      padding: var(--space-3);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+    }
+    .field label {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-2);
+      color: var(--text-muted);
+      font: 700 11px/1.2 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .field select {
+      width: 100%;
+      border: 1px solid var(--rule-hard);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+      color: var(--text-ink);
+      padding: 9px 10px;
+    }
+    .checkline {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      min-height: 38px;
+    }
+    .checkline input { width: auto; }
+    .source {
+      color: var(--text-faint);
+      font: 11px/1.3 var(--mono);
+    }
     @media (max-width: 1100px) {
       body { overflow: auto; height: auto; display: block; }
       .rail { width: 100%; height: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--rule); }
@@ -445,6 +746,7 @@ INDEX_HTML = """<!doctype html>
     <a href="#memory" data-view="memory">Memory <span class="nav-count" id="n-memory"></span></a>
     <a href="#chat" data-view="chat">Chat <span class="nav-count" id="n-chat"></span></a>
     <a href="#traces" data-view="traces">Traces <span class="nav-count" id="n-traces"></span></a>
+    <a href="#config" data-view="config">Config <span class="nav-count" id="n-config"></span></a>
     <div class="nav-group">Runtime</div>
     <a href="#ops" data-view="ops">Ops <span class="nav-count" id="n-ops"></span></a>
     <div class="rail-foot">
@@ -474,9 +776,10 @@ INDEX_HTML = """<!doctype html>
       memory: ["Memory", "Semantic facts and episodic records used by the deep agent."],
       chat: ["Chat", "Recent Telegram/user-assistant rows persisted by the harness."],
       traces: ["Traces", "JSONL event tail: route, memory retrieval, deep jobs, errors."],
+      config: ["Config", "Runtime configuration, decision model, stickers, memory, and replies."],
       ops: ["Ops", "Local dashboard controls and baseline architecture notes."]
     };
-    let state = { view: "overview", data: null, factDraft: { subject: "", content: "" } };
+    let state = { view: "overview", data: null, factDraft: { subject: "", content: "" }, configTab: "runtime" };
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const fmt = (s) => s ? esc(String(s).replace("T", " ").replace("Z", " UTC")) : "";
     const traceKind = (t) => t.kind || t.event || t.type || "event";
@@ -508,6 +811,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("n-traces").textContent = data.traces.length;
       document.getElementById("n-overview").textContent = "";
       document.getElementById("n-ops").textContent = "";
+      document.getElementById("n-config").textContent = Object.keys(data.config?.overrides || {}).length || "";
     }
     function factRecord(f) {
       return `<div class="record">
@@ -881,14 +1185,96 @@ INDEX_HTML = """<!doctype html>
       const traces = data.traces.map(traceRecord).join("") || empty("No trace events yet.");
       return `<section class="panel"><h2>Trace Events</h2><div class="records">${traces}</div></section>`;
     }
+    function configSections(data) {
+      return data.config?.sections || [];
+    }
+    function currentConfigSection(data) {
+      const sections = configSections(data);
+      if (!sections.length) return null;
+      return sections.find(section => section.id === state.configTab) || sections[0];
+    }
+    function boolValue(value) {
+      return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+    }
+    function configFieldInput(field) {
+      const disabled = field.editable ? "" : " disabled";
+      const value = field.value ?? "";
+      if (field.type === "bool") {
+        return `<div class="checkline"><input data-config-key="${esc(field.name)}" type="checkbox"${boolValue(value) ? " checked" : ""}${disabled}><span>${boolValue(value) ? "Enabled" : "Disabled"}</span></div>`;
+      }
+      if (field.type === "select") {
+        const options = (field.choices || []).map(choice => `<option value="${esc(choice)}"${String(choice) === String(value) ? " selected" : ""}>${esc(choice)}</option>`).join("");
+        return `<select data-config-key="${esc(field.name)}"${disabled}>${options}</select>`;
+      }
+      if (field.type === "textarea") {
+        return `<textarea data-config-key="${esc(field.name)}"${disabled}>${esc(value)}</textarea>`;
+      }
+      return `<input data-config-key="${esc(field.name)}" type="${field.type === "number" ? "number" : "text"}" value="${esc(value)}"${disabled}>`;
+    }
+    function configField(field) {
+      const locked = field.editable ? "" : " OS env lock";
+      const runtimeValue = field.runtime_value == null ? "" : ` | runtime=${field.runtime_value}`;
+      return `<div class="field">
+        <label><span>${esc(field.label)}</span><span class="source">${esc(field.source)}${esc(locked)}</span></label>
+        ${configFieldInput(field)}
+        <div class="source">${esc(field.name)} | default=${esc(field.default ?? "")}${esc(runtimeValue)}</div>
+      </div>`;
+    }
+    function renderBotControls(bot) {
+      const running = Boolean(bot?.running);
+      const managed = Boolean(bot?.managed);
+      const badge = running ? "ok" : managed ? "warn" : "";
+      const label = running ? `running pid=${bot.pid}` : managed ? `stopped code=${bot.returncode}` : "not managed";
+      return `<section class="panel">
+        <h2>Telegram Bot</h2>
+        <div class="records">
+          <div class="record">
+            <div class="splitline"><span>Managed process</span><span class="badge ${badge}">${esc(label)}</span></div>
+            <div class="meta">Dashboard chỉ quản lý bot do chính dashboard start. Bot đang chạy ở terminal riêng cần dừng ở terminal đó.</div>
+          </div>
+        </div>
+        <div class="actions" style="margin-left:0">
+          <button class="primary" data-bot-action="start" type="button"${running ? " disabled" : ""}>Start bot</button>
+          <button class="danger" data-bot-action="stop" type="button"${running ? "" : " disabled"}>Stop bot</button>
+        </div>
+      </section>`;
+    }
+    function renderConfig(data) {
+      const sections = configSections(data);
+      const active = currentConfigSection(data);
+      if (!active) return empty("No config schema available.");
+      state.configTab = active.id;
+      const tabs = sections.map(section => `<button data-config-tab="${esc(section.id)}" class="${section.id === active.id ? "on" : ""}" type="button">${esc(section.title)}</button>`).join("");
+      const fields = active.fields.map(configField).join("");
+      return `${active.id === "runtime" ? renderBotControls(data.config?.bot || {}) : ""}
+      <section class="panel">
+        <h2>Config</h2>
+        <div class="tabs">${tabs}</div>
+        <form id="config-form" data-section="${esc(active.id)}" class="form-grid">
+          <div class="record">
+            <div class="splitline"><span>${esc(active.title)}</span><span class="badge warn">${esc(data.config?.path || "")}</span></div>
+            <div class="meta">${esc(active.description || "")}</div>
+          </div>
+          <div class="field-grid">${fields}</div>
+          <div class="actions" style="margin-left:0">
+            <button class="primary" type="submit">Save</button>
+            <button data-config-reset="${esc(active.id)}" type="button">Reset tab</button>
+          </div>
+        </form>
+      </section>`;
+    }
     function renderOps(data) {
       return `<div class="grid">
         <section class="panel">
           <h2>Endpoints</h2>
           <div class="records">
             <div class="record"><span class="badge ok">GET</span> /api/snapshot</div>
+            <div class="record"><span class="badge ok">GET</span> /api/config</div>
+            <div class="record"><span class="badge ok">GET</span> /api/runtime/bot</div>
             <div class="record"><span class="badge ok">GET</span> /api/traces</div>
             <div class="record"><span class="badge ok">GET</span> /api/memory</div>
+            <div class="record"><span class="badge warn">POST</span> /api/config</div>
+            <div class="record"><span class="badge warn">POST</span> /api/runtime/bot/start|stop</div>
             <div class="record"><span class="badge warn">POST</span> /api/memory/facts</div>
             <div class="record"><span class="badge bad">DELETE</span> /api/memory/facts/{id}</div>
           </div>
@@ -910,18 +1296,24 @@ INDEX_HTML = """<!doctype html>
       if (state.view === "memory") view.innerHTML = renderMemory(state.data);
       else if (state.view === "chat") view.innerHTML = renderChat(state.data);
       else if (state.view === "traces") view.innerHTML = renderTraces(state.data);
+      else if (state.view === "config") view.innerHTML = renderConfig(state.data);
       else if (state.view === "ops") view.innerHTML = renderOps(state.data);
       else view.innerHTML = renderOverview(state.data);
       bindFactForm();
+      bindConfigForm();
     }
     function factFormHasFocus() {
       const form = document.getElementById("fact-form");
       return Boolean(form && form.contains(document.activeElement));
     }
+    function configFormHasFocus() {
+      const form = document.getElementById("config-form");
+      return Boolean(form && form.contains(document.activeElement));
+    }
     async function loadSnapshot(options = {}) {
       const res = await fetch("/api/snapshot");
       state.data = await res.json();
-      if (!factFormHasFocus() || options.forceRender) {
+      if ((!factFormHasFocus() && !configFormHasFocus()) || options.forceRender) {
         render();
       }
     }
@@ -945,6 +1337,58 @@ INDEX_HTML = """<!doctype html>
           })
         });
         state.factDraft = { subject: "", content: "" };
+        await loadSnapshot({ forceRender: true });
+      });
+    }
+    function bindConfigForm() {
+      document.querySelectorAll("[data-config-tab]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", () => {
+          state.configTab = button.dataset.configTab;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-bot-action]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          await fetch(`/api/runtime/bot/${button.dataset.botAction}`, { method: "POST" });
+          await loadSnapshot({ forceRender: true });
+        });
+      });
+      document.querySelectorAll("[data-config-reset]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          await fetch("/api/config/reset", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({section: button.dataset.configReset})
+          });
+          await loadSnapshot({ forceRender: true });
+        });
+      });
+      const form = document.getElementById("config-form");
+      if (!form || form.dataset.bound) return;
+      form.dataset.bound = "1";
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const values = {};
+        form.querySelectorAll("[data-config-key]").forEach(input => {
+          if (input.disabled) return;
+          values[input.dataset.configKey] = input.type === "checkbox" ? input.checked : input.value;
+        });
+        const res = await fetch("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({values})
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({error: "Config save failed"}));
+          alert(data.error || "Config save failed");
+          return;
+        }
         await loadSnapshot({ forceRender: true });
       });
     }
@@ -973,9 +1417,14 @@ def html_bytes(text: str) -> tuple[int, bytes, str]:
     return 200, text.encode("utf-8"), "text/html; charset=utf-8"
 
 
-def make_handler(memory_store: MemoryStore | None = None, trace_logger: TraceLogger | None = None):
+def make_handler(
+    memory_store: MemoryStore | None = None,
+    trace_logger: TraceLogger | None = None,
+    bot_manager: TelegramBotProcessManager | None = None,
+):
     store = memory_store or default_memory_store()
     traces = trace_logger or default_trace_logger()
+    manager = bot_manager or TelegramBotProcessManager()
 
     class NikoOpsHandler(BaseHTTPRequestHandler):
         server_version = "NikoOps/0.1"
@@ -986,7 +1435,21 @@ def make_handler(memory_store: MemoryStore | None = None, trace_logger: TraceLog
                 self._send(*html_bytes(INDEX_HTML))
                 return
             if parsed.path == "/api/snapshot":
-                self._send(*json_bytes({"memory": store.snapshot(), "traces": traces.read_events(limit=80)}))
+                self._send(
+                    *json_bytes(
+                        {
+                            "memory": store.snapshot(),
+                            "traces": traces.read_events(limit=80),
+                            "config": config_snapshot(manager),
+                        }
+                    )
+                )
+                return
+            if parsed.path == "/api/config":
+                self._send(*json_bytes({"config": config_snapshot(manager)}))
+                return
+            if parsed.path == "/api/runtime/bot":
+                self._send(*json_bytes({"bot": manager.status()}))
                 return
             if parsed.path == "/api/traces":
                 limit = self._query_limit(parsed.query)
@@ -1012,6 +1475,35 @@ def make_handler(memory_store: MemoryStore | None = None, trace_logger: TraceLog
                     self._send(*json_bytes({"error": str(exc)}, status=400))
                     return
                 self._send(*json_bytes({"id": fact_id}, status=201))
+                return
+            if parsed.path == "/api/config":
+                data = self._read_json()
+                values = data.get("values") if isinstance(data.get("values"), dict) else data
+                try:
+                    update_runtime_config(validate_config_updates(values))
+                except ValueError as exc:
+                    self._send(*json_bytes({"error": str(exc)}, status=400))
+                    return
+                self._send(*json_bytes({"config": config_snapshot(manager)}))
+                return
+            if parsed.path == "/api/config/reset":
+                data = self._read_json()
+                keys: list[str] = []
+                if isinstance(data.get("keys"), list):
+                    keys.extend(str(key) for key in data["keys"])
+                if data.get("section"):
+                    keys.extend(config_section_keys(str(data["section"])))
+                if not keys:
+                    self._send(*json_bytes({"error": "missing keys or section"}, status=400))
+                    return
+                reset_runtime_config(keys)
+                self._send(*json_bytes({"config": config_snapshot(manager)}))
+                return
+            if parsed.path == "/api/runtime/bot/start":
+                self._send(*json_bytes({"bot": manager.start()}))
+                return
+            if parsed.path == "/api/runtime/bot/stop":
+                self._send(*json_bytes({"bot": manager.stop()}))
                 return
             self._send(*json_bytes({"error": "not found"}, status=404))
 
@@ -1063,12 +1555,13 @@ def create_server(
     port: int = DEFAULT_OPS_PORT,
     memory_store: MemoryStore | None = None,
     trace_logger: TraceLogger | None = None,
+    bot_manager: TelegramBotProcessManager | None = None,
 ) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(memory_store, trace_logger))
+    return ThreadingHTTPServer((host, port), make_handler(memory_store, trace_logger, bot_manager))
 
 
 def main() -> int:
-    load_env_files()
+    load_env_files("telegram")
     host = env_value("NIKO_OPS_HOST", DEFAULT_OPS_HOST)
     raw_port = env_value("NIKO_OPS_PORT", str(DEFAULT_OPS_PORT))
     try:
