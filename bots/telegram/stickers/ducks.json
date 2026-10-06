@@ -19,19 +19,6 @@
         "😳",
         "😡",
         "😠"
-      ],
-      "keywords": [
-        "loi",
-        "error",
-        "fail",
-        "bug",
-        "khong duoc",
-        "hong",
-        "sai",
-        "toang",
-        "crash",
-        "cham",
-        "het context"
       ]
     },
     "happy": {
@@ -41,21 +28,6 @@
         "👍",
         "🤗",
         "👌"
-      ],
-      "keywords": [
-        "haha",
-        "hehe",
-        "hihi",
-        "lol",
-        ":v",
-        "vui",
-        "ngon",
-        "dinh",
-        "tuyet",
-        "cam on",
-        "thanks",
-        "ok",
-        "oke"
       ]
     },
     "thinking": {
@@ -63,17 +35,6 @@
         "🤔",
         "🙄",
         "🤷‍♂️"
-      ],
-      "keywords": [
-        "sao",
-        "vi sao",
-        "tai sao",
-        "lam sao",
-        "hum",
-        "hmm",
-        "nghi",
-        "phan tich",
-        "?"
       ]
     },
     "coding": {
@@ -81,19 +42,6 @@
         "🤔",
         "👍",
         "👌"
-      ],
-      "keywords": [
-        "code",
-        "repo",
-        "git",
-        "pr",
-        "python",
-        "script",
-        "api",
-        "cli",
-        "mcp",
-        "hook",
-        "context"
       ]
     },
     "tease": {
@@ -101,13 +49,6 @@
         "😈",
         "😎",
         "😏"
-      ],
-      "keywords": [
-        "treu",
-        "ca khia",
-        "cham biem",
-        "dua thoi",
-        "banh cuon"
       ]
     },
     "hype": {
@@ -116,15 +57,6 @@
         "🤑",
         "🌈",
         "👍"
-      ],
-      "keywords": [
-        "ship",
-        "merge",
-        "deploy",
-        "done",
-        "xong",
-        "chay duoc",
-        "trien"
       ]
     },
     "sad": {
@@ -132,14 +64,6 @@
         "😭",
         "🥶",
         "👎"
-      ],
-      "keywords": [
-        "buon",
-        "met",
-        "kho",
-        "nan",
-        "chiu",
-        "chan"
       ]
     },
     "neutral": {
@@ -148,8 +72,7 @@
         "👋",
         "👌",
         "😴"
-      ],
-      "keywords": []
+      ]
     }
   }
 }

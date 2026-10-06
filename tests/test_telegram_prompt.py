@@ -11,14 +11,17 @@ from bots.telegram.bot import (
     STICKER_SET_CACHE,
     TelegramError,
     decision_triage_status_line,
+    format_sticker_decision_log,
     format_reply_for_recipient,
     handle_message,
     maybe_send_sticker,
     prepare_long_polling,
     send_chat_action,
+    sticker_decision_status_line,
     telegram_request,
 )
-from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
+from bots.decision_model.sticker import StickerMoodDecision
+from bots.telegram.sticker_picker import choose_sticker_file_id
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.graph import format_fast_triage_log
 from niko.graphs.chat_reply.prompts import (
@@ -827,42 +830,66 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertEqual(answer, "Da anh\n\nMeow")
 
-    def test_sticker_picker_detects_warning_mood(self):
-        config = {
-            "mood_priority": ["warning"],
-            "moods": {"warning": {"keywords": ["loi"], "emojis": ["\U0001f631"]}},
-        }
-
-        self.assertEqual(detect_sticker_mood("Bot bi loi roi anh", config), "warning")
-
-    def test_sticker_picker_chooses_matching_duck_sticker(self):
+    def test_sticker_picker_chooses_matching_duck_sticker_by_decided_mood(self):
         thumbs_up = "\U0001f44d"
         config = {
             "mode": "smart",
             "mood_priority": ["happy"],
-            "moods": {"happy": {"keywords": ["ok"], "emojis": [thumbs_up]}},
+            "moods": {"happy": {"emojis": [thumbs_up]}},
         }
         stickers = [
             {"file_id": "sad-duck", "emoji": "\U0001f610"},
             {"file_id": "happy-duck", "emoji": thumbs_up},
         ]
 
-        sticker = choose_sticker_file_id(stickers, config, "ok anh", chooser=lambda items: items[0])
+        sticker = choose_sticker_file_id(stickers, config, "happy", chooser=lambda items: items[0])
 
         self.assertEqual(sticker, "happy-duck")
 
-    def test_sticker_picker_smart_mode_skips_when_no_mood(self):
+    def test_sticker_picker_skips_when_decision_is_no_sticker(self):
         config = {
             "mode": "smart",
             "mood_priority": ["happy"],
-            "moods": {"happy": {"keywords": ["ok"], "emojis": ["\U0001f44d"]}},
+            "moods": {"happy": {"emojis": ["\U0001f44d"]}},
         }
 
-        sticker = choose_sticker_file_id([{"file_id": "duck", "emoji": "\U0001f44d"}], config, "xin chao")
+        sticker = choose_sticker_file_id([{"file_id": "duck", "emoji": "\U0001f44d"}], config, "no_sticker")
 
         self.assertIsNone(sticker)
 
-    def test_maybe_send_sticker_sends_matching_duck_sticker(self):
+    def test_sticker_decision_terminal_log_includes_provider_model_and_mood(self):
+        decision = StickerMoodDecision(
+            mood="happy",
+            provider="ollama_nimble",
+            model="nimble",
+            confidence=0.8123,
+            label="happy",
+            probabilities={"happy": 0.8123, "no_sticker": 0.1877},
+        )
+
+        line = format_sticker_decision_log(decision)
+
+        self.assertIn("provider=ollama_nimble", line)
+        self.assertIn("mood=happy", line)
+        self.assertIn("model=nimble", line)
+        self.assertIn("confidence=0.812", line)
+
+    def test_sticker_startup_log_mentions_ollama_decision_model(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_STICKERS_ENABLED": "1",
+                "TELEGRAM_STICKER_DECISION_MODEL_ENABLED": "1",
+                "TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS": "5",
+            },
+            clear=True,
+        ):
+            line = sticker_decision_status_line()
+
+        self.assertIn("Ollama local enabled", line)
+        self.assertIn("timeout=5", line)
+
+    def test_maybe_send_sticker_sends_matching_duck_sticker_from_decision_model(self):
         STICKER_SET_CACHE.clear()
         calls = []
         thumbs_up = "\U0001f44d"
@@ -870,7 +897,7 @@ class TelegramPromptTests(unittest.TestCase):
             "set_name": "UtyaDuck",
             "mode": "smart",
             "mood_priority": ["happy"],
-            "moods": {"happy": {"keywords": ["ok"], "emojis": [thumbs_up]}},
+            "moods": {"happy": {"emojis": [thumbs_up]}},
         }
 
         def fake_telegram_request(token, method, payload, timeout_seconds=None):
@@ -882,11 +909,52 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "1"}, clear=False), patch(
             "bots.telegram.bot.load_effective_sticker_config", return_value=config
+        ), patch(
+            "bots.telegram.bot.decide_sticker_mood",
+            return_value=StickerMoodDecision(mood="happy", provider="ollama_nimble", model="nimble"),
         ), patch("bots.telegram.bot.telegram_request", side_effect=fake_telegram_request):
             maybe_send_sticker("token", 123, "ok anh", "Da duoc anh")
 
         self.assertEqual(calls[0], ("getStickerSet", {"name": "UtyaDuck"}))
         self.assertEqual(calls[1], ("sendSticker", {"chat_id": 123, "sticker": "happy-duck"}))
+
+    def test_maybe_send_sticker_skips_when_decision_model_chooses_no_sticker(self):
+        STICKER_SET_CACHE.clear()
+        config = {
+            "set_name": "UtyaDuck",
+            "mode": "smart",
+            "mood_priority": ["happy"],
+            "moods": {"happy": {"emojis": ["\U0001f44d"]}},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "1"}, clear=False), patch(
+            "bots.telegram.bot.load_effective_sticker_config", return_value=config
+        ), patch(
+            "bots.telegram.bot.decide_sticker_mood",
+            return_value=StickerMoodDecision(mood="no_sticker", provider="ollama_nimble", model="nimble"),
+        ), patch("bots.telegram.bot.telegram_request") as telegram_request_mock:
+            maybe_send_sticker("token", 123, "nghiem tuc", "Da anh")
+
+        telegram_request_mock.assert_not_called()
+
+    def test_maybe_send_sticker_skips_when_decision_model_fails(self):
+        STICKER_SET_CACHE.clear()
+        config = {
+            "set_name": "UtyaDuck",
+            "mode": "smart",
+            "mood_priority": ["happy"],
+            "moods": {"happy": {"emojis": ["\U0001f44d"]}},
+        }
+
+        with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "1"}, clear=False), patch(
+            "bots.telegram.bot.load_effective_sticker_config", return_value=config
+        ), patch(
+            "bots.telegram.bot.decide_sticker_mood",
+            side_effect=RuntimeError("ollama sticker timeout"),
+        ), patch("bots.telegram.bot.telegram_request") as telegram_request_mock:
+            maybe_send_sticker("token", 123, "nghiem tuc", "Da anh")
+
+        telegram_request_mock.assert_not_called()
 
     def test_uncertain_delay_seconds_is_bounded(self):
         with patch.dict(os.environ, {"NIKO_UNCERTAIN_DELAY_SECONDS": "45"}, clear=False):

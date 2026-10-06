@@ -25,9 +25,14 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 6. Kiểm tra `TELEGRAM_ALLOWED_CHAT_IDS` và `CHAT_ALLOWED_USER_KEYS`.
 7. Tạo callback `deliver_reply` và `notify_working`.
 8. Gọi `CHAT_REPLY_GRAPH.handle_message(...)`.
-9. Khi graph trả lời, gateway gửi message và có thể gửi sticker nền nếu bật sticker.
+9. Khi graph trả lời, gateway gửi message trước.
+10. Nếu bật sticker, gateway chạy worker nền: hỏi Nimble local chọn mood sticker,
+    rồi map mood đó sang file_id Telegram. Nếu Nimble chọn `no_sticker` hoặc lỗi,
+    bot bỏ qua sticker.
 
 Gateway không quyết định dùng local/Fast/Deep. Nó cũng không retrieve memory.
+Decision model trong sticker chỉ chọn mood trang trí sau reply, không ảnh hưởng
+route chính của chat.
 
 ## Chế Độ Single Agent
 

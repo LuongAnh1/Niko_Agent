@@ -53,12 +53,13 @@ bots/
   decision_model/
     client.py          # Ollama /v1/systemone client cho Nimble decision model
     triage.py          # Mapping prompt Telegram sang reply_now/send_to_deep
+    sticker.py         # Mapping prompt/reply sang mood sticker Telegram
     warmup.py          # Giu Nimble loaded voi keep_alive=-1
   telegram/
     bot.py             # Telegram gateway: polling, auth, mention filter, /id, reply, sticker
-    sticker_picker.py  # Local sticker picker cho Telegram Duck
+    sticker_picker.py  # Chon file_id theo mood sticker da quyet dinh
     stickers/
-      ducks.json       # Mapping mood/keyword sang sticker Telegram
+      ducks.json       # Mapping mood sang sticker Telegram
 
 niko/
   runtime.py           # Gọi Claude CLI, đọc hook, build prompt, inject memory context
@@ -154,6 +155,8 @@ Root `.env` giữ cấu hình chung:
 - `TELEGRAM_GROUP_MODE`
 - `TELEGRAM_MENTION_REPLIES`
 - `TELEGRAM_STICKERS_ENABLED`
+- `TELEGRAM_STICKER_DECISION_MODEL_ENABLED`
+- `TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS`
 - `TELEGRAM_STICKER_CONFIG_FILE`
 - `TELEGRAM_STICKER_SET_NAME`
 - `TELEGRAM_STICKER_MODE`

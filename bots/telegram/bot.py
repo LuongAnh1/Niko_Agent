@@ -21,6 +21,12 @@ from urllib.request import Request, urlopen
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from bots.decision_model.sticker import (
+    NO_STICKER_MOOD,
+    StickerMoodDecision,
+    available_moods_from_config,
+    decide_sticker_mood,
+)
 from bots.telegram.sticker_picker import choose_sticker_file_id, load_sticker_config
 from niko.graphs.chat_reply import ChatReplyGraph
 from niko.chat_gateway import (
@@ -80,6 +86,11 @@ def telegram_sticker_timeout_seconds() -> int:
         return max(1, int(raw_value))
     except ValueError:
         return DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS
+
+
+def sticker_decision_model_enabled() -> bool:
+    """Sticker không còn dùng keyword rule; tắt AI nghĩa là không gửi sticker."""
+    return env_flag("TELEGRAM_STICKER_DECISION_MODEL_ENABLED", "1")
 
 
 def telegram_startup_retries() -> int:
@@ -319,6 +330,28 @@ def send_sticker(token: str, chat_id: int, sticker_file_id: str, timeout_seconds
     )
 
 
+def format_probability_map(probabilities: dict[str, float]) -> str:
+    items = [f"{key}={value:.3f}" for key, value in sorted(probabilities.items())]
+    return "{" + ", ".join(items) + "}"
+
+
+def format_sticker_decision_log(decision: StickerMoodDecision) -> str:
+    """Dòng terminal cho biết Nimble đã chọn mood sticker nào."""
+    parts = [
+        f"provider={decision.provider or 'ollama_nimble'}",
+        f"mood={decision.mood}",
+    ]
+    if decision.model:
+        parts.append(f"model={decision.model}")
+    if decision.label:
+        parts.append(f"label={decision.label}")
+    if decision.confidence is not None:
+        parts.append(f"confidence={decision.confidence:.3f}")
+    if decision.probabilities:
+        parts.append(f"probabilities={format_probability_map(decision.probabilities)}")
+    return "Sticker decision: " + " ".join(parts)
+
+
 def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
     """Sticker là hiệu ứng phụ vui vẻ: lỗi sticker không được làm hỏng reply chính."""
     if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
@@ -330,13 +363,24 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
         if not set_name:
             return
 
+        if not sticker_decision_model_enabled():
+            print("Sticker decision: disabled")
+            return
+
+        decision = decide_sticker_mood(user_prompt, answer, available_moods_from_config(config))
+        print(format_sticker_decision_log(decision))
+        if decision.mood == NO_STICKER_MOOD:
+            return
+
         timeout_seconds = telegram_sticker_timeout_seconds()
         stickers = get_sticker_set_stickers(token, set_name, timeout_seconds=timeout_seconds)
-        sticker_file_id = choose_sticker_file_id(stickers, config, f"{user_prompt}\n{answer}")
+        sticker_file_id = choose_sticker_file_id(stickers, config, decision.mood)
         if sticker_file_id:
             send_sticker(token, chat_id, sticker_file_id, timeout_seconds=timeout_seconds)
+        else:
+            print(f"Sticker decision: mood={decision.mood} nhung khong tim thay sticker phu hop.")
     except Exception as exc:
-        print(f"Khong gui duoc sticker Telegram: {exc}", file=sys.stderr)
+        print(f"Sticker decision failed: {exc}", file=sys.stderr)
 
 
 def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
@@ -367,6 +411,16 @@ def decision_triage_status_line() -> str:
         return f"Decision triage: Ollama local disabled; using legacy Fast/Fable triage (mode={mode})."
 
     return f"Decision triage: disabled; uncertain prompts will hand off to Deep (mode={mode})."
+
+
+def sticker_decision_status_line() -> str:
+    """Tóm tắt cơ chế sticker để biết có gọi Nimble sau reply không."""
+    if not env_flag("TELEGRAM_STICKERS_ENABLED", "0"):
+        return "Sticker decision: disabled (TELEGRAM_STICKERS_ENABLED=0)."
+    if sticker_decision_model_enabled():
+        timeout = env_value("TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS", "").strip() or "shared"
+        return f"Sticker decision: Ollama local enabled (timeout={timeout})."
+    return "Sticker decision: disabled; keyword rule fallback has been removed."
 
 
 def deliver_niko_answer(token: str, chat_id: int, prompt: str, prompt_message, answer: str) -> None:
@@ -454,6 +508,7 @@ def main() -> int:
     print("Telegram Niko bot dang chay. Nhan Ctrl+C de dung.")
     print(f"Bot username: @{bot_username}")
     print(decision_triage_status_line())
+    print(sticker_decision_status_line())
     if not allowed_chat_ids:
         print("Canh bao: TELEGRAM_ALLOWED_CHAT_IDS dang trong, bot se tra loi moi chat gui den.")
     if allowed_user_keys:
