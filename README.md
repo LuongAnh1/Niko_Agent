@@ -39,7 +39,15 @@ docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
 ## Chạy Nhanh
 
 1. Cài và cấu hình FCC/Claude CLI để lệnh `fcc-claude` chạy được.
-2. Copy các file env mẫu:
+2. Cài Ollama, bật Ollama server, rồi pull model Nimble dùng cho decision triage:
+
+```bash
+ollama pull nimble
+```
+
+Nếu anh dùng tag khác, ví dụ một bản quantized cụ thể, đổi `NIKO_DECISION_MODEL_NAME` trong `niko/.env` cho khớp.
+
+3. Copy các file env mẫu:
 
 ```bash
 copy .env.example .env
@@ -47,15 +55,24 @@ copy niko\.env.example niko\.env
 copy bots\telegram\.env.example bots\telegram\.env
 ```
 
-3. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
-4. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
-5. Chạy bot:
+4. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
+5. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
+6. Warm up Nimble để model được giữ loaded cho tới khi Ollama tắt:
+
+```bash
+rtk python -m bots.decision_model.warmup
+ollama ps
+```
+
+Nếu `ollama ps` hiện `nimble:latest` với thời gian giữ loaded là `Forever`, decision model đã sẵn sàng.
+
+7. Chạy bot:
 
 ```bash
 python -m bots.telegram.bot
 ```
 
-6. Chạy dashboard quan sát:
+8. Chạy dashboard quan sát:
 
 ```bash
 python -m niko.ops.dashboard
@@ -101,10 +118,13 @@ NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
 ```
 
-Warm up Nimble decision model de giu model loaded den khi stop Ollama:
+Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
+phải pull sẵn trên máy. Lệnh warmup dưới đây gọi model một lần và gửi
+`keep_alive=-1`, nên model được giữ loaded cho tới khi anh tắt Ollama:
 
 ```bash
 rtk python -m bots.decision_model.warmup
+ollama ps
 ```
 
 `bots/telegram/.env`:
