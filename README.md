@@ -127,6 +127,22 @@ rtk python -m bots.decision_model.warmup
 ollama ps
 ```
 
+Nếu muốn gỡ Nimble khỏi RAM/VRAM nhưng vẫn giữ Ollama chạy, dùng:
+
+```bash
+ollama stop nimble
+ollama ps
+```
+
+Nếu bot vẫn đang chạy và `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, lần chat tiếp theo
+cần decision model có thể load Nimble lại. Muốn tắt hẳn decision model thì đổi
+env rồi restart bot:
+
+```env
+NIKO_DECISION_MODEL_ENABLED=0
+TELEGRAM_STICKER_DECISION_MODEL_ENABLED=0
+```
+
 `bots/telegram/.env`:
 
 ```env
