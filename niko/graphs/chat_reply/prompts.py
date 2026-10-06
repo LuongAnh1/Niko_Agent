@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-import sys
 import time
 from typing import Any
 
 from niko.graphs.chat_reply.router import ROUTE_DELAYED_DEEP_AGENT
 from niko.config import env_flag, env_value
+from niko.harness.runtime_log import default_runtime_logger
 import niko.runtime as runtime
 
 
@@ -34,6 +34,10 @@ DEFAULT_NIKO_DEEP_BUSY_REPLY = (
     "Da anh doi em chut, em van dang xu ly cau truoc. Khi co ket qua em se gui lai anh."
 )
 DEFAULT_NIKO_UNCERTAIN_DELAY_SECONDS = 3.0
+
+
+def runtime_log(event: str, message: str, *, level: str = "info", data: dict[str, Any] | None = None) -> None:
+    default_runtime_logger().event("fast_agent", event, message, level=level, data=data or {})
 
 FAST_AGENT_TASK_TRIAGE = "triage"
 FAST_AGENT_TASK_REPLY = "reply"
@@ -369,7 +373,12 @@ def try_call_fast_agent(
     try:
         return call_fast_agent(prompt, gateway_message, task=task, deep_answer=deep_answer, active_job=active_job)
     except Exception as exc:
-        print(f"Fast agent loi o task {task}: {exc}", file=sys.stderr)
+        runtime_log(
+            "fast_agent_error",
+            f"Fast agent loi o task {task}: {exc}",
+            level="error",
+            data={"task": task, "error": str(exc)},
+        )
         return None
 
 
@@ -407,7 +416,12 @@ def try_call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecis
     try:
         return call_fast_agent_decision(prompt, gateway_message)
     except Exception as exc:
-        print(f"Fast agent triage khong hop le, chuyen sang deep agent: {exc}", file=sys.stderr)
+        runtime_log(
+            "fast_triage_error",
+            f"Fast agent triage khong hop le, chuyen sang deep agent: {exc}",
+            level="warning",
+            data={"error": str(exc)},
+        )
         return None
 
 

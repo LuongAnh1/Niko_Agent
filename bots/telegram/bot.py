@@ -9,7 +9,6 @@ thành `ChatGatewayMessage`. Mọi quyết định agent, memory, triage hay Dee
 from __future__ import annotations
 
 import json
-import os
 import sys
 import threading
 import time
@@ -27,6 +26,7 @@ from bots.decision_model.sticker import (
     available_moods_from_config,
     decide_sticker_mood,
 )
+from bots.telegram.instance_guard import TelegramBotAlreadyRunning, acquire_telegram_bot_instance
 from bots.telegram.sticker_picker import choose_sticker_file_id, load_sticker_config
 from niko.graphs.chat_reply import ChatReplyGraph
 from niko.chat_gateway import (
@@ -36,6 +36,7 @@ from niko.chat_gateway import (
     telegram_message_to_gateway,
 )
 from niko.config import env_flag, env_value, load_env_files, resolve_project_path
+from niko.harness.runtime_log import default_runtime_logger
 
 
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
@@ -52,14 +53,24 @@ STICKER_SET_CACHE: dict[str, list[dict]] = {}
 CHAT_REPLY_GRAPH = ChatReplyGraph()
 
 
+def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
+    default_runtime_logger().event("telegram_bot", event, message, level=level, data=data or {})
+
+
 class TelegramError(RuntimeError):
     """Lỗi Telegram API đã được đổi sang message nội bộ dễ log."""
 
     pass
 
 
+def is_getupdates_conflict(error: Exception) -> bool:
+    """Telegram 409 nghĩa là token này đang có long-polling instance khác."""
+    message = str(error).lower()
+    return "telegram http 409" in message and "getupdates" in message
+
+
 def telegram_request_timeout_seconds() -> int:
-    raw_value = os.getenv("TELEGRAM_REQUEST_TIMEOUT_SECONDS", str(DEFAULT_TELEGRAM_REQUEST_TIMEOUT_SECONDS)).strip()
+    raw_value = env_value("TELEGRAM_REQUEST_TIMEOUT_SECONDS", str(DEFAULT_TELEGRAM_REQUEST_TIMEOUT_SECONDS)).strip()
     try:
         return max(5, int(raw_value))
     except ValueError:
@@ -67,7 +78,7 @@ def telegram_request_timeout_seconds() -> int:
 
 
 def telegram_chat_action_timeout_seconds() -> int:
-    raw_value = os.getenv(
+    raw_value = env_value(
         "TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS",
         str(DEFAULT_TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS),
     ).strip()
@@ -78,7 +89,7 @@ def telegram_chat_action_timeout_seconds() -> int:
 
 
 def telegram_sticker_timeout_seconds() -> int:
-    raw_value = os.getenv(
+    raw_value = env_value(
         "TELEGRAM_STICKER_TIMEOUT_SECONDS",
         str(DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS),
     ).strip()
@@ -94,7 +105,7 @@ def sticker_decision_model_enabled() -> bool:
 
 
 def telegram_startup_retries() -> int:
-    raw_value = os.getenv("TELEGRAM_STARTUP_RETRIES", str(DEFAULT_TELEGRAM_STARTUP_RETRIES)).strip()
+    raw_value = env_value("TELEGRAM_STARTUP_RETRIES", str(DEFAULT_TELEGRAM_STARTUP_RETRIES)).strip()
     try:
         return max(0, int(raw_value))
     except ValueError:
@@ -102,7 +113,7 @@ def telegram_startup_retries() -> int:
 
 
 def telegram_startup_retry_delay_seconds() -> float:
-    raw_value = os.getenv(
+    raw_value = env_value(
         "TELEGRAM_STARTUP_RETRY_DELAY_SECONDS",
         str(DEFAULT_TELEGRAM_STARTUP_RETRY_DELAY_SECONDS),
     ).strip()
@@ -214,7 +225,7 @@ def split_text(text: str, max_length: int) -> list[str]:
 
 def parse_allowed_chat_ids() -> set[int]:
     """Allowlist chat ở tầng Telegram; allowlist user nằm ở chat_gateway."""
-    raw_value = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
+    raw_value = env_value("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
     if not raw_value:
         return set()
 
@@ -228,7 +239,7 @@ def parse_allowed_chat_ids() -> set[int]:
 
 def prepare_long_polling(token: str) -> None:
     """Gỡ webhook trước khi long polling để tránh Telegram giữ delivery cũ."""
-    drop_pending = os.getenv("TELEGRAM_DROP_PENDING_UPDATES", "0").strip() == "1"
+    drop_pending = env_flag("TELEGRAM_DROP_PENDING_UPDATES", "0")
     max_retries = telegram_startup_retries()
     for attempt in range(max_retries + 1):
         try:
@@ -236,18 +247,22 @@ def prepare_long_polling(token: str) -> None:
             return
         except TelegramError as exc:
             if attempt >= max_retries:
-                print(
+                runtime_log(
+                    "delete_webhook_warning",
                     "Canh bao: khong goi duoc deleteWebhook luc khoi dong. "
                     f"Bot van tiep tuc long polling, loi gan nhat: {exc}",
-                    file=sys.stderr,
+                    level="warning",
+                    data={"error": str(exc)},
                 )
                 return
 
             delay_seconds = telegram_startup_retry_delay_seconds()
-            print(
+            runtime_log(
+                "delete_webhook_retry",
                 "Canh bao: deleteWebhook bi loi, thu lai "
                 f"{attempt + 1}/{max_retries} sau {delay_seconds:g}s: {exc}",
-                file=sys.stderr,
+                level="warning",
+                data={"attempt": attempt + 1, "max_retries": max_retries, "delay_seconds": delay_seconds},
             )
             if delay_seconds > 0:
                 time.sleep(delay_seconds)
@@ -287,7 +302,7 @@ def extract_group_prompt(message: dict, bot_username: str) -> str:
     if not is_group_chat(message):
         return text
 
-    group_mode = os.getenv("TELEGRAM_GROUP_MODE", GROUP_MODE_MENTIONS).strip().lower()
+    group_mode = env_value("TELEGRAM_GROUP_MODE", GROUP_MODE_MENTIONS).strip().lower()
     if group_mode == GROUP_MODE_ALL:
         return strip_bot_mentions(text, bot_username)
 
@@ -299,14 +314,14 @@ def extract_group_prompt(message: dict, bot_username: str) -> str:
 
 def load_effective_sticker_config() -> dict:
     """Nạp sticker config file rồi cho env override vài field hay đổi khi demo."""
-    config_file = os.getenv("TELEGRAM_STICKER_CONFIG_FILE", DEFAULT_TELEGRAM_STICKER_CONFIG_FILE).strip()
+    config_file = env_value("TELEGRAM_STICKER_CONFIG_FILE", DEFAULT_TELEGRAM_STICKER_CONFIG_FILE).strip()
     config = load_sticker_config(resolve_project_path(config_file))
 
-    sticker_set_name = os.getenv("TELEGRAM_STICKER_SET_NAME", "").strip()
+    sticker_set_name = env_value("TELEGRAM_STICKER_SET_NAME", "").strip()
     if sticker_set_name:
         config["set_name"] = sticker_set_name
 
-    sticker_mode = os.getenv("TELEGRAM_STICKER_MODE", "").strip()
+    sticker_mode = env_value("TELEGRAM_STICKER_MODE", "").strip()
     if sticker_mode:
         config["mode"] = sticker_mode
 
@@ -336,7 +351,7 @@ def format_probability_map(probabilities: dict[str, float]) -> str:
 
 
 def format_sticker_decision_log(decision: StickerMoodDecision) -> str:
-    """Dòng terminal cho biết Nimble đã chọn mood sticker nào."""
+    """Dòng runtime log cho biết Nimble đã chọn mood sticker nào."""
     parts = [
         f"provider={decision.provider or 'ollama_nimble'}",
         f"mood={decision.mood}",
@@ -364,11 +379,22 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
             return
 
         if not sticker_decision_model_enabled():
-            print("Sticker decision: disabled")
+            runtime_log("sticker_decision_disabled", "Sticker decision: disabled")
             return
 
         decision = decide_sticker_mood(user_prompt, answer, available_moods_from_config(config))
-        print(format_sticker_decision_log(decision))
+        runtime_log(
+            "sticker_decision",
+            format_sticker_decision_log(decision),
+            data={
+                "provider": decision.provider or "ollama_nimble",
+                "mood": decision.mood,
+                "model": decision.model,
+                "label": decision.label,
+                "confidence": decision.confidence,
+                "probabilities": decision.probabilities,
+            },
+        )
         if decision.mood == NO_STICKER_MOOD:
             return
 
@@ -378,9 +404,19 @@ def maybe_send_sticker(token: str, chat_id: int, user_prompt: str, answer: str) 
         if sticker_file_id:
             send_sticker(token, chat_id, sticker_file_id, timeout_seconds=timeout_seconds)
         else:
-            print(f"Sticker decision: mood={decision.mood} nhung khong tim thay sticker phu hop.")
+            runtime_log(
+                "sticker_missing",
+                f"Sticker decision: mood={decision.mood} nhung khong tim thay sticker phu hop.",
+                level="warning",
+                data={"mood": decision.mood},
+            )
     except Exception as exc:
-        print(f"Sticker decision failed: {exc}", file=sys.stderr)
+        runtime_log(
+            "sticker_decision_failed",
+            f"Sticker decision failed: {exc}",
+            level="error",
+            data={"error": str(exc)},
+        )
 
 
 def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer: str) -> None:
@@ -396,7 +432,7 @@ def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer:
 
 
 def decision_triage_status_line() -> str:
-    """Tóm tắt provider triage đang bật để terminal bot dễ kiểm tra cấu hình."""
+    """Tóm tắt provider triage đang bật để dashboard dễ kiểm tra cấu hình."""
     mode = env_value("NIKO_AGENT_MODE", "single", legacy_name="TELEGRAM_AGENT_MODE").strip() or "single"
     if env_flag("NIKO_DECISION_MODEL_ENABLED", "0"):
         model = env_value("NIKO_DECISION_MODEL_NAME", "nimble").strip() or "nimble"
@@ -446,11 +482,20 @@ def handle_message(
     chat_id = message["chat"]["id"]
     raw_text = (message.get("text") or "").strip()
 
-    print(f"Nhan tin nhan tu chat_id={chat_id}, user_key={gateway_message.user.key}")
+    runtime_log(
+        "telegram_message_received",
+        f"Nhan tin nhan tu chat_id={chat_id}, user_key={gateway_message.user.key}",
+        data={"chat_id": chat_id, "user_key": gateway_message.user.key},
+    )
 
     if is_command_for_bot(raw_text, "/id", bot_username) or is_command_for_bot(raw_text, "/whoami", bot_username):
         prompt_message = gateway_message.with_text(raw_text)
         send_reply(token, chat_id, format_identity_reply(prompt_message), prompt_message)
+        runtime_log(
+            "identity_command_handled",
+            f"Da xu ly identity command cho chat_id={chat_id}",
+            data={"chat_id": chat_id, "user_key": gateway_message.user.key},
+        )
         return
 
     prompt = extract_group_prompt(message, bot_username)
@@ -460,11 +505,21 @@ def handle_message(
     prompt_message = gateway_message.with_text(prompt)
 
     if allowed_chat_ids and chat_id not in allowed_chat_ids:
-        print(f"Bo qua chat_id chua duoc phep: {chat_id}")
+        runtime_log(
+            "telegram_chat_rejected",
+            f"Bo qua chat_id chua duoc phep: {chat_id}",
+            level="warning",
+            data={"chat_id": chat_id},
+        )
         return
 
     if allowed_user_keys and gateway_message.user.key not in allowed_user_keys:
-        print(f"Bo qua user_key chua duoc phep: {gateway_message.user.key}")
+        runtime_log(
+            "telegram_user_rejected",
+            f"Bo qua user_key chua duoc phep: {gateway_message.user.key}",
+            level="warning",
+            data={"user_key": gateway_message.user.key},
+        )
         return
 
     if is_command_for_bot(prompt, "/start", bot_username):
@@ -481,11 +536,17 @@ def handle_message(
 
     try:
         route = CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)
-        print(f"Da xu ly Telegram message: route={route}, chat_id={chat_id}, user_key={gateway_message.user.key}")
+        runtime_log(
+            "telegram_message_processed",
+            f"Da xu ly Telegram message: route={route}, chat_id={chat_id}, user_key={gateway_message.user.key}",
+            data={"route": route, "chat_id": chat_id, "user_key": gateway_message.user.key},
+        )
     except Exception as exc:
-        print(
+        runtime_log(
+            "telegram_message_error",
             f"Loi xu ly Telegram message: chat_id={chat_id}, user_key={gateway_message.user.key}, error={exc}",
-            file=sys.stderr,
+            level="error",
+            data={"chat_id": chat_id, "user_key": gateway_message.user.key, "error": str(exc)},
         )
         deliver_niko_answer(token, chat_id, prompt, prompt_message, f"Loi: {exc}")
 
@@ -494,25 +555,62 @@ def main() -> int:
     """Entrypoint long polling local cho Telegram bot."""
     load_env_files("telegram")
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = env_value("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        print("Thieu TELEGRAM_BOT_TOKEN. Hay tao file bots/telegram/.env hoac set bien moi truong.", file=sys.stderr)
+        runtime_log(
+            "telegram_config_error",
+            "Thieu TELEGRAM_BOT_TOKEN. Hay mo dashboard Config/Bots de nhap token.",
+            level="error",
+        )
         return 1
 
     allowed_chat_ids = parse_allowed_chat_ids()
-    allowed_user_keys = parse_allowed_user_keys(os.getenv("CHAT_ALLOWED_USER_KEYS", ""))
-    user_aliases = parse_user_aliases(os.getenv("CHAT_USER_ALIASES", ""))
+    allowed_user_keys = parse_allowed_user_keys(env_value("CHAT_ALLOWED_USER_KEYS", ""))
+    user_aliases = parse_user_aliases(env_value("CHAT_USER_ALIASES", ""))
     offset = None
 
+    try:
+        instance_lock = acquire_telegram_bot_instance()
+    except TelegramBotAlreadyRunning as exc:
+        runtime_log(
+            "telegram_instance_conflict",
+            str(exc),
+            level="error",
+            data=exc.info.to_dict(),
+        )
+        return 2
+    runtime_log(
+        "telegram_instance_lock_acquired",
+        f"Da giu Telegram bot single-instance lock pid={instance_lock.info.pid}.",
+        data=instance_lock.info.to_dict(),
+    )
+
     bot_username = get_bot_username(token)
-    print("Telegram Niko bot dang chay. Nhan Ctrl+C de dung.")
-    print(f"Bot username: @{bot_username}")
-    print(decision_triage_status_line())
-    print(sticker_decision_status_line())
+    decision_status = decision_triage_status_line()
+    sticker_status = sticker_decision_status_line()
+    runtime_log(
+        "telegram_bot_started",
+        f"Telegram Niko bot dang chay: @{bot_username}",
+        data={
+            "bot_username": bot_username,
+            "decision_triage": decision_status,
+            "sticker_decision": sticker_status,
+            "allowed_chat_count": len(allowed_chat_ids),
+            "allowed_user_count": len(allowed_user_keys),
+        },
+    )
     if not allowed_chat_ids:
-        print("Canh bao: TELEGRAM_ALLOWED_CHAT_IDS dang trong, bot se tra loi moi chat gui den.")
+        runtime_log(
+            "telegram_allowlist_warning",
+            "Canh bao: TELEGRAM_ALLOWED_CHAT_IDS dang trong, bot se tra loi moi chat gui den.",
+            level="warning",
+        )
     if allowed_user_keys:
-        print(f"Chi tra loi {len(allowed_user_keys)} user_key duoc phep.")
+        runtime_log(
+            "telegram_user_allowlist_loaded",
+            f"Chi tra loi {len(allowed_user_keys)} user_key duoc phep.",
+            data={"allowed_user_count": len(allowed_user_keys)},
+        )
 
     prepare_long_polling(token)
 
@@ -529,10 +627,24 @@ def main() -> int:
                 if message:
                     handle_message(token, message, allowed_chat_ids, allowed_user_keys, user_aliases, bot_username)
         except KeyboardInterrupt:
-            print("\nDa dung bot.")
+            runtime_log("telegram_bot_stopped", "Da dung bot.")
             return 0
         except Exception as exc:
-            print(f"Loi vong lap bot: {exc}", file=sys.stderr)
+            if is_getupdates_conflict(exc):
+                runtime_log(
+                    "telegram_polling_conflict",
+                    "Telegram getUpdates bi conflict: dang co mot bot instance khac dung cung token. "
+                    "Hay dung process bot cu hoac dung dashboard Start cho duy nhat mot instance.",
+                    level="error",
+                    data={"error": str(exc)},
+                )
+                return 2
+            runtime_log(
+                "telegram_polling_error",
+                f"Loi Telegram long polling: {exc}",
+                level="error",
+                data={"error": str(exc)},
+            )
             time.sleep(5)
 
 

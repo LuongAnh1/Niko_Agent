@@ -9,11 +9,11 @@ mà là orchestration cụ thể cho Niko Telegram baseline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import sys
 import threading
 import time
 from typing import Callable
 
+from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger, TraceTurn, default_trace_logger
 from niko.memory.context import compact_episode_summary, memory_write_enabled
 from niko.memory.store import MemoryStore, default_memory_store, utc_now
@@ -55,7 +55,7 @@ def two_agent_mode_enabled() -> bool:
 
 
 def format_probability_map(probabilities: dict[str, float]) -> str:
-    """Rút gọn xác suất để log terminal đọc được trong một dòng."""
+    """Rút gọn xác suất để runtime log đọc được trong một dòng."""
     items = [f"{key}={value:.3f}" for key, value in sorted(probabilities.items())]
     return "{" + ", ".join(items) + "}"
 
@@ -77,6 +77,10 @@ def format_fast_triage_log(decision: prompts.FastAgentDecision) -> str:
     if decision.probabilities:
         parts.append(f"probabilities={format_probability_map(decision.probabilities)}")
     return "Fast triage: " + " ".join(parts)
+
+
+def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
+    default_runtime_logger().event("chat_graph", event, message, level=level, data=data or {})
 
 
 class ChatReplyGraph:
@@ -387,7 +391,11 @@ class ChatReplyGraph:
             deep_job_active=self.has_active_deep_job(conversation_id),
             fast_agent_available=prompts.fast_triage_available(),
         )
-        print(f"Agent route: {route.kind} ({route.reason})")
+        runtime_log(
+            "route_decision",
+            f"Agent route: {route.kind} ({route.reason})",
+            data={"route": route.kind, "reason": route.reason, "trace_id": trace_turn.turn_id},
+        )
         self.trace_logger.event(
             trace_turn.turn_id,
             "route_decision",
@@ -430,7 +438,6 @@ class ChatReplyGraph:
             self._notify_working_async(notify_working, trace_turn.turn_id)
             decision = prompts.try_call_fast_agent_decision(prompt, gateway_message)
             if decision:
-                print(format_fast_triage_log(decision))
                 decision_meta = {
                     "decision": decision.route,
                     "has_reply": bool(decision.reply),
@@ -452,6 +459,11 @@ class ChatReplyGraph:
                     "fast_triage_finished",
                     decision_meta,
                 )
+                runtime_log(
+                    "fast_triage_finished",
+                    format_fast_triage_log(decision),
+                    data={**decision_meta, "trace_id": trace_turn.turn_id},
+                )
             if decision and decision.route == prompts.FAST_DECISION_REPLY_NOW:
                 # Nimble chỉ quyết định route; nếu không có text thì Fable sinh reply nhanh.
                 fast_reply = decision.reply or prompts.try_call_fast_agent(
@@ -460,7 +472,12 @@ class ChatReplyGraph:
                     task=prompts.FAST_AGENT_TASK_REPLY,
                 )
                 if not fast_reply:
-                    print("Fast triage chon reply_now nhung khong tao duoc reply, chuyen sang deep agent.", file=sys.stderr)
+                    runtime_log(
+                        "fast_reply_fallback_to_deep",
+                        "Fast triage chon reply_now nhung khong tao duoc reply, chuyen sang deep agent.",
+                        level="warning",
+                        data={"trace_id": trace_turn.turn_id},
+                    )
                     self.trace_logger.event(trace_turn.turn_id, "fast_reply_fallback_to_deep", {})
                 else:
                     final_reply = prompts.ensure_reply_suffix(fast_reply)
@@ -490,7 +507,12 @@ class ChatReplyGraph:
                     trace_id=trace_turn.turn_id,
                 )
                 return route.kind
-            print("Fast agent khong co cau tra loi truc tiep hop le, chuyen sang deep agent.", file=sys.stderr)
+            runtime_log(
+                "fast_triage_fallback_to_deep",
+                "Fast agent khong co cau tra loi truc tiep hop le, chuyen sang deep agent.",
+                level="warning",
+                data={"trace_id": trace_turn.turn_id},
+            )
             self.trace_logger.event(trace_turn.turn_id, "fast_triage_fallback_to_deep", {})
 
         # Deep/default path: các route chắc chắn sâu, hoặc triage lỗi/không trả reply hợp lệ.

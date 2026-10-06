@@ -50,6 +50,8 @@ class MemoryStoreTests(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
+                    "NIKO_STATE_DIR": temp_dir,
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
                     "NIKO_MEMORY_TOP_K": "3",

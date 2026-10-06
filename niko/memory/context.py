@@ -9,7 +9,6 @@ Nó chưa làm embedding, rerank hay graph reasoning; đây là tầng text retr
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 import re
 import unicodedata
 from typing import Any
@@ -213,9 +212,4 @@ def compact_episode_summary(prompt: str, answer: str, followups: list[str] | Non
 
 def memory_write_enabled() -> bool:
     """Memory write có thể tắt độc lập retrieval để test/demo sạch dữ liệu."""
-    return memory_enabled() and os.getenv("NIKO_MEMORY_WRITE_ENABLED", "1").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return memory_enabled() and env_flag("NIKO_MEMORY_WRITE_ENABLED", "1")

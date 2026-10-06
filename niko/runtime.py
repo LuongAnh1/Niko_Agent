@@ -11,11 +11,11 @@ import os
 from pathlib import Path
 import shlex
 import shutil
-import sys
 import subprocess
 
 from niko.chat_gateway import build_identity_context
 from niko.config import env_flag, env_value, resolve_project_path
+from niko.harness.runtime_log import default_runtime_logger
 
 
 DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
@@ -46,7 +46,7 @@ def build_cli_args(command: str, prompt: str | None = None) -> list[str]:
 
 def resolve_claude_workdir() -> Path | None:
     """Tạo workdir riêng cho CLI nếu cấu hình, tránh chạy thẳng trên repo root."""
-    raw_path = os.getenv("CLAUDE_WORKDIR", DEFAULT_CLAUDE_WORKDIR).strip()
+    raw_path = env_value("CLAUDE_WORKDIR", DEFAULT_CLAUDE_WORKDIR).strip()
     if not raw_path:
         return None
 
@@ -58,7 +58,7 @@ def resolve_claude_workdir() -> Path | None:
 def run_cli(command: str, prompt: str | None = None, timeout_seconds: int | None = None) -> str:
     """Chạy một CLI LLM và chuẩn hóa lỗi thành RuntimeError dễ trace."""
     if timeout_seconds is None:
-        timeout_seconds = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180"))
+        timeout_seconds = int(env_value("CLAUDE_TIMEOUT_SECONDS", "180"))
 
     try:
         result = subprocess.run(
@@ -136,10 +136,10 @@ load_telegram_prompt_hook = load_prompt_hook
 
 def deep_agent_command() -> str:
     """Deep có command riêng; nếu trống thì dùng command Claude mặc định."""
-    command = os.getenv("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
+    command = env_value("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
     if command:
         return command
-    return os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
+    return env_value("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
 
 
 def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, trace_logger=None) -> str:
@@ -163,7 +163,13 @@ def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, t
                 logger.event(trace_id, "memory_retrieval_error", {"error": str(exc)})
             except Exception:
                 pass
-        print(f"Khong nap duoc memory context: {exc}", file=sys.stderr)
+        default_runtime_logger().event(
+            "deep_runtime",
+            "memory_context_error",
+            f"Khong nap duoc memory context: {exc}",
+            level="error",
+            data={"error": str(exc)},
+        )
 
     deep_prompt = build_niko_prompt(
         prompt,
@@ -175,7 +181,7 @@ def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, t
 
 
 def call_claude(prompt: str, command: str | None = None) -> str:
-    command = command or os.getenv("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
+    command = command or env_value("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
     return run_cli(command, prompt) or "(Khong co noi dung tra ve.)"
 
 
