@@ -29,7 +29,7 @@ from niko.chat_gateway import (
     parse_user_aliases,
     telegram_message_to_gateway,
 )
-from niko.config import env_flag, load_env_files, resolve_project_path
+from niko.config import env_flag, env_value, load_env_files, resolve_project_path
 
 
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
@@ -351,6 +351,24 @@ def maybe_send_sticker_async(token: str, chat_id: int, user_prompt: str, answer:
     thread.start()
 
 
+def decision_triage_status_line() -> str:
+    """Tóm tắt provider triage đang bật để terminal bot dễ kiểm tra cấu hình."""
+    mode = env_value("NIKO_AGENT_MODE", "single", legacy_name="TELEGRAM_AGENT_MODE").strip() or "single"
+    if env_flag("NIKO_DECISION_MODEL_ENABLED", "0"):
+        model = env_value("NIKO_DECISION_MODEL_NAME", "nimble").strip() or "nimble"
+        base_url = env_value("NIKO_DECISION_MODEL_BASE_URL", "http://localhost:11434").strip()
+        keep_alive = env_value("NIKO_DECISION_MODEL_KEEP_ALIVE", "-1").strip() or "(default)"
+        return (
+            "Decision triage: Ollama local enabled "
+            f"(mode={mode}, model={model}, base_url={base_url}, keep_alive={keep_alive})."
+        )
+
+    if env_value("NIKO_FAST_AGENT_COMMAND", "", legacy_name="TELEGRAM_FAST_AGENT_COMMAND").strip():
+        return f"Decision triage: Ollama local disabled; using legacy Fast/Fable triage (mode={mode})."
+
+    return f"Decision triage: disabled; uncertain prompts will hand off to Deep (mode={mode})."
+
+
 def deliver_niko_answer(token: str, chat_id: int, prompt: str, prompt_message, answer: str) -> None:
     """Một chỗ duy nhất cho reply cuối: text trước, sticker chạy nền sau."""
     send_reply(token, chat_id, answer, prompt_message)
@@ -408,8 +426,13 @@ def handle_message(
         send_chat_action(token, chat_id)
 
     try:
-        CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)
+        route = CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)
+        print(f"Da xu ly Telegram message: route={route}, chat_id={chat_id}, user_key={gateway_message.user.key}")
     except Exception as exc:
+        print(
+            f"Loi xu ly Telegram message: chat_id={chat_id}, user_key={gateway_message.user.key}, error={exc}",
+            file=sys.stderr,
+        )
         deliver_niko_answer(token, chat_id, prompt, prompt_message, f"Loi: {exc}")
 
 
@@ -430,6 +453,7 @@ def main() -> int:
     bot_username = get_bot_username(token)
     print("Telegram Niko bot dang chay. Nhan Ctrl+C de dung.")
     print(f"Bot username: @{bot_username}")
+    print(decision_triage_status_line())
     if not allowed_chat_ids:
         print("Canh bao: TELEGRAM_ALLOWED_CHAT_IDS dang trong, bot se tra loi moi chat gui den.")
     if allowed_user_keys:

@@ -246,7 +246,7 @@ def parse_fast_agent_decision(answer: str) -> FastAgentDecision:
 
     reply_value = data.get("reply", "")
     reply = "" if reply_value is None else str(reply_value).strip()
-    return FastAgentDecision(route=route, reply=reply)
+    return FastAgentDecision(route=route, reply=reply, provider="legacy_fast_agent")
 
 
 def build_fast_agent_task_prompt(

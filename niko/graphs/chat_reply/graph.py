@@ -54,6 +54,31 @@ def two_agent_mode_enabled() -> bool:
     return mode in {AGENT_MODE_TWO_AGENT, "dual", "2", "true", "on"}
 
 
+def format_probability_map(probabilities: dict[str, float]) -> str:
+    """Rút gọn xác suất để log terminal đọc được trong một dòng."""
+    items = [f"{key}={value:.3f}" for key, value in sorted(probabilities.items())]
+    return "{" + ", ".join(items) + "}"
+
+
+def format_fast_triage_log(decision: prompts.FastAgentDecision) -> str:
+    """Dòng log cho biết triage dùng provider nào và model đã quyết định gì."""
+    provider = decision.provider or "legacy_fast_agent"
+    parts = [
+        f"provider={provider}",
+        f"route={decision.route}",
+        f"has_reply={'yes' if decision.reply else 'no'}",
+    ]
+    if decision.model:
+        parts.append(f"model={decision.model}")
+    if decision.label:
+        parts.append(f"label={decision.label}")
+    if decision.confidence is not None:
+        parts.append(f"confidence={decision.confidence:.3f}")
+    if decision.probabilities:
+        parts.append(f"probabilities={format_probability_map(decision.probabilities)}")
+    return "Fast triage: " + " ".join(parts)
+
+
 class ChatReplyGraph:
     """Điều phối một turn chat và giữ trạng thái Deep job đang chạy."""
 
@@ -405,7 +430,7 @@ class ChatReplyGraph:
             self._notify_working_async(notify_working, trace_turn.turn_id)
             decision = prompts.try_call_fast_agent_decision(prompt, gateway_message)
             if decision:
-                print(f"Fast triage: {decision.route}")
+                print(format_fast_triage_log(decision))
                 decision_meta = {
                     "decision": decision.route,
                     "has_reply": bool(decision.reply),

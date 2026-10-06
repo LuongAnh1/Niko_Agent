@@ -10,6 +10,7 @@ from unittest.mock import patch
 from bots.telegram.bot import (
     STICKER_SET_CACHE,
     TelegramError,
+    decision_triage_status_line,
     format_reply_for_recipient,
     handle_message,
     maybe_send_sticker,
@@ -19,6 +20,7 @@ from bots.telegram.bot import (
 )
 from bots.telegram.sticker_picker import choose_sticker_file_id, detect_sticker_mood
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
+from niko.graphs.chat_reply.graph import format_fast_triage_log
 from niko.graphs.chat_reply.prompts import (
     FAST_AGENT_TASK_FINAL,
     FAST_AGENT_TASK_REPLY,
@@ -306,6 +308,43 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertEqual(decision.route, FAST_DECISION_SEND_TO_DEEP)
         self.assertEqual(decision.reply, "Da anh doi em chut")
+        self.assertEqual(decision.provider, "legacy_fast_agent")
+
+    def test_fast_triage_terminal_log_includes_provider_model_and_label(self):
+        decision = FastAgentDecision(
+            route=FAST_DECISION_SEND_TO_DEEP,
+            provider="ollama_nimble",
+            model="nimble",
+            confidence=0.8754,
+            label="send_to_deep",
+            probabilities={"reply_now": 0.1246, "send_to_deep": 0.8754},
+        )
+
+        log_line = format_fast_triage_log(decision)
+
+        self.assertIn("provider=ollama_nimble", log_line)
+        self.assertIn("model=nimble", log_line)
+        self.assertIn("route=send_to_deep", log_line)
+        self.assertIn("label=send_to_deep", log_line)
+        self.assertIn("confidence=0.875", log_line)
+
+    def test_telegram_startup_log_mentions_ollama_decision_model(self):
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_DECISION_MODEL_BASE_URL": "http://localhost:11434",
+                "NIKO_DECISION_MODEL_NAME": "nimble",
+                "NIKO_DECISION_MODEL_KEEP_ALIVE": "-1",
+            },
+            clear=True,
+        ):
+            line = decision_triage_status_line()
+
+        self.assertIn("Ollama local enabled", line)
+        self.assertIn("model=nimble", line)
+        self.assertIn("keep_alive=-1", line)
 
     def test_fast_triage_prompt_skips_hook(self):
         message = telegram_message_to_gateway(
