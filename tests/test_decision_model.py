@@ -1,10 +1,13 @@
 import unittest
+from unittest.mock import patch
 
 from bots.decision_model.client import (
     DecisionModelConfig,
+    build_ollama_unload_payload,
     build_systemone_choice_payload,
     parse_keep_alive,
     parse_systemone_choice_response,
+    unload_decision_model,
 )
 from bots.decision_model.sticker import (
     NO_STICKER_MOOD,
@@ -41,6 +44,29 @@ class DecisionModelTests(unittest.TestCase):
         self.assertEqual(payload["model"], "nimble")
         self.assertEqual(payload["keep_alive"], -1)
         self.assertEqual(payload["questions"]["route"]["type"], "choice")
+
+    def test_ollama_unload_payload_uses_keep_alive_zero(self):
+        config = DecisionModelConfig(model="nimble")
+
+        payload = build_ollama_unload_payload(config)
+
+        self.assertEqual(payload["model"], "nimble")
+        self.assertEqual(payload["keep_alive"], 0)
+        self.assertEqual(payload["prompt"], "")
+        self.assertFalse(payload["stream"])
+
+    def test_unload_decision_model_posts_to_ollama_generate(self):
+        config = DecisionModelConfig(base_url="http://localhost:11434", model="nimble", timeout_seconds=10)
+
+        with patch("bots.decision_model.client.post_json", return_value={"done": True}) as post_json:
+            response = unload_decision_model(config=config, timeout_seconds=3)
+
+        self.assertEqual(response, {"done": True})
+        post_json.assert_called_once_with(
+            "http://localhost:11434/api/generate",
+            {"model": "nimble", "prompt": "", "stream": False, "keep_alive": 0},
+            timeout_seconds=3,
+        )
 
     def test_parse_systemone_choice_response(self):
         decision = parse_systemone_choice_response(

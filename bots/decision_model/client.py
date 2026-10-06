@@ -107,6 +107,20 @@ def systemone_choice(
     return parse_systemone_choice_response(response, question_name)
 
 
+def unload_decision_model(
+    config: DecisionModelConfig | None = None,
+    timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Yeu cau Ollama unload model khoi RAM/VRAM neu dang duoc giu loaded."""
+    config = config or load_decision_model_config()
+    payload = build_ollama_unload_payload(config)
+    return post_json(
+        f"{config.base_url.rstrip('/')}/api/generate",
+        payload,
+        timeout_seconds=timeout_seconds or config.timeout_seconds,
+    )
+
+
 def build_systemone_choice_payload(
     *,
     state: Any,
@@ -130,6 +144,16 @@ def build_systemone_choice_payload(
     if config.keep_alive is not None:
         payload["keep_alive"] = config.keep_alive
     return payload
+
+
+def build_ollama_unload_payload(config: DecisionModelConfig) -> dict[str, Any]:
+    """Payload unload theo API Ollama: prompt rong + keep_alive=0."""
+    return {
+        "model": config.model,
+        "prompt": "",
+        "stream": False,
+        "keep_alive": 0,
+    }
 
 
 def post_json(url: str, payload: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
