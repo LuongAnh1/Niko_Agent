@@ -43,13 +43,16 @@ scattered text a user pastes into chat.
   `fcc-claude`.
 - `niko/harness/trace.py`: JSONL trace logger. Default trace path is
   `niko/.runtime/traces/YYYY-MM-DD.jsonl`.
+- `niko/harness/runtime_log.py`: JSONL runtime log logger for Bots dashboard
+  table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
 - `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, and
   `episodes`. Uses FTS5 when available, with LIKE fallback.
 - `niko/memory/context.py`: Retrieves semantic/episodic memory and formats the
   memory context injected into the Deep agent.
-- `niko/ops/dashboard.py`: Mini Niko Ops dashboard. Runs locally with stdlib
-  Python and exposes trace/memory/chat/config views plus simple memory/config
-  APIs.
+- `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
+- `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
+- `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
+- `niko/ops/templates/dashboard.html`: Dashboard HTML/CSS/JS frontend template.
 - `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
   prompts, except for Fast JSON triage.
 - `niko/.runtime/`: Local runtime state. Do not commit it.
@@ -144,7 +147,7 @@ Trace events are JSONL and should make a turn observable. Typical events include
 `memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
 `deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
 
-Run the dashboard locally:
+Run the dashboard locally before starting bots:
 
 ```bash
 rtk python -m niko.ops.dashboard
@@ -164,6 +167,13 @@ Dashboard graph semantics:
 - `Memory Gate -> Memory Records`: retrieval from facts/episodes.
 - `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
 
+The dashboard `Bots` tab is the preferred place to start/stop Telegram Bot,
+warm up or stop/unload Decision Model, and inspect runtime logs. Terminal output
+should stay bootstrap-only; operational logs belong in `niko/harness/runtime_log.py`.
+Telegram Bot uses `niko/.runtime/telegram_bot.lock` as a single-instance guard;
+dashboard should show `external` instead of starting a duplicate when a terminal
+bot process already owns that lock.
+
 ## Important Docs
 
 - `README.md`: high-level setup and baseline explanation.
@@ -177,24 +187,27 @@ Dashboard graph semantics:
 
 ## Environment And State
 
-Env file loading order:
+Dashboard-first config precedence:
 
 ```text
-root .env -> niko/.env -> bots/telegram/.env -> real OS environment wins
-```
-
-Effective config precedence:
-
-```text
-real OS environment -> niko/.runtime/config.json -> env files -> code defaults
+real OS environment -> niko/.runtime/config.json -> root .env bootstrap -> code defaults
 ```
 
 The dashboard Config tab writes `niko/.runtime/config.json`. Keep secrets and
-machine-specific commands in `.env` or OS env, not in dashboard runtime config.
+machine-specific commands in dashboard runtime config for local demo, unless an
+OS env override is intentionally needed. Dashboard snapshots must mask secrets.
+Root `.env` is only for dashboard bootstrap keys such as `NIKO_OPS_HOST`,
+`NIKO_OPS_PORT`, and `NIKO_RUNTIME_CONFIG_FILE`. Do not recreate `niko/.env` or
+`bots/telegram/.env`; put Telegram, agent, decision model, sticker, memory, and
+reply settings in the dashboard Config tab. Dashboard-spawned bot subprocesses
+must use `runtime_subprocess_env()` so file-env keys are not inherited as OS
+overrides.
 
-Core variables:
+Core runtime config keys:
 
 ```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_CHAT_IDS=
 CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
 CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
@@ -207,6 +220,7 @@ NIKO_DECISION_MODEL_KEEP_ALIVE=-1
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_STATE_DIR=niko/.runtime
 NIKO_TRACE_ENABLED=1
+NIKO_RUNTIME_LOG_ENABLED=1
 NIKO_MEMORY_ENABLED=1
 NIKO_MEMORY_RETRIEVAL_ENABLED=1
 NIKO_MEMORY_WRITE_ENABLED=1
@@ -216,7 +230,8 @@ NIKO_OPS_PORT=7777
 ```
 
 Do not reveal or commit secrets from `.env` files, Telegram tokens, runtime
-SQLite data, or trace contents that may contain private conversation data.
+config, runtime SQLite data, trace contents, or runtime logs that may contain
+private conversation data.
 
 ## Development Commands
 
@@ -228,6 +243,10 @@ rtk python -m bots.decision_model.warmup
 rtk python -m bots.telegram.bot
 rtk python -m niko.ops.dashboard
 ```
+
+Preferred manual run order is dashboard first, then use tab `Bots` to warm up
+Decision Model and start Telegram Bot. Direct bot/warmup commands remain useful
+for debugging.
 
 If calling PowerShell cmdlets through `rtk`, invoke PowerShell explicitly:
 

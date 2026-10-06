@@ -6,7 +6,7 @@ Thư mục này mô tả Niko Agent theo góc nhìn kỹ thuật và demo đồ 
 
 1. [Kiến trúc](architecture.md): module chính, ranh giới trách nhiệm, runtime, memory, ops.
 2. [Luồng chat Telegram](telegram-chat-flow.md): từ Telegram message đến local/fast/deep reply.
-3. [Harness Memory & Ops](niko-harness-memory-ops.md): SQLite memory, trace JSONL, dashboard và API.
+3. [Harness Memory & Ops](niko-harness-memory-ops.md): SQLite memory, trace/runtime log, dashboard, runtime config và API.
 4. [Nghiệp vụ harness](business-domains/README.md): Telegram gateway hiện tại, Jira gateway dự kiến và hướng nâng cấp memory.
 5. [Demo Guide](demo-guide.md): cách chạy bot/dashboard và các kịch bản demo.
 6. [Memory Roadmap](memory-roadmap.md): baseline hiện tại và hướng nâng cấp Semantic/Episodic Memory.

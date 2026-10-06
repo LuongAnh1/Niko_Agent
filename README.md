@@ -17,7 +17,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `chat_log`: lịch sử hội thoại đã xử lý.
   - `facts`: Semantic Memory thủ công/baseline.
   - `episodes`: Episodic Memory sinh ra sau deep job.
-- Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config.
+- Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
 
 ## Cấu Trúc Chính
 
@@ -27,10 +27,16 @@ bots/decision_model/            # Ollama/Nimble decision scripts cho fast triage
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
-niko/harness/trace.py            # Trace JSONL
+niko/harness/trace.py            # Trace JSONL theo turn
+niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
 niko/memory/context.py           # Retrieve memory context cho Deep agent
-niko/ops/dashboard.py            # Mini Niko Ops dashboard
+niko/ops/                       # Mini Niko Ops dashboard
+  dashboard.py                   # HTTP server/entrypoint mỏng
+  bots.py                        # Start/stop Telegram Bot, warmup/stop Decision Model
+  config_schema.py               # Schema, validate, mask runtime config
+  frontend.py                    # Load template dashboard
+  templates/dashboard.html       # HTML/CSS/JS dashboard
 niko/HOOK.md                     # Persona/hook của Niko
 niko/.runtime/                   # Runtime state, không commit
 docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
@@ -45,34 +51,15 @@ docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
 ollama pull nimble
 ```
 
-Nếu anh dùng tag khác, ví dụ một bản quantized cụ thể, đổi `NIKO_DECISION_MODEL_NAME` trong `niko/.env` cho khớp.
+Nếu anh dùng tag khác, ví dụ một bản quantized cụ thể, đổi model trong dashboard tab `Config -> Decision Model`.
 
-3. Copy các file env mẫu:
+3. Copy bootstrap env tối thiểu nếu cần đổi host/port/path config:
 
 ```bash
 copy .env.example .env
-copy niko\.env.example niko\.env
-copy bots\telegram\.env.example bots\telegram\.env
 ```
 
-4. Điền `TELEGRAM_BOT_TOKEN` trong `bots/telegram/.env`.
-5. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`.
-6. Warm up Nimble để model được giữ loaded cho tới khi Ollama tắt:
-
-```bash
-rtk python -m bots.decision_model.warmup
-ollama ps
-```
-
-Nếu `ollama ps` hiện `nimble:latest` với thời gian giữ loaded là `Forever`, decision model đã sẵn sàng.
-
-7. Chạy bot:
-
-```bash
-python -m bots.telegram.bot
-```
-
-8. Chạy dashboard quan sát:
+4. Chạy dashboard trước:
 
 ```bash
 python -m niko.ops.dashboard
@@ -80,58 +67,57 @@ python -m niko.ops.dashboard
 
 Dashboard mặc định: `http://127.0.0.1:7777`
 
-Trong dashboard có tab `Config` để chỉnh các cấu hình vận hành như Nimble,
-sticker, memory, reply text và bật/tắt bot Telegram do dashboard quản lý.
-Secret/token vẫn để trong `.env`, không chỉnh trên dashboard.
+5. Trong dashboard:
+
+- Tab `Config`: nhập `TELEGRAM_BOT_TOKEN`, allowlist, command Claude/Fast, Nimble, sticker, memory và reply text.
+- Tab `Bots`: bấm `Warmup` cho Decision Model, rồi `Start` Telegram Bot.
+- Tab `Bots` cũng có bảng runtime log thay cho các dòng log trước đây trên terminal.
+
+Telegram Bot có single-instance lock ở `niko/.runtime/telegram_bot.lock`. Nếu anh
+đang chạy bot bằng terminal, dashboard sẽ hiện trạng thái `external` và chặn
+`Start` để tránh lỗi Telegram `409 Conflict`.
+
+6. Lấy `chat_id` và `user_key` bằng `/id` hoặc `/whoami`, rồi cập nhật allowlist trong `Config` nếu cần.
+
+Runtime config và secret local được lưu ở `niko/.runtime/config.json`; thư mục này đã bị gitignore.
+
+Anh có thể chỉnh cấu hình theo hai cách:
+
+- Qua dashboard tab `Config`, đây là cách an toàn nhất vì secret được mask và input được validate.
+- Sửa trực tiếp `niko/.runtime/config.json` khi cần thao tác nhanh. File là JSON object key/value string; sau khi sửa, restart Telegram Bot trong tab `Bots` để các process đang chạy đọc lại các key liên quan tới startup như token, command, allowlist.
 
 ## Cấu Hình Tối Thiểu
 
-Root `.env`:
+Dashboard là source chính cho cấu hình vận hành. `.env` chỉ còn bootstrap dashboard hoặc override khẩn cấp:
 
 ```env
-CLAUDE_CLI_COMMAND=fcc-claude -p
-CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
-CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
-CLAUDE_TIMEOUT_SECONDS=180
-CHAT_IDENTITY_ENABLED=1
-CHAT_ALLOWED_USER_KEYS=
-CHAT_USER_ALIASES=telegram:123456789=Anh A
-```
-
-`niko/.env`:
-
-```env
-NIKO_AGENT_MODE=two_agent
-NIKO_DECISION_MODEL_ENABLED=1
-NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
-NIKO_DECISION_MODEL_NAME=nimble
-NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
-NIKO_DECISION_MODEL_KEEP_ALIVE=-1
-NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
-NIKO_FAST_AGENT_TIMEOUT_SECONDS=45
-NIKO_UNCERTAIN_DELAY_SECONDS=3
-NIKO_PROMPT_HOOK_FILE=niko/HOOK.md
-NIKO_REPLY_SUFFIX=Meow
-NIKO_STATE_DIR=niko/.runtime
-NIKO_TRACE_ENABLED=1
-NIKO_MEMORY_ENABLED=1
-NIKO_MEMORY_RETRIEVAL_ENABLED=1
-NIKO_MEMORY_WRITE_ENABLED=1
-NIKO_MEMORY_TOP_K=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
+NIKO_RUNTIME_CONFIG_FILE=niko/.runtime/config.json
 ```
 
+Các nhóm nên chỉnh trong dashboard:
+
+- `Telegram Gateway`: token, allowlist, group mode, timeout/retry.
+- `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
+- `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
+- `Sticker`: sticker set/config/mode và timeout.
+- `Memory & Trace`: memory, trace và runtime log.
+- `Replies`: suffix, wait/busy/error reply.
+
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
-phải pull sẵn trên máy. Lệnh warmup dưới đây gọi model một lần và gửi
-`keep_alive=-1`, nên model được giữ loaded cho tới khi anh tắt Ollama:
+phải pull sẵn trên máy. Nút `Warmup` trong dashboard chạy nền với
+`NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS` riêng, vì lần load đầu có thể lâu
+hơn timeout triage thường. Lệnh warmup dưới đây dùng cùng timeout warmup và gửi
+`keep_alive=-1`, nên model được giữ loaded cho tới khi anh unload model hoặc tắt Ollama:
 
 ```bash
 rtk python -m bots.decision_model.warmup
 ollama ps
 ```
 
-Nếu muốn gỡ Nimble khỏi RAM/VRAM nhưng vẫn giữ Ollama chạy, dùng:
+Nếu muốn gỡ Nimble khỏi RAM/VRAM nhưng vẫn giữ Ollama chạy, bấm `Stop` ở
+`Bots -> Decision Model` hoặc dùng:
 
 ```bash
 ollama stop nimble
@@ -140,37 +126,25 @@ ollama ps
 
 Nếu bot vẫn đang chạy và `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, lần chat tiếp theo
 cần decision model có thể load Nimble lại. Muốn tắt hẳn decision model thì đổi
-env rồi restart bot:
+trong dashboard tab `Config -> Decision Model`, rồi restart bot ở tab `Bots`:
 
 ```env
 NIKO_DECISION_MODEL_ENABLED=0
 TELEGRAM_STICKER_DECISION_MODEL_ENABLED=0
 ```
 
-`bots/telegram/.env`:
-
-```env
-TELEGRAM_BOT_TOKEN=token_cua_bot
-TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
-TELEGRAM_GROUP_MODE=mentions
-TELEGRAM_MENTION_REPLIES=1
-TELEGRAM_STICKERS_ENABLED=1
-TELEGRAM_STICKER_DECISION_MODEL_ENABLED=1
-TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS=5
-TELEGRAM_STICKER_CONFIG_FILE=bots/telegram/stickers/ducks.json
-TELEGRAM_STICKER_SET_NAME=UtyaDuck
-TELEGRAM_STICKER_MODE=smart
-TELEGRAM_STICKER_TIMEOUT_SECONDS=5
-```
-
 Sticker Telegram dùng Nimble local để chọn mood sau khi text reply đã gửi. Nếu
 Nimble chọn `no_sticker` hoặc lỗi/timeout, bot chỉ bỏ qua sticker và không
 fallback về keyword rule cũ.
 
-Thứ tự load env file: root `.env` -> `niko/.env` -> `bots/telegram/.env`.
+Niko không còn dùng `niko/.env` hoặc `bots/telegram/.env`. Nếu các file đó xuất
+hiện lại, hãy coi là legacy và xóa đi. Dashboard chỉ nạp root `.env` để bootstrap
+`NIKO_OPS_HOST`, `NIKO_OPS_PORT`, `NIKO_RUNTIME_CONFIG_FILE`; khi start bot con,
+dashboard bỏ các key đọc từ `.env` để bot đọc cấu hình từ runtime config.
+
 Thứ tự cấu hình hiệu lực: OS env thật -> `niko/.runtime/config.json` do tab
-Config ghi -> env file -> default trong code. Nếu một key bị OS env khóa,
-dashboard vẫn hiển thị nhưng không ghi đè được.
+Config ghi -> root `.env` bootstrap -> default trong code. Nếu một key bị OS env
+khóa, dashboard vẫn hiển thị nhưng không ghi đè được.
 
 ## Demo Baseline
 
@@ -180,6 +154,7 @@ Các kịch bản demo nhanh:
 - Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`, `turn_end`.
+- Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
 Chi tiết hơn xem [docs/demo-guide.md](docs/demo-guide.md).
 
@@ -205,13 +180,13 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 ## Test
 
 ```bash
-python -m unittest discover
+python -m pytest
 ```
 
 Nếu chạy qua Codex/RTK:
 
 ```bash
-rtk python -m unittest discover
+rtk python -m pytest
 ```
 
 ## Ghi Chú Phát Triển

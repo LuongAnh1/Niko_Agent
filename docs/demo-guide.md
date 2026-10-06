@@ -4,27 +4,22 @@ Tài liệu này dùng để chạy demo Niko Agent ở mức harness baseline: 
 
 ## Chuẩn Bị
 
-Kiểm tra env:
+Kiểm tra dashboard config:
 
-- Root `.env` có `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `CLAUDE_WORKDIR`.
-- `niko/.env` có `NIKO_AGENT_MODE=two_agent`, memory/trace bật.
-- `bots/telegram/.env` có `TELEGRAM_BOT_TOKEN`.
+- Root `.env` chỉ cần bootstrap nếu muốn đổi `NIKO_OPS_HOST`, `NIKO_OPS_PORT` hoặc `NIKO_RUNTIME_CONFIG_FILE`.
+- Tab `Config` có `TELEGRAM_BOT_TOKEN`, allowlist, agent commands, Nimble, sticker, memory/trace và reply text.
+- Tab `Bots` có Telegram Bot và Decision Model.
+- Nếu muốn chuẩn bị nhanh bằng tay, có thể sửa trực tiếp `niko/.runtime/config.json`, refresh dashboard, rồi restart Telegram Bot trong tab `Bots`.
 
 Chạy test trước demo:
 
 ```bash
-python -m unittest discover
+python -m pytest
 ```
 
-## Chạy Bot Và Dashboard
+## Chạy Dashboard Và Bot
 
-Terminal 1:
-
-```bash
-python -m bots.telegram.bot
-```
-
-Terminal 2:
+Terminal:
 
 ```bash
 python -m niko.ops.dashboard
@@ -36,10 +31,12 @@ Mở dashboard:
 http://127.0.0.1:7777
 ```
 
-Trong tab Config, có thể chỉnh nhanh Nimble, sticker, memory, reply text và
-bật/tắt bot Telegram do dashboard start. Sau khi đổi cấu hình, bấm `Save`.
-Dashboard ghi vào `niko/.runtime/config.json`; secret như Telegram token vẫn ở
-`.env`.
+Trong dashboard:
+
+1. Vào tab `Config`, chỉnh cấu hình rồi bấm `Save`.
+2. Vào tab `Bots`, bấm `Warmup` cho Decision Model và chờ trạng thái `ready`.
+3. Bấm `Start` Telegram Bot.
+4. Theo dõi bảng `Runtime Log` trong tab `Bots` thay cho terminal log cũ.
 
 ## Kịch Bản 1: Local Reply
 
@@ -136,6 +133,7 @@ Kỳ vọng:
 Dashboard:
 
 - Overview: xem tuyến chạy gần nhất.
+- Bots: xem trạng thái bot, warmup/stop Decision Model, runtime log.
 - Memory: xem facts và episodes.
 - Chat: xem chat log.
 - Traces: xem event JSON.
@@ -145,6 +143,8 @@ File runtime:
 ```text
 niko/.runtime/niko_memory.sqlite3
 niko/.runtime/traces/YYYY-MM-DD.jsonl
+niko/.runtime/logs/YYYY-MM-DD.jsonl
+niko/.runtime/config.json
 ```
 
 ## Troubleshooting
@@ -157,22 +157,11 @@ Nếu bot phản hồi chậm:
 
 Nếu sticker không gửi:
 
-- Xem terminal có dòng `Sticker decision: ...` không.
+- Xem tab Bots có event `sticker_decision` không.
 - Nếu thấy `mood=no_sticker`, Nimble đã quyết định không cần sticker.
-- Nếu thấy `Sticker decision failed`, kiểm tra Ollama/Nimble đang chạy.
+- Nếu thấy `sticker_decision_failed`, kiểm tra Ollama/Nimble đang chạy.
 
-Nếu sticker hoặc Telegram sticker API timeout:
-
-```env
-TELEGRAM_STICKERS_ENABLED=0
-```
-
-hoặc giảm timeout:
-
-```env
-TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS=3
-TELEGRAM_STICKER_TIMEOUT_SECONDS=3
-```
+Nếu sticker hoặc Telegram sticker API timeout, chỉnh trong `Config -> Sticker`: tắt `TELEGRAM_STICKERS_ENABLED` hoặc giảm timeout.
 
 Nếu dashboard không đổi sau khi sửa code:
 
@@ -182,7 +171,9 @@ Nếu dashboard không đổi sau khi sửa code:
 
 Nếu muốn reset dữ liệu demo:
 
-1. Dừng bot và dashboard.
+1. Dừng bot trong tab Bots, rồi dừng dashboard.
 2. Backup hoặc xóa `niko/.runtime/niko_memory.sqlite3`.
 3. Backup hoặc xóa `niko/.runtime/traces/`.
-4. Chạy lại bot/dashboard.
+4. Backup hoặc xóa `niko/.runtime/logs/` nếu muốn xóa runtime log.
+5. Xóa `niko/.runtime/telegram_bot.lock` chỉ khi chắc chắn không còn process bot nào chạy.
+6. Chạy lại dashboard và start bot từ tab Bots.

@@ -5,9 +5,13 @@ Tài liệu này mô tả baseline harness của Niko: trace JSONL, SQLite memor
 ## Thành Phần
 
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
+- `niko/harness/runtime_log.py`: ghi runtime log JSONL cho tab Bots.
 - `niko/memory/store.py`: SQLite memory store.
 - `niko/memory/context.py`: retrieve semantic/episodic memory và build context cho Deep agent.
-- `niko/ops/dashboard.py`: Mini Niko Ops dashboard chạy local bằng stdlib Python.
+- `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
+- `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
+- `niko/ops/config_schema.py`: schema, validate, mask secret và snapshot cho tab Config.
+- `niko/ops/frontend.py` + `niko/ops/templates/dashboard.html`: frontend dashboard tách khỏi server Python.
 
 ## Runtime State
 
@@ -17,6 +21,8 @@ Mặc định state nằm trong:
 niko/.runtime/
   niko_memory.sqlite3
   traces/YYYY-MM-DD.jsonl
+  logs/YYYY-MM-DD.jsonl
+  config.json
   claude_sandbox/
 ```
 
@@ -90,10 +96,11 @@ Mặc định:
 Dashboard có các tab:
 
 - Overview: live harness graph, preview facts/episodes, trace tail.
+- Bots: start/stop/restart Telegram bot, chặn start trùng khi có instance external, warmup/stop Decision Model, xem runtime log dạng bảng.
 - Memory: thêm/xóa semantic facts, xem semantic facts và episodic events.
 - Chat: xem recent chat log.
 - Traces: xem JSONL trace event.
-- Config: chỉnh runtime config theo nhóm, start/stop bot Telegram do dashboard quản lý.
+- Config: chỉnh runtime config theo nhóm, gồm Telegram token, agent commands, Nimble, sticker, memory và reply text.
 - Ops: xem endpoint và ranh giới baseline.
 
 Dashboard chỉ nên chạy local trong v1. Nếu expose ra ngoài máy cá nhân thì cần thêm auth/reverse proxy.
@@ -115,9 +122,12 @@ Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để d�
 ## API
 
 - `GET /api/snapshot`
+- `GET /api/bots`
 - `GET /api/config`
+- `GET /api/runtime/logs`
 - `POST /api/config`
 - `POST /api/config/reset`
+- `POST /api/bots/{id}/{action}`
 - `GET /api/runtime/bot`
 - `POST /api/runtime/bot/start`
 - `POST /api/runtime/bot/stop`
@@ -125,6 +135,11 @@ Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để d�
 - `GET /api/memory`
 - `POST /api/memory/facts`
 - `DELETE /api/memory/facts/{id}`
+
+`POST /api/bots/decision/warmup` trả về ngay trạng thái `warming` và chạy warmup
+nền với `NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS`. `POST
+/api/bots/decision/stop` gửi unload request tới Ollama để gỡ model khỏi
+RAM/VRAM mà không cần tắt Ollama daemon.
 
 Ví dụ thêm fact:
 
@@ -134,18 +149,19 @@ curl -X POST http://127.0.0.1:7777/api/memory/facts ^
   -d "{\"subject\":\"Project\",\"content\":\"Niko is a local agent harness.\"}"
 ```
 
-## Env
+## Config
 
-```env
-NIKO_STATE_DIR=niko/.runtime
-NIKO_TRACE_ENABLED=1
-NIKO_MEMORY_ENABLED=1
-NIKO_MEMORY_RETRIEVAL_ENABLED=1
-NIKO_MEMORY_WRITE_ENABLED=1
-NIKO_MEMORY_TOP_K=4
-NIKO_OPS_HOST=127.0.0.1
-NIKO_OPS_PORT=7777
-```
+Dashboard là luồng chính để chỉnh config. Chỉ root `.env` còn nên tồn tại, và chỉ nên giữ bootstrap tối thiểu như `NIKO_OPS_HOST`, `NIKO_OPS_PORT`, `NIKO_RUNTIME_CONFIG_FILE`. Không dùng `niko/.env` hoặc `bots/telegram/.env`; secret như `TELEGRAM_BOT_TOKEN` nên nhập trong dashboard. API snapshot sẽ mask secret và file runtime nằm trong `niko/.runtime/`.
+
+`niko/ops/config_schema.py` là danh sách trắng các key được phép ghi từ UI/API.
+Nếu muốn thêm config mới vào dashboard, thêm field vào schema này trước rồi mới
+đọc key đó trong runtime tương ứng.
+
+Nếu không muốn đi qua UI, có thể sửa trực tiếp `niko/.runtime/config.json`. File
+này là JSON object đơn giản, mỗi key là tên biến cấu hình trong tab Config và
+value nên để dạng string. Sau khi sửa trực tiếp, refresh dashboard; với các key
+được đọc khi process start như Telegram token, allowlist, Claude/Fast command,
+nên restart Telegram Bot trong tab Bots.
 
 ## Baseline Có Ý Nghĩa Gì
 

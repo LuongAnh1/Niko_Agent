@@ -54,25 +54,32 @@ bots/
     client.py          # Ollama /v1/systemone client cho Nimble decision model
     triage.py          # Mapping prompt Telegram sang reply_now/send_to_deep
     sticker.py         # Mapping prompt/reply sang mood sticker Telegram
-    warmup.py          # Giu Nimble loaded voi keep_alive=-1
+    warmup.py          # Giữ Nimble loaded với keep_alive=-1
   telegram/
     bot.py             # Telegram gateway: polling, auth, mention filter, /id, reply, sticker
+    instance_guard.py  # Single-instance lock/PID guard cho Telegram long polling
     sticker_picker.py  # Chon file_id theo mood sticker da quyet dinh
     stickers/
       ducks.json       # Mapping mood sang sticker Telegram
 
 niko/
   runtime.py           # Gọi Claude CLI, đọc hook, build prompt, inject memory context
-  config.py            # Load env và resolve project path
+  config.py            # Load bootstrap env, runtime config và resolve project path
   chat_gateway.py      # ChatGatewayMessage, identity, alias, allowed user parsing
   HOOK.md              # Persona/hook nạp vào Niko
   harness/
     trace.py           # JSONL turn/event tracing
+    runtime_log.py     # JSONL runtime log cho tab Bots
   memory/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
     context.py         # Retrieve memory context cho Deep agent
   ops/
-    dashboard.py       # Mini Niko Ops dashboard
+    dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
+    bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
+    config_schema.py   # Schema, validate, snapshot cho dashboard Config
+    frontend.py        # Load HTML template
+    templates/
+      dashboard.html   # HTML/CSS/JS của dashboard
   graphs/
     chat_reply/
       graph.py         # ChatReplyGraph điều phối flow chat
@@ -106,67 +113,32 @@ Telegram gateway đang tạo một instance global:
 CHAT_REPLY_GRAPH = ChatReplyGraph()
 ```
 
-## Env Chính
+## Config Chính
 
-Root `.env` giữ cấu hình chung:
+Luồng vận hành chính là dashboard-first:
 
-- `CLAUDE_CLI_COMMAND`
-- `CLAUDE_DEEP_AGENT_COMMAND`
-- `CLAUDE_WORKDIR`
-- `CLAUDE_TIMEOUT_SECONDS`
-- `CHAT_IDENTITY_ENABLED`
-- `CHAT_ALLOWED_USER_KEYS`
-- `CHAT_USER_ALIASES`
+1. Chạy `python -m niko.ops.dashboard`.
+2. Chỉnh cấu hình trong tab Config.
+3. Start Telegram bot và warmup/stop Decision Model trong tab Bots.
 
-`niko/.env` giữ cấu hình agent/harness:
+Các nhóm config chính trong dashboard:
 
-- `NIKO_AGENT_MODE`
-- `NIKO_DECISION_MODEL_ENABLED`
-- `NIKO_DECISION_MODEL_BASE_URL`
-- `NIKO_DECISION_MODEL_NAME`
-- `NIKO_DECISION_MODEL_TIMEOUT_SECONDS`
-- `NIKO_DECISION_MODEL_KEEP_ALIVE`
-- `NIKO_FAST_AGENT_COMMAND`
-- `NIKO_FAST_AGENT_TIMEOUT_SECONDS`
-- `NIKO_UNCERTAIN_DELAY_SECONDS`
-- `NIKO_DEEP_WAIT_REPLY`
-- `NIKO_DEEP_BUSY_REPLY`
-- `NIKO_PROMPT_HOOK_FILE`
-- `NIKO_REPLY_SUFFIX`
-- `NIKO_TOOL_UNAVAILABLE_REPLY`
-- `NIKO_STATE_DIR`
-- `NIKO_TRACE_ENABLED`
-- `NIKO_MEMORY_ENABLED`
-- `NIKO_MEMORY_RETRIEVAL_ENABLED`
-- `NIKO_MEMORY_WRITE_ENABLED`
-- `NIKO_MEMORY_TOP_K`
-- `NIKO_OPS_HOST`
-- `NIKO_OPS_PORT`
+- `Telegram Gateway`: token, allowlist, group mode, timeout/retry.
+- `Agent Commands`: Claude/Fast command, workdir, timeout, hook file, identity.
+- `Decision Model`: Ollama/Nimble base URL, model, triage/warmup/stop timeout, keep alive.
+- `Sticker`: bật/tắt sticker, sticker set/config/mode, timeout.
+- `Memory & Trace`: memory, trace, runtime log.
+- `Replies`: suffix, wait/busy/error text.
 
-`bots/telegram/.env` giữ cấu hình Telegram:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ALLOWED_CHAT_IDS`
-- `TELEGRAM_DROP_PENDING_UPDATES`
-- `TELEGRAM_REQUEST_TIMEOUT_SECONDS`
-- `TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS`
-- `TELEGRAM_STARTUP_RETRIES`
-- `TELEGRAM_STARTUP_RETRY_DELAY_SECONDS`
-- `TELEGRAM_GROUP_MODE`
-- `TELEGRAM_MENTION_REPLIES`
-- `TELEGRAM_STICKERS_ENABLED`
-- `TELEGRAM_STICKER_DECISION_MODEL_ENABLED`
-- `TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS`
-- `TELEGRAM_STICKER_CONFIG_FILE`
-- `TELEGRAM_STICKER_SET_NAME`
-- `TELEGRAM_STICKER_MODE`
-- `TELEGRAM_STICKER_TIMEOUT_SECONDS`
-
-Thứ tự load env file hiện tại: root `.env` -> `niko/.env` -> `bots/telegram/.env`.
 Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
-Thứ tự cấu hình hiệu lực là: OS env thật -> runtime config -> env file ->
-default trong code. Secret/token vẫn nằm ở `.env` hoặc OS env, không chỉnh trên
-dashboard.
+Khi cần thao tác nhanh, có thể sửa trực tiếp file JSON này rồi refresh dashboard;
+với key được đọc lúc process start như token, allowlist hoặc agent command thì
+restart Telegram Bot trong tab Bots.
+Niko không còn dùng `niko/.env` hoặc `bots/telegram/.env`; chỉ root `.env` còn
+vai trò bootstrap dashboard (`NIKO_OPS_HOST`, `NIKO_OPS_PORT`,
+`NIKO_RUNTIME_CONFIG_FILE`). Thứ tự cấu hình hiệu lực là: OS env thật -> runtime
+config -> root `.env` bootstrap -> default trong code. Secret/token có thể lưu
+trong runtime config local; dashboard mask secret trong snapshot/API.
 
 ## Dữ Liệu Runtime
 
@@ -175,6 +147,7 @@ niko/.runtime/
   config.json                      # Runtime config do dashboard Config ghi
   niko_memory.sqlite3              # SQLite memory
   traces/YYYY-MM-DD.jsonl          # JSONL trace
+  logs/YYYY-MM-DD.jsonl            # Runtime log cho tab Bots
   claude_sandbox/                  # CLAUDE_WORKDIR
 ```
 

@@ -11,7 +11,9 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 - `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
 - `niko.runtime`: gọi Claude CLI cho Deep agent và inject memory context.
 - `niko.harness.trace`: ghi JSONL trace.
+- `niko.harness.runtime_log`: ghi runtime log cho tab Bots.
 - `niko.memory`: lưu chat log, semantic facts, episodic events.
+- `bots/telegram/instance_guard.py`: single-instance lock để dashboard/terminal không start trùng Telegram long polling.
 
 ## Gateway Telegram
 
@@ -29,6 +31,11 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 10. Nếu bật sticker, gateway chạy worker nền: hỏi Nimble local chọn mood sticker,
     rồi map mood đó sang file_id Telegram. Nếu Nimble chọn `no_sticker` hoặc lỗi,
     bot bỏ qua sticker.
+
+Trước khi gọi Telegram API dài hạn, gateway lấy lock tại
+`niko/.runtime/telegram_bot.lock`. Nếu đã có process khác giữ lock và PID còn
+sống, bot mới thoát sớm với log `telegram_instance_conflict` thay vì để Telegram
+báo `409 Conflict` ở `getUpdates`.
 
 Gateway không quyết định dùng local/Fast/Deep. Nó cũng không retrieve memory.
 Decision model trong sticker chỉ chọn mood trang trí sau reply, không ảnh hưởng
@@ -76,13 +83,7 @@ Trên dashboard:
 
 ## Vai Trò Của Decision Model Và Fast Agent
 
-Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm triage local. Chạy warmup:
-
-```bash
-rtk python -m bots.decision_model.warmup
-```
-
-Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, Ollama giữ model loaded cho tới khi `ollama stop nimble` hoặc restart Ollama.
+Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm triage local. Trong luồng dashboard-first, warmup bằng tab `Bots -> Decision Model -> Warmup`; action này chạy nền và dùng `NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS` riêng để tránh cắt request khi model đang cold-start. Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, Ollama giữ model loaded cho tới khi bấm `Bots -> Decision Model -> Stop`, chạy `ollama stop nimble`, hoặc restart Ollama.
 
 Fast Agent dùng `NIKO_FAST_AGENT_COMMAND` để sinh ngôn ngữ khi cần. Fast nên dùng model nhẹ/nhanh và có các task:
 
@@ -160,7 +161,7 @@ Mỗi turn có thể có các event:
 - `turn_end`
 - `reply_delivery_error`
 
-Dashboard đọc các event này để hiển thị live harness graph và trace tail.
+Dashboard đọc các event này để hiển thị live harness graph và trace tail. Các log vận hành thay cho terminal, ví dụ `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`, được ghi vào `niko/.runtime/logs/YYYY-MM-DD.jsonl` và hiển thị trong tab Bots.
 
 ## Luồng Chi Tiết
 
@@ -215,7 +216,7 @@ Deep background:
 ## Test Liên Quan
 
 ```bash
-python -m unittest discover
+python -m pytest
 ```
 
 Scenario chính đang được test:
