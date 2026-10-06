@@ -48,7 +48,8 @@ scattered text a user pastes into chat.
 - `niko/memory/context.py`: Retrieves semantic/episodic memory and formats the
   memory context injected into the Deep agent.
 - `niko/ops/dashboard.py`: Mini Niko Ops dashboard. Runs locally with stdlib
-  Python and exposes trace/memory/chat views plus simple memory APIs.
+  Python and exposes trace/memory/chat/config views plus simple memory/config
+  APIs.
 - `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
   prompts, except for Fast JSON triage.
 - `niko/.runtime/`: Local runtime state. Do not commit it.
@@ -176,11 +177,20 @@ Dashboard graph semantics:
 
 ## Environment And State
 
-Env loading order:
+Env file loading order:
 
 ```text
 root .env -> niko/.env -> bots/telegram/.env -> real OS environment wins
 ```
+
+Effective config precedence:
+
+```text
+real OS environment -> niko/.runtime/config.json -> env files -> code defaults
+```
+
+The dashboard Config tab writes `niko/.runtime/config.json`. Keep secrets and
+machine-specific commands in `.env` or OS env, not in dashboard runtime config.
 
 Core variables:
 

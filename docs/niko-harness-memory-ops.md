@@ -93,6 +93,7 @@ Dashboard có các tab:
 - Memory: thêm/xóa semantic facts, xem semantic facts và episodic events.
 - Chat: xem recent chat log.
 - Traces: xem JSONL trace event.
+- Config: chỉnh runtime config theo nhóm, start/stop bot Telegram do dashboard quản lý.
 - Ops: xem endpoint và ranh giới baseline.
 
 Dashboard chỉ nên chạy local trong v1. Nếu expose ra ngoài máy cá nhân thì cần thêm auth/reverse proxy.
@@ -114,6 +115,12 @@ Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để d�
 ## API
 
 - `GET /api/snapshot`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/config/reset`
+- `GET /api/runtime/bot`
+- `POST /api/runtime/bot/start`
+- `POST /api/runtime/bot/stop`
 - `GET /api/traces`
 - `GET /api/memory`
 - `POST /api/memory/facts`
