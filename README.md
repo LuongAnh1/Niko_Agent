@@ -135,8 +135,17 @@ TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx
 TELEGRAM_GROUP_MODE=mentions
 TELEGRAM_MENTION_REPLIES=1
 TELEGRAM_STICKERS_ENABLED=1
+TELEGRAM_STICKER_DECISION_MODEL_ENABLED=1
+TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS=5
+TELEGRAM_STICKER_CONFIG_FILE=bots/telegram/stickers/ducks.json
+TELEGRAM_STICKER_SET_NAME=UtyaDuck
+TELEGRAM_STICKER_MODE=smart
 TELEGRAM_STICKER_TIMEOUT_SECONDS=5
 ```
+
+Sticker Telegram dùng Nimble local để chọn mood sau khi text reply đã gửi. Nếu
+Nimble chọn `no_sticker` hoặc lỗi/timeout, bot chỉ bỏ qua sticker và không
+fallback về keyword rule cũ.
 
 Thứ tự load env: root `.env` -> `niko/.env` -> `bots/telegram/.env`. Biến môi trường thật của hệ điều hành vẫn được ưu tiên hơn file `.env`.
 

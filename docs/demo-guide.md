@@ -150,15 +150,22 @@ Nếu bot phản hồi chậm:
 - Kiểm tra `CLAUDE_TIMEOUT_SECONDS`.
 - Kiểm tra `fcc-claude` có đang chạy được không.
 
-Nếu sticker timeout:
+Nếu sticker không gửi:
+
+- Xem terminal có dòng `Sticker decision: ...` không.
+- Nếu thấy `mood=no_sticker`, Nimble đã quyết định không cần sticker.
+- Nếu thấy `Sticker decision failed`, kiểm tra Ollama/Nimble đang chạy.
+
+Nếu sticker hoặc Telegram sticker API timeout:
 
 ```env
 TELEGRAM_STICKERS_ENABLED=0
 ```
 
-hoặc giảm:
+hoặc giảm timeout:
 
 ```env
+TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS=3
 TELEGRAM_STICKER_TIMEOUT_SECONDS=3
 ```
 

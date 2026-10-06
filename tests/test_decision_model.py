@@ -6,6 +6,12 @@ from bots.decision_model.client import (
     parse_keep_alive,
     parse_systemone_choice_response,
 )
+from bots.decision_model.sticker import (
+    NO_STICKER_MOOD,
+    available_moods_from_config,
+    build_sticker_mood_criteria,
+    normalize_sticker_mood,
+)
 from bots.decision_model.triage import (
     ROUTE_REPLY_NOW,
     ROUTE_SEND_TO_DEEP,
@@ -61,6 +67,30 @@ class DecisionModelTests(unittest.TestCase):
     def test_route_choice_aliases(self):
         self.assertEqual(normalize_route_choice("reply_now"), ROUTE_REPLY_NOW)
         self.assertEqual(normalize_route_choice("handoff"), ROUTE_SEND_TO_DEEP)
+
+    def test_sticker_mood_criteria_always_includes_no_sticker(self):
+        criteria = build_sticker_mood_criteria(["happy", "coding"])
+
+        self.assertIn(NO_STICKER_MOOD, criteria)
+        self.assertIn("happy", criteria)
+        self.assertIn("coding", criteria)
+
+    def test_sticker_mood_aliases_and_invalid_choices(self):
+        self.assertEqual(normalize_sticker_mood("no sticker", ["happy"]), NO_STICKER_MOOD)
+        self.assertEqual(normalize_sticker_mood("happy", ["happy"]), "happy")
+
+        with self.assertRaises(RuntimeError):
+            normalize_sticker_mood("angry", ["happy"])
+
+    def test_available_sticker_moods_follow_config_priority(self):
+        moods = available_moods_from_config(
+            {
+                "mood_priority": ["happy", "coding"],
+                "moods": {"coding": {}, "happy": {}, "neutral": {}},
+            }
+        )
+
+        self.assertEqual(moods, ["happy", "coding", "neutral"])
 
 
 if __name__ == "__main__":

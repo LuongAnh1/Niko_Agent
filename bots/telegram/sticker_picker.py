@@ -1,58 +1,47 @@
-"""Chọn sticker Telegram theo mood đơn giản.
+"""Chọn sticker Telegram theo mood đã được quyết định.
 
-Sticker là lớp trang trí phía gateway, không ảnh hưởng route hay memory. File
-này chỉ nhận text + config JSON, tìm mood theo keyword rồi chọn file_id phù hợp.
+Sticker là lớp trang trí phía gateway, không ảnh hưởng route hay memory. File này
+chỉ biết mapping JSON và sticker set Telegram; decision model mới là nơi chọn mood.
 """
 
 from __future__ import annotations
 
 import json
 import random
-import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
 
 StickerChooser = Callable[[list[Any]], Any]
+NO_STICKER_MOOD = 'no_sticker'
 
 
 def load_sticker_config(path: Path) -> dict[str, Any]:
-    """Đọc mapping mood/keyword/sticker từ JSON trong repo."""
+    """Đọc mapping mood/sticker từ JSON trong repo."""
     return json.loads(path.read_text(encoding='utf-8'))
-
-
-def detect_sticker_mood(text: str, config: dict[str, Any]) -> str | None:
-    """Tìm mood đầu tiên khớp theo thứ tự ưu tiên cấu hình."""
-    normalized_text = normalize_text(text)
-    moods = config.get('moods', {})
-    for mood in config.get('mood_priority', moods.keys()):
-        rule = moods.get(mood, {})
-        for keyword in rule.get('keywords', []):
-            normalized_keyword = normalize_text(str(keyword))
-            if normalized_keyword and normalized_keyword in normalized_text:
-                return str(mood)
-    return None
 
 
 def choose_sticker_file_id(
     stickers: list[Any],
     config: dict[str, Any],
-    source_text: str,
+    mood: str,
     chooser: StickerChooser | None = None,
 ) -> str | None:
-    """Trả về file_id để gửi, hoặc None nếu mode/config không muốn gửi."""
+    """Trả về file_id cho mood đã chọn, hoặc None nếu không nên gửi."""
     mode = str(config.get('mode', 'smart')).strip().lower()
     if mode in {'off', '0', 'false', 'no'}:
         return None
 
-    mood = detect_sticker_mood(source_text, config)
-    if mood is None:
-        if mode != 'always':
-            return None
-        mood = str(config.get('fallback_mood', 'neutral'))
+    normalized_mood = str(mood).strip().lower()
+    if not normalized_mood or normalized_mood == NO_STICKER_MOOD:
+        return None
+
+    moods = config.get('moods', {})
+    if normalized_mood not in moods:
+        return None
 
     chooser = chooser or random.choice
-    return choose_sticker_for_mood(stickers, config, mood, chooser)
+    return choose_sticker_for_mood(stickers, config, normalized_mood, chooser)
 
 
 def choose_sticker_for_mood(
@@ -101,9 +90,3 @@ def extract_sticker_file_id(sticker: Any) -> str | None:
         file_id = str(sticker.get('file_id', '')).strip()
         return file_id or None
     return None
-
-
-def normalize_text(text: str) -> str:
-    """Normalize để keyword tiếng Việt không phụ thuộc dấu/hoa thường."""
-    decomposed = unicodedata.normalize('NFKD', text.casefold())
-    return ''.join(char for char in decomposed if not unicodedata.combining(char))
