@@ -164,7 +164,7 @@ sequenceDiagram
 ```
 
 Write gate v1 chỉ chặn `episodes`. `chat_log` vẫn là operational log để debug,
-dashboard và consolidation sau này có nguyên liệu.
+dashboard và manual/auto consolidation có nguyên liệu.
 
 ## 5. Target Flow: Consolidation
 
@@ -232,7 +232,7 @@ flowchart LR
     Facts[(facts<br/>semantic memory)] --> Working
     Episodes[(episodes<br/>episodic memory)] --> Working
 
-    ChatLog[(chat_log<br/>operational log)] --> Consolidation[Consolidation<br/>planned]
+    ChatLog[(chat_log<br/>operational log)] --> Consolidation[Consolidation<br/>manual done / auto planned]
     Consolidation --> Facts
     Consolidation --> Episodes
 
@@ -241,8 +241,8 @@ flowchart LR
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class Current,Working,Facts,Episodes,ChatLog,Manual done;
-    class Recent,Consolidation planned;
+    class Current,Working,Facts,Episodes,ChatLog,Manual,Consolidation done;
+    class Recent planned;
 ```
 
 `chat_log` không phải semantic/episodic memory. Nó là log vận hành và nguyên liệu
@@ -254,7 +254,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | --- | --- | --- |
 | 0 | Ranh giới chat memory vs lakehouse/Jira | done |
 | 0.5 | `MemoryRuntime` làm cổng pipeline trung tâm | done |
-| 1 | Decision model memory tasks | retrieval/write done, classifier/correction planned |
+| 1 | Decision model memory tasks | retrieval/write/classifier done, correction planned |
 | 2 | Retrieval gate cho Deep | done, default-off |
 | 3 | Unicode/query search hardening | done |
 | 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier done, auto threshold planned |

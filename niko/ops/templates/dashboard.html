@@ -429,6 +429,11 @@
       text-transform: uppercase;
       letter-spacing: .08em;
     }
+    .field-help {
+      margin: 0;
+      color: var(--text-muted);
+      font: 12px/1.45 var(--font);
+    }
     .field select {
       width: 100%;
       border: 1px solid var(--rule-hard);
@@ -1148,6 +1153,7 @@
       const runtimeValue = field.runtime_value == null ? "" : ` | runtime=${field.runtime_value}`;
       return `<div class="field">
         <label><span>${esc(field.label)}</span><span class="source">${esc(field.source)}${esc(locked)}</span></label>
+        ${field.help ? `<p class="field-help">${esc(field.help)}</p>` : ""}
         ${configFieldInput(field)}
         <div class="source">${esc(field.name)} | default=${esc(field.default ?? "")}${esc(runtimeValue)}</div>
       </div>`;

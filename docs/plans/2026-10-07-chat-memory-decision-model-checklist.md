@@ -3,6 +3,7 @@
 Ngày lập: 2026-10-07
 Tài liệu gốc: [Kế Hoạch Chat Memory Decision Model](2026-10-07-chat-memory-decision-model.md)
 Phạm vi: chat memory single-user trong `Niko_Agent`
+Checklist kiểm tra live: [Memory Live Verification](../harness/memory-live-verification.md)
 
 Checklist này bám theo các phase trong kế hoạch gốc. Mỗi nhóm có mục đích để khi
 đọc lại mình biết checkbox đó phục vụ phần nào của memory pipeline, không chỉ là
@@ -50,9 +51,9 @@ hẹp về memory, thay vì để Deep agent tự quyết định mọi thứ.
 - [x] Mở rộng `ChoiceDecision.extra` để nhận `query/reason`.
 - [x] Export `MemoryRetrievalDecision` và `decide_memory_retrieval` từ `bots.decision_model`.
 - [x] Thiết kế tiếp `decide_memory_write(...)`.
-- [ ] Thiết kế tiếp `classify_memory_candidate(...)`.
+- [x] Thiết kế tiếp `classify_memory_candidate(...)`.
 - [ ] Thiết kế tiếp `decide_memory_correction_intent(...)`.
-- [ ] Trong dashboard Config, mỗi cấu hình mới của Decision/Memory layer phải có
+- [x] Trong dashboard Config, mỗi cấu hình mới của Decision/Memory layer phải có
   chú thích rõ dùng để làm gì, ảnh hưởng runtime nào, và khi nào nên bật/tắt.
 
 ## 2. Phase 2: Retrieval Gate Cho Deep
@@ -76,7 +77,7 @@ nhưng vẫn fail-open để không bỏ lỡ memory thật sự cần.
 - [ ] Test thực tế trên Telegram với `NIKO_MEMORY_GATE_ENABLED=1`.
 - [ ] Quan sát tab Bots xem log gate có đủ dễ đọc không.
 - [ ] Quan sát tab Traces xem `gate_decision`, `gate_query`, `gate_reason` có đủ debug không.
-- [ ] Ghi prompt mẫu cho gate `skip`, `retrieve`, fail-open.
+- [x] Ghi prompt mẫu cho gate `skip`, `retrieve`, fail-open.
 - [ ] Nếu Nimble hay thiếu `query`, chỉnh instructions của gate.
 - [ ] Nếu gate làm chậm Deep rõ rệt, cân nhắc timeout riêng.
 
@@ -180,7 +181,7 @@ khi coi là xong.
 - [x] `rtk python -m pytest` pass sau write gate v1.
 - [x] Link docs nội bộ pass.
 - [ ] Bật gate trên dashboard không làm Telegram bot crash.
-- [ ] Config dashboard hiển thị mô tả dễ hiểu cho từng key memory/decision mới.
+- [x] Config dashboard hiển thị mô tả dễ hiểu cho từng key memory/decision mới.
 - [ ] Khi gate skip, Deep prompt không chứa `Semantic memory / facts`.
 - [ ] Khi gate retrieve, Deep prompt có memory context phù hợp.
 - [ ] Khi Ollama/Nimble lỗi, Deep vẫn chạy với retrieval fallback.

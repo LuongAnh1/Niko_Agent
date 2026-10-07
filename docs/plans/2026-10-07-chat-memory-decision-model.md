@@ -260,7 +260,7 @@ Các decision point phù hợp:
 | `sticker_mood` | Đã có | Reply này có nên thả sticker không? Mood nào? | `no_sticker` hoặc mood hợp lệ |
 | `memory_retrieval_gate` | Đã có v1, default-off | Turn này có cần đọc long-term memory không? | `skip` hoặc `retrieve` + query |
 | `memory_write_gate` | Đã có v1, default-off | Turn này có thông tin đáng nhớ không? | `discard` hoặc `remember` |
-| `memory_type_classifier` | Cần thêm | Memory ứng viên là fact, episode hay không nên lưu? | `semantic_fact`, `episodic_event`, `discard` |
+| `memory_type_classifier` | Đã có v1 | Memory ứng viên là fact, episode hay không nên lưu? | `semantic_fact`, `episodic_event`, `discard` |
 | `memory_correction_intent` | Cần thêm | User đang yêu cầu sửa/quên memory không? | `none`, `correct_memory`, `forget_memory` |
 
 Pattern chung nên dùng:
@@ -300,7 +300,8 @@ Ranh giới quan trọng:
 
 ### Phase 1: Memory Decision Layer
 
-Trạng thái: đã triển khai phần `memory_retrieval_gate` v1.
+Trạng thái: đã triển khai `memory_retrieval_gate`, `memory_write_gate` và
+`memory_type_classifier` v1. `memory_correction_intent` vẫn để phase sau.
 
 Mục tiêu: chuẩn hóa cách Niko dùng local Ollama/Nimble cho các quyết định nhỏ
 trong memory pipeline.
@@ -314,9 +315,9 @@ bots/decision_model/memory.py
 Module này dùng lại `systemone_choice(...)` và cung cấp các hàm hẹp:
 
 - `decide_memory_retrieval(...)` đã có.
-- `decide_memory_write(...)`
-- `classify_memory_candidate(...)`
-- `decide_memory_correction_intent(...)`
+- `decide_memory_write(...)` đã có.
+- `classify_memory_candidate(...)` đã có.
+- `decide_memory_correction_intent(...)` chưa có.
 
 Các hàm này chỉ trả dataclass/metadata quyết định, không search store và không
 ghi database. Caller ở graph/memory pipeline quyết định hành động tiếp theo.

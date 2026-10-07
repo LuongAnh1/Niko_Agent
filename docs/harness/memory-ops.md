@@ -2,6 +2,8 @@
 
 Tài liệu này mô tả baseline harness của Niko: trace JSONL, SQLite memory và Mini Niko Ops dashboard. Mục tiêu là có một hệ thống chạy thật, quan sát được, có dữ liệu runtime để sau này cải tiến memory.
 
+Checklist kiểm tra live qua Telegram nằm ở [Memory Live Verification](memory-live-verification.md).
+
 ## Thành Phần
 
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
@@ -42,7 +44,9 @@ SQLite hiện có ba nhóm dữ liệu:
 
 `chat_log` không phải Semantic/Episodic Memory theo nghĩa dùng để suy luận. Nó là log vận hành để xem lại hội thoại. Semantic/Episodic hiện nằm ở `facts` và `episodes`.
 `chat_log` hiện có cờ `consolidated` để scaffold consolidation biết batch nào đã
-được xử lý xong; việc tự sinh facts/episodes từ batch vẫn là phase sau.
+được xử lý xong. Manual consolidation v1 đã có thể tạo candidate bảo thủ, gọi
+Decision Model để phân loại, rồi ghi facts/episodes với source `consolidation`;
+threshold/scheduler tự động vẫn là phase sau.
 
 Nếu SQLite hỗ trợ FTS5, store dùng full-text search. Nếu không có FTS5, store fallback về LIKE search có giới hạn.
 

@@ -2,9 +2,12 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
+from http.client import RemoteDisconnected
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from niko.harness.runtime_log import RuntimeEventLogger
@@ -13,6 +16,8 @@ from niko.memory.store import MemoryStore
 from niko.ops.dashboard import TelegramBotProcessManager, create_server
 from bots.telegram.instance_guard import TelegramBotInstanceInfo
 from bots.decision_model.memory import MEMORY_SEMANTIC_FACT, MemoryCandidateDecision
+
+TRANSIENT_LOCAL_HTTP_ERRORS = (ConnectionAbortedError, ConnectionResetError, RemoteDisconnected, URLError)
 
 
 class OpsDashboardTests(unittest.TestCase):
@@ -157,6 +162,18 @@ class OpsDashboardTests(unittest.TestCase):
                     self.assertEqual(token_field["value"], "********")
                     self.assertNotIn("secret-token", json.dumps(updated))
                     self.assertIn("secret-token", config_path.read_text(encoding="utf-8"))
+
+                    memory = next(section for section in updated["sections"] if section["id"] == "memory")
+                    retrieval_gate = next(
+                        field for field in memory["fields"] if field["name"] == "NIKO_MEMORY_GATE_ENABLED"
+                    )
+                    self.assertIn("Deep", retrieval_gate["help"])
+
+                    decision = next(section for section in updated["sections"] if section["id"] == "decision")
+                    keep_alive = next(
+                        field for field in decision["fields"] if field["name"] == "NIKO_DECISION_MODEL_KEEP_ALIVE"
+                    )
+                    self.assertIn("RAM/VRAM", keep_alive["help"])
                 finally:
                     server.shutdown()
                     server.server_close()
@@ -274,8 +291,7 @@ class OpsDashboardTests(unittest.TestCase):
                 thread.join(timeout=2)
 
     def _json_get(self, url: str) -> dict:
-        with urlopen(url, timeout=5) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return self._json_request(url)
 
     def _json_post(self, url: str, payload: dict) -> dict:
         request = Request(
@@ -284,13 +300,24 @@ class OpsDashboardTests(unittest.TestCase):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(request, timeout=5) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return self._json_request(request)
 
     def _json_delete(self, url: str) -> dict:
         request = Request(url, method="DELETE")
-        with urlopen(request, timeout=5) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return self._json_request(request)
+
+    def _json_request(self, request) -> dict:
+        for attempt in range(3):
+            try:
+                with urlopen(request, timeout=5) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except TRANSIENT_LOCAL_HTTP_ERRORS as exc:
+                if isinstance(exc, HTTPError):
+                    raise
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
+        raise AssertionError("unreachable")
 
 
 if __name__ == "__main__":
