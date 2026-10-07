@@ -3,6 +3,7 @@
 Tài liệu này mô tả baseline harness của Niko: trace JSONL, SQLite memory và Mini Niko Ops dashboard. Mục tiêu là có một hệ thống chạy thật, quan sát được, có dữ liệu runtime để sau này cải tiến memory.
 
 Checklist kiểm tra live qua Telegram nằm ở [Memory Live Verification](memory-live-verification.md).
+Kịch bản eval deterministic nằm ở [Chat Memory Eval Scenarios](memory-eval-scenarios.md).
 
 ## Thành Phần
 

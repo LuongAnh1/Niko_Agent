@@ -171,6 +171,7 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 - [Kiến trúc](docs/harness/architecture.md)
 - [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
 - [Harness Memory & Ops](docs/harness/memory-ops.md)
+- [Chat Memory Eval Scenarios](docs/harness/memory-eval-scenarios.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo/demo-guide.md)
 - [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)

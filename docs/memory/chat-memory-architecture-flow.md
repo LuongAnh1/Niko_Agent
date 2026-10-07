@@ -283,7 +283,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
 | 5 | Correction/forget qua chat/dashboard | V1 temporary, delete flow live-verified |
 | 6 | Working memory rõ: recent/current/long-term | done v1 |
-| 7 | Eval riêng cho memory | unit tests and live verification done, eval scenarios planned |
+| 7 | Eval riêng cho memory | done v1: deterministic eval scenarios + unit tests |
 
 ## 9. Nguyên Tắc Kiểm Soát
 

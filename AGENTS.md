@@ -221,6 +221,8 @@ bot process already owns that lock.
 - `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
 - `docs/harness/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
 - `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/harness/memory-eval-scenarios.md`: deterministic chat memory eval
+  scenarios for retrieval/write/correction regression checks.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
 - `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.

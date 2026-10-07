@@ -508,18 +508,18 @@ Long-term facts/episodes vẫn là memory chung của instance.
 
 Mục tiêu: memory không chỉ “có vẻ chạy”, mà có test chứng minh.
 
-Nên có deterministic tests:
+Trạng thái: đã có scenario doc và deterministic tests trong
+`docs/harness/memory-eval-scenarios.md` và `tests/test_memory_eval_scenarios.py`.
+Các nhóm hiện được cover:
 
 - save fact, hỏi trực tiếp, retrieve đúng.
 - hỏi câu không cần memory, gate skip.
 - gate lỗi, retrieve fail-open.
 - write gate discard, không tạo memory dài hạn.
-- consolidation below threshold không gọi model.
-- consolidation failure không mất log.
 - query tiếng Việt có dấu search đúng.
 - correction/delete fact không còn retrieve fact cũ.
 
-Sau đó mới thêm judge/eval mềm cho chất lượng trả lời.
+Judge/eval mềm cho chất lượng trả lời vẫn để sau, khi prompt Deep ổn định hơn.
 
 ## Khuyến Nghị Bước Tiếp Theo Cho Niko
 
@@ -530,12 +530,11 @@ gates đã có test và trace, search tiếng Việt đã được harden, manua
 
 Em đề xuất bước tiếp theo nên là hai việc nhỏ, ít rủi ro:
 
-1. Thêm eval prompt mẫu cho retrieval/write/correction thay vì chỉ live test thủ công.
-2. Sau eval, cân nhắc threshold/scheduler consolidation tự động nếu demo cần.
+1. Cân nhắc threshold/scheduler consolidation tự động nếu demo cần.
+2. Sau đó mới quay lại Loop/tool workflow bền cho memory correction nếu muốn bỏ pending RAM.
 
-Lý do: correction và working memory đã có baseline quan sát được; trước khi mở
-thêm scheduler hoặc Loop/tool bền, mình cần eval để tránh cảm giác "có vẻ chạy"
-nhưng thiếu regression.
+Lý do: correction, working memory và eval baseline đã có; scheduler consolidation
+là phần còn thiếu rõ nhất nếu muốn memory tự gom từ chat log thay vì chạy thủ công.
 
 Không triển khai trong bước đầu:
 

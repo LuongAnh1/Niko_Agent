@@ -235,12 +235,12 @@ và cảm giác “có vẻ chạy”.
 - [x] Unit test regression cho case model trả `retrieve/search` ở câu kiểm kê
   fact: mode thực thi cuối cùng phải là `fact_mode=list`, `episode_mode=none`.
 - [x] Unit test trace có gate metadata.
-- [ ] Eval prompt mẫu cho câu không cần memory.
-- [ ] Eval prompt mẫu cho câu hỏi cần memory trực tiếp.
-- [ ] Eval prompt mẫu cho câu hỏi cần memory gián tiếp.
-- [ ] Eval prompt mẫu cho correction/forget khi phase đó có.
-- [ ] Eval regression cho query tiếng Việt có dấu.
-- [ ] Eval failure mode khi Ollama/Nimble không chạy.
+- [x] Eval prompt mẫu cho câu không cần memory.
+- [x] Eval prompt mẫu cho câu hỏi cần memory trực tiếp.
+- [x] Eval prompt mẫu cho câu hỏi cần memory gián tiếp.
+- [x] Eval prompt mẫu cho correction/forget khi phase đó có.
+- [x] Eval regression cho query tiếng Việt có dấu.
+- [x] Eval failure mode khi Ollama/Nimble không chạy.
 
 ## Acceptance Check Chung
 
@@ -252,6 +252,7 @@ khi coi là xong.
 - [x] `rtk python -m pytest` pass sau search hardening Phase 3.
 - [x] `rtk python -m pytest` pass sau refactor `MemoryRuntime`.
 - [x] `rtk python -m pytest` pass sau write gate v1.
+- [x] `rtk python -m pytest` pass sau working memory/eval v1: 143 passed.
 - [x] Link docs nội bộ pass.
 - [x] Bật gate trên dashboard không làm Telegram bot crash.
 - [x] Config dashboard hiển thị mô tả dễ hiểu cho từng key memory/decision mới.
