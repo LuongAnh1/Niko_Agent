@@ -173,27 +173,28 @@ flowchart TB
     ChatLog[(chat_log<br/>operational log)] --> Threshold{Đủ N exchange<br/>chưa consolidated?}
     Threshold -->|no| Wait[Chờ thêm hội thoại]
     Threshold -->|yes| Batch[Load batch cố định]
-    Batch --> Summarizer[Summarizer nhỏ<br/>planned]
-    Summarizer --> Classifier{Memory type classifier<br/>planned}
+    Batch --> CandidateBuilder[Rule-based candidate builder]
+    CandidateBuilder --> Classifier{Memory type classifier}
     Classifier -->|semantic_fact| Facts[(facts)]
     Classifier -->|episodic_event| Episodes[(episodes)]
     Classifier -->|discard| NoMemory[Không tạo long-term memory]
     Facts --> Mark[Mark đúng rows đã đọc<br/>consolidated=1]
     Episodes --> Mark
     NoMemory --> Mark
-    Summarizer -->|error / invalid output| Retry[Không mark rows<br/>retry lần sau]
+    Classifier -->|error / invalid output| Retry[Không mark rows<br/>retry lần sau]
 
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class ChatLog,Batch,Mark done;
-    class Threshold,Wait,Summarizer,Classifier,Facts,Episodes,NoMemory,Retry planned;
+    class ChatLog,Batch,CandidateBuilder,Classifier,Facts,Episodes,NoMemory,Mark,Retry done;
+    class Threshold,Wait planned;
 ```
 
 Scaffold consolidation hiện đã có: `chat_log` có `consolidated`, store đọc được batch
-chưa xử lý, và `niko/memory/consolidation.py` có API preview/mark-done. Phần chưa
-làm là threshold tự động, summarizer, classifier và ghi facts/episodes; các bước đó
-vẫn phải giữ guardrail: model lỗi thì không mark row đã consolidate.
+chưa xử lý, tạo candidate bảo thủ, dùng classifier `semantic_fact` / `episodic_event`
+/ `discard`, ghi facts/episodes với provenance `consolidation`, và có API dashboard
+để chạy thủ công. Phần chưa làm là threshold/scheduler tự động và summarizer tự do;
+guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã consolidate.
 
 ## 6. Target Flow: Correction / Forget Memory
 
@@ -256,7 +257,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 1 | Decision model memory tasks | retrieval/write done, classifier/correction planned |
 | 2 | Retrieval gate cho Deep | done, default-off |
 | 3 | Unicode/query search hardening | done |
-| 4 | Write gate và consolidation | write gate done, consolidation scaffold done, summarizer/classifier planned |
+| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier done, auto threshold planned |
 | 5 | Correction/forget qua chat/dashboard | planned |
 | 6 | Working memory rõ: recent/current/long-term | planned |
 | 7 | Eval riêng cho memory | partial tests done, eval scenarios planned |

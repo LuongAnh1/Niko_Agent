@@ -83,6 +83,21 @@ Khi một turn được xử lý:
 - Nếu write gate lỗi, Niko fail-open và vẫn ghi episode baseline.
 - Semantic facts hiện chủ yếu được thêm thủ công qua dashboard hoặc API.
 
+## Manual Consolidation
+
+Dashboard Memory tab có khối `Consolidation` để chạy thủ công một batch
+`chat_log` chưa consolidated. Luồng này tạo candidate bằng rule bảo thủ, dùng
+Nimble chỉ để phân loại `semantic_fact`, `episodic_event` hoặc `discard`, rồi mới
+ghi vào `facts`/`episodes` với `source=consolidation`.
+
+Guardrail hiện tại:
+
+- Candidate builder không suy diễn fact mơ hồ; semantic fact cần câu user nói rõ
+  kiểu “ghi nhớ”, “lưu fact”, “từ giờ”.
+- Nếu classifier/Ollama lỗi, batch không bị mark consolidated để có thể retry.
+- Nếu classifier trả `discard`, batch có thể được mark done mà không tạo memory dài hạn.
+- Chưa có scheduler nền; mọi consolidation v1 chạy qua API/dashboard thủ công.
+
 Các event trace liên quan:
 
 - `memory_retrieval`
@@ -146,7 +161,9 @@ Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để d�
 - `POST /api/runtime/bot/stop`
 - `GET /api/traces`
 - `GET /api/memory`
+- `GET /api/memory/consolidation`
 - `POST /api/memory/facts`
+- `POST /api/memory/consolidation/run`
 - `DELETE /api/memory/facts/{id}`
 
 `POST /api/bots/decision/warmup` trả về ngay trạng thái `warming` và chạy warmup

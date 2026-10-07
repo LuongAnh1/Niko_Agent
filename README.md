@@ -19,6 +19,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `episodes`: Episodic Memory sinh ra sau deep job.
   - retrieval/write gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
+- Manual memory consolidation: Memory tab có thể preview/run một batch `chat_log` để tạo facts/episodes có provenance `consolidation`.
 
 ## Cấu Trúc Chính
 

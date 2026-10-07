@@ -7,9 +7,12 @@ from unittest.mock import Mock, patch
 
 from bots.decision_model.memory import (
     MEMORY_DISCARD,
+    MEMORY_EPISODIC_EVENT,
     MEMORY_REMEMBER,
     MEMORY_RETRIEVE,
+    MEMORY_SEMANTIC_FACT,
     MEMORY_SKIP,
+    MemoryCandidateDecision,
     MemoryRetrievalDecision,
     MemoryWriteDecision,
 )
@@ -103,6 +106,90 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(batch.row_ids, [row_id])
         self.assertEqual(result.marked_count, 1)
         self.assertEqual(remaining, [])
+
+    def test_consolidation_run_writes_explicit_semantic_fact_and_marks_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            row_id = store.log_chat("chat-1", "user", "Ghi nhớ rằng anh thích dashboard rõ ràng", source="test")
+            consolidator = MemoryConsolidator(
+                store=store,
+                candidate_classifier=lambda _candidate: MemoryCandidateDecision(
+                    decision=MEMORY_SEMANTIC_FACT,
+                    reason="explicit fact",
+                ),
+            )
+
+            result = consolidator.run_once(limit=5)
+            snapshot = store.snapshot()
+            remaining = store.list_unconsolidated_chat(limit=5)
+
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(result.marked_count, 1)
+        self.assertEqual(result.facts_written, [snapshot["facts"][0]["id"]])
+        self.assertIn("dashboard", snapshot["facts"][0]["content"])
+        self.assertEqual(snapshot["facts"][0]["source"], "consolidation")
+        self.assertEqual(remaining, [])
+        self.assertEqual(result.batch.row_ids, [row_id])
+
+    def test_consolidation_run_writes_episodic_event_and_marks_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("chat-1", "user", "Implement phần memory consolidation giúp anh", source="test")
+            store.log_chat("chat-1", "assistant", "Đã triển khai và test phần consolidation", source="test")
+            consolidator = MemoryConsolidator(
+                store=store,
+                candidate_classifier=lambda _candidate: MemoryCandidateDecision(
+                    decision=MEMORY_EPISODIC_EVENT,
+                    reason="completed task",
+                ),
+            )
+
+            result = consolidator.run_once(limit=5)
+            snapshot = store.snapshot()
+
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(result.marked_count, 2)
+        self.assertEqual(snapshot["counts"]["episodes"], 1)
+        self.assertEqual(snapshot["episodes"][0]["source"], "consolidation")
+        self.assertIn("Implement", snapshot["episodes"][0]["summary"])
+
+    def test_consolidation_discard_marks_small_talk_done_without_long_term_write(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("chat-1", "user", "chào em", source="test")
+            consolidator = MemoryConsolidator(
+                store=store,
+                candidate_classifier=lambda _candidate: MemoryCandidateDecision(
+                    decision=MEMORY_DISCARD,
+                    reason="small talk",
+                ),
+            )
+
+            result = consolidator.run_once(limit=5)
+            snapshot = store.snapshot()
+            remaining = store.list_unconsolidated_chat(limit=5)
+
+        self.assertEqual(result.status, "discarded")
+        self.assertEqual(result.marked_count, 1)
+        self.assertEqual(snapshot["counts"]["facts"], 0)
+        self.assertEqual(snapshot["counts"]["episodes"], 0)
+        self.assertEqual(remaining, [])
+
+    def test_consolidation_classifier_error_does_not_mark_rows(self):
+        def failing_classifier(_candidate):
+            raise RuntimeError("ollama offline")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            row_id = store.log_chat("chat-1", "user", "Ghi nhớ rằng anh dùng Niko local", source="test")
+            consolidator = MemoryConsolidator(store=store, candidate_classifier=failing_classifier)
+
+            result = consolidator.run_once(limit=5)
+            remaining = store.list_unconsolidated_chat(limit=5)
+
+        self.assertEqual(result.status, "error")
+        self.assertIn("ollama offline", result.error)
+        self.assertEqual([row["id"] for row in remaining], [row_id])
 
     def test_add_search_and_delete_fact(self):
         with tempfile.TemporaryDirectory() as temp_dir:

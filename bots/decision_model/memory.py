@@ -16,8 +16,11 @@ MEMORY_SKIP = "skip"
 MEMORY_RETRIEVE = "retrieve"
 MEMORY_REMEMBER = "remember"
 MEMORY_DISCARD = "discard"
+MEMORY_SEMANTIC_FACT = "semantic_fact"
+MEMORY_EPISODIC_EVENT = "episodic_event"
 QUESTION_NAME = "memory_retrieval"
 WRITE_QUESTION_NAME = "memory_write"
+CANDIDATE_QUESTION_NAME = "memory_type"
 MAX_MEMORY_GATE_PROMPT_LENGTH = 1600
 
 
@@ -39,6 +42,20 @@ class MemoryRetrievalDecision:
 @dataclass(frozen=True)
 class MemoryWriteDecision:
     """Quyết định đã chuẩn hóa cho bước ghi episodic memory dài hạn."""
+
+    decision: str
+    reason: str = ""
+    confidence: float | None = None
+    label: str = ""
+    probabilities: dict[str, float] = field(default_factory=dict)
+    provider: str = "ollama_nimble"
+    model: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MemoryCandidateDecision:
+    """Quyết định đã chuẩn hóa cho một memory candidate từ consolidation."""
 
     decision: str
     reason: str = ""
@@ -104,6 +121,30 @@ def decide_memory_write(
     )
 
 
+def classify_memory_candidate(
+    candidate: dict[str, Any],
+    config: DecisionModelConfig | None = None,
+) -> MemoryCandidateDecision:
+    """Hỏi Nimble xem candidate là semantic fact, episodic event hay nên bỏ."""
+    decision = systemone_choice(
+        state=build_memory_candidate_state(candidate),
+        question_name=CANDIDATE_QUESTION_NAME,
+        instructions=build_memory_candidate_instructions(),
+        criteria=build_memory_candidate_criteria(),
+        config=config,
+    )
+    normalized = normalize_memory_candidate_choice(decision.choice)
+    return MemoryCandidateDecision(
+        decision=normalized,
+        reason=normalize_optional_text(decision.extra.get("reason")),
+        confidence=decision.confidence,
+        label=decision.choice,
+        probabilities=decision.probabilities,
+        model=decision.model,
+        usage=decision.usage,
+    )
+
+
 def build_memory_retrieval_state(prompt: str, gateway_message=None) -> dict[str, Any]:
     """State tối thiểu: prompt hiện tại và metadata gateway không nhạy cảm."""
     state: dict[str, Any] = {"prompt": truncate_memory_gate_text(prompt)}
@@ -149,6 +190,28 @@ def build_memory_write_state(
     return state
 
 
+def build_memory_candidate_state(candidate: dict[str, Any]) -> dict[str, Any]:
+    """State hẹp cho classifier: candidate đã được pipeline tạo sẵn, không phải raw log dài."""
+    allowed_keys = {
+        "kind_hint",
+        "subject",
+        "content",
+        "summary",
+        "reason",
+        "source_roles",
+        "row_ids",
+        "conversation_id",
+    }
+    state: dict[str, Any] = {}
+    for key in allowed_keys:
+        value = candidate.get(key)
+        if isinstance(value, str):
+            state[key] = truncate_memory_gate_text(value, limit=900)
+        elif value not in (None, [], {}):
+            state[key] = value
+    return state
+
+
 def build_memory_retrieval_instructions() -> str:
     """Luật retrieval gate: chỉ quyết định đọc memory hay bỏ qua."""
     return (
@@ -176,6 +239,20 @@ def build_memory_write_instructions() -> str:
     )
 
 
+def build_memory_candidate_instructions() -> str:
+    """Luật phân loại candidate: model chỉ chọn loại, không tạo nội dung mới."""
+    return (
+        "Classify this pre-built chat-memory candidate. Choose semantic_fact only "
+        "when the candidate is a stable user preference, standing fact, rule, "
+        "identity detail, project detail, or instruction likely useful later. "
+        "Choose episodic_event when it is a dated interaction, completed task, "
+        "decision, debugging outcome, or follow-up context. Choose discard for "
+        "small talk, vague statements, unsupported inference, duplicates, transient "
+        "messages, or anything too risky to store as long-term memory. Do not "
+        "rewrite or add facts; only choose the label and optionally include reason."
+    )
+
+
 def build_memory_retrieval_criteria() -> dict[str, str]:
     """Hai lựa chọn duy nhất mà memory pipeline hiểu ở v1."""
     return {
@@ -189,6 +266,15 @@ def build_memory_write_criteria() -> dict[str, str]:
     return {
         MEMORY_REMEMBER: "Save this completed Deep interaction as long-term episodic memory.",
         MEMORY_DISCARD: "Do not save this interaction as long-term episodic memory.",
+    }
+
+
+def build_memory_candidate_criteria() -> dict[str, str]:
+    """Ba loại candidate mà consolidation v1 hiểu."""
+    return {
+        MEMORY_SEMANTIC_FACT: "Store as a durable semantic fact.",
+        MEMORY_EPISODIC_EVENT: "Store as an episodic event summary.",
+        MEMORY_DISCARD: "Do not store this candidate as long-term memory.",
     }
 
 
@@ -241,6 +327,32 @@ def normalize_memory_write_choice(choice: str) -> str:
         raise RuntimeError(f"Ollama memory write decision khong hop le: {choice or '(empty)'}") from exc
 
 
+def normalize_memory_candidate_choice(choice: str) -> str:
+    """Chấp nhận alias nhẹ cho classifier candidate."""
+    normalized = choice.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        MEMORY_SEMANTIC_FACT: MEMORY_SEMANTIC_FACT,
+        "fact": MEMORY_SEMANTIC_FACT,
+        "semantic": MEMORY_SEMANTIC_FACT,
+        "remember_fact": MEMORY_SEMANTIC_FACT,
+        MEMORY_EPISODIC_EVENT: MEMORY_EPISODIC_EVENT,
+        "episode": MEMORY_EPISODIC_EVENT,
+        "episodic": MEMORY_EPISODIC_EVENT,
+        "event": MEMORY_EPISODIC_EVENT,
+        "memory_event": MEMORY_EPISODIC_EVENT,
+        MEMORY_DISCARD: MEMORY_DISCARD,
+        MEMORY_SKIP: MEMORY_DISCARD,
+        "no": MEMORY_DISCARD,
+        "none": MEMORY_DISCARD,
+        "ignore": MEMORY_DISCARD,
+        "do_not_store": MEMORY_DISCARD,
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise RuntimeError(f"Ollama memory candidate decision khong hop le: {choice or '(empty)'}") from exc
+
+
 def normalize_optional_text(value: Any) -> str:
     """Chuẩn hóa field phụ `query/reason` nếu provider trả về."""
     if value is None:
@@ -255,7 +367,9 @@ def truncate_memory_gate_text(value: str, limit: int = MAX_MEMORY_GATE_PROMPT_LE
     return text[: limit - 20].rstrip() + "\n...[truncated]"
 
 
-def decision_meta(decision: ChoiceDecision | MemoryRetrievalDecision | MemoryWriteDecision) -> dict[str, Any]:
+def decision_meta(
+    decision: ChoiceDecision | MemoryRetrievalDecision | MemoryWriteDecision | MemoryCandidateDecision,
+) -> dict[str, Any]:
     """Metadata sạch để trace/log gate mà không cần lưu raw payload."""
     meta: dict[str, Any] = {}
     confidence = getattr(decision, "confidence", None)

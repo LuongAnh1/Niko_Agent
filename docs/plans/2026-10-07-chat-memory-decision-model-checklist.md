@@ -112,14 +112,15 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Thêm API mark-done chỉ đánh dấu đúng row đã đọc.
 - [x] Nối scaffold consolidation qua `MemoryRuntime` để giữ một cổng memory thống nhất.
 - [ ] Thêm threshold tự động theo ngưỡng N exchange trước khi gọi model.
+- [x] Tạo memory candidates bảo thủ từ batch bằng rule nội bộ.
 - [ ] Summarizer tạo memory candidates từ batch.
-- [ ] Thêm `memory_type_classifier` để lọc `semantic_fact`, `episodic_event`, `discard`.
-- [ ] Ghi facts với source/provenance `consolidation`.
-- [ ] Ghi episodes với source/provenance `consolidation`.
-- [ ] Chỉ mark đúng rows đã đọc là consolidated.
-- [ ] Model lỗi hoặc output không parse được thì không mark consolidated.
-- [ ] No facts hợp lệ vẫn có thể mark done nếu batch chỉ là small talk.
-- [ ] Thêm dashboard/manual trigger nếu cần debug consolidation.
+- [x] Thêm `memory_type_classifier` để lọc `semantic_fact`, `episodic_event`, `discard`.
+- [x] Ghi facts với source/provenance `consolidation`.
+- [x] Ghi episodes với source/provenance `consolidation`.
+- [x] Chỉ mark đúng rows đã đọc là consolidated.
+- [x] Model lỗi hoặc output không parse được thì không mark consolidated.
+- [x] No facts hợp lệ vẫn có thể mark done nếu batch chỉ là small talk.
+- [x] Thêm dashboard/manual trigger nếu cần debug consolidation.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
 

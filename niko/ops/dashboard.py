@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from niko.config import env_value, load_env_files, reset_runtime_config, update_runtime_config
 from niko.harness.runtime_log import RuntimeEventLogger, default_runtime_logger
 from niko.harness.trace import TraceLogger, default_trace_logger
+from niko.memory.consolidation import MemoryConsolidator
 from niko.memory.store import MemoryStore, default_memory_store
 from niko.ops.bots import TelegramBotProcessManager, bots_snapshot, run_bot_action
 from niko.ops.config_schema import config_section_keys, config_snapshot, validate_config_updates
@@ -47,6 +48,7 @@ def make_handler(
     để test có thể truyền memory store, trace logger và bot manager giả lập.
     """
     store = memory_store or default_memory_store()
+    consolidator = MemoryConsolidator(store=store)
     traces = trace_logger or default_trace_logger()
     runtime_logs = runtime_logger or default_runtime_logger()
     manager = bot_manager or TelegramBotProcessManager(runtime_logger=runtime_logs)
@@ -61,10 +63,18 @@ def make_handler(
                 return
             if parsed.path == "/api/snapshot":
                 # Snapshot tổng hợp cho lần render đầu và các lần refresh định kỳ của UI.
+                consolidation_batch = consolidator.preview_next_batch()
                 self._send(
                     *json_bytes(
                         {
                             "memory": store.snapshot(),
+                            "consolidation": {
+                                "batch": consolidation_batch.to_dict(),
+                                "candidates": [
+                                    candidate.to_dict()
+                                    for candidate in consolidator.build_candidates(consolidation_batch)
+                                ],
+                            },
                             "traces": traces.read_events(limit=80),
                             "config": config_snapshot(manager),
                             "bots": bots_snapshot(manager),
@@ -109,7 +119,32 @@ def make_handler(
                 self._send(*json_bytes({"traces": traces.read_events(limit=limit)}))
                 return
             if parsed.path == "/api/memory":
-                self._send(*json_bytes({"memory": store.snapshot()}))
+                consolidation_batch = consolidator.preview_next_batch()
+                self._send(
+                    *json_bytes(
+                        {
+                            "memory": store.snapshot(),
+                            "consolidation": {
+                                "batch": consolidation_batch.to_dict(),
+                                "candidates": [
+                                    candidate.to_dict()
+                                    for candidate in consolidator.build_candidates(consolidation_batch)
+                                ],
+                            },
+                        }
+                    )
+                )
+                return
+            if parsed.path == "/api/memory/consolidation":
+                batch = consolidator.preview_next_batch(limit=self._query_limit(parsed.query, default=12))
+                self._send(
+                    *json_bytes(
+                        {
+                            "batch": batch.to_dict(),
+                            "candidates": [candidate.to_dict() for candidate in consolidator.build_candidates(batch)],
+                        }
+                    )
+                )
                 return
             self._send(*json_bytes({"error": "not found"}, status=404))
 
@@ -129,6 +164,19 @@ def make_handler(
                     self._send(*json_bytes({"error": str(exc)}, status=400))
                     return
                 self._send(*json_bytes({"id": fact_id}, status=201))
+                return
+            if parsed.path == "/api/memory/consolidation/run":
+                data = self._read_json()
+                raw_limit = data.get("limit")
+                try:
+                    limit = None if raw_limit in (None, "") else max(1, min(100, int(raw_limit)))
+                except (TypeError, ValueError):
+                    self._send(*json_bytes({"error": "invalid consolidation limit"}, status=400))
+                    return
+                session_id = str(data.get("session_id", "")).strip() or None
+                result = consolidator.run_once(limit=limit, session_id=session_id)
+                status = 500 if result.status == "error" else 200
+                self._send(*json_bytes({"result": result.to_dict()}, status=status))
                 return
             if parsed.path == "/api/config":
                 data = self._read_json()

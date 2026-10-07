@@ -17,11 +17,15 @@ from bots.decision_model.sticker import (
 )
 from bots.decision_model.memory import (
     MEMORY_DISCARD,
+    MEMORY_EPISODIC_EVENT,
     MEMORY_RETRIEVE,
     MEMORY_REMEMBER,
+    MEMORY_SEMANTIC_FACT,
     MEMORY_SKIP,
+    build_memory_candidate_criteria,
     build_memory_retrieval_criteria,
     build_memory_write_criteria,
+    normalize_memory_candidate_choice,
     normalize_memory_retrieval_choice,
     normalize_memory_write_choice,
 )
@@ -153,6 +157,19 @@ class DecisionModelTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             normalize_memory_write_choice("maybe")
+
+    def test_memory_candidate_choice_aliases_and_criteria(self):
+        criteria = build_memory_candidate_criteria()
+
+        self.assertIn(MEMORY_SEMANTIC_FACT, criteria)
+        self.assertIn(MEMORY_EPISODIC_EVENT, criteria)
+        self.assertIn(MEMORY_DISCARD, criteria)
+        self.assertEqual(normalize_memory_candidate_choice("fact"), MEMORY_SEMANTIC_FACT)
+        self.assertEqual(normalize_memory_candidate_choice("episode"), MEMORY_EPISODIC_EVENT)
+        self.assertEqual(normalize_memory_candidate_choice("ignore"), MEMORY_DISCARD)
+
+        with self.assertRaises(RuntimeError):
+            normalize_memory_candidate_choice("maybe")
 
 
 if __name__ == "__main__":

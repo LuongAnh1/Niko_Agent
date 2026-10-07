@@ -204,9 +204,9 @@ Những phần còn thiếu hoặc mới ở mức scaffold so với Waku:
 
 - Đã có retrieval gate v1, default-off, dùng Nimble để chọn `skip/retrieve` khi bật.
 - Đã có write gate v1, default-off, hiện chỉ quyết định ghi/bỏ `episodes`.
-- Đã có `consolidated` flag trên `chat_log` và scaffold đọc/mark batch.
-- Chưa có batch consolidation tự sinh facts/episodes từ chat log.
-- Chưa có classifier rõ cho semantic fact, episodic event, hoặc discard.
+- Đã có manual consolidation v1: đọc batch `chat_log`, tạo candidate bảo thủ,
+  phân loại `semantic_fact` / `episodic_event` / `discard`, ghi facts/episodes và mark batch.
+- Chưa có threshold/scheduler tự động cho consolidation.
 - Chưa có memory management qua chat.
 - Chưa có working-memory model rõ: recent history window, session switch/reload.
 - Chưa có readable `MEMORY.md` mirror.
@@ -385,9 +385,10 @@ Phase này nhỏ nhưng đáng làm sớm vì Niko chat tiếng Việt là chín
 
 Mục tiêu: tự tạo semantic facts/episodes từ chat thật, nhưng không spam memory.
 
-Trạng thái: write gate v1 đã có; scaffold consolidation đã có cột `consolidated`,
-batch preview và mark-done. Phần tự động gọi model, tạo candidates, phân loại và ghi
-facts/episodes vẫn để phase sau.
+Trạng thái: write gate v1 đã có; manual consolidation v1 đã có cột `consolidated`,
+batch preview, candidate builder bảo thủ, memory type classifier, ghi facts/episodes
+với `source=consolidation`, và dashboard/API trigger thủ công. Threshold/scheduler
+tự động và summarizer tự do vẫn để phase sau.
 
 Luồng đề xuất:
 
@@ -397,7 +398,7 @@ Sau turn hoàn tất
      -> discard: chỉ giữ chat_log
      -> remember: đưa vào batch consolidation
   -> nếu đủ N exchange đáng nhớ trong instance này
-  -> summarizer nhỏ tạo candidates
+  -> candidate builder bảo thủ tạo candidates
   -> memory_type_classifier lọc fact/episode/discard
   -> ghi facts/episodes
   -> mark đúng row đã đọc là consolidated
@@ -420,6 +421,9 @@ Config:
 - `NIKO_MEMORY_CONSOLIDATION_ENABLED`
 - `NIKO_MEMORY_CONSOLIDATE_EVERY_N`
 - `NIKO_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS`
+
+Các config này dành cho auto consolidation phase sau; manual consolidation hiện
+chạy qua dashboard/API và chưa có scheduler nền.
 
 V1 consolidation đọc chat log local của một Niko instance. Khi mở rộng multi-user
 mới cần thêm scope filter theo `user_key` hoặc `conversation_id`.

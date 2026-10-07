@@ -564,7 +564,13 @@
       config: ["Config", "Runtime configuration, decision model, stickers, memory, and replies."],
       ops: ["Ops", "Local dashboard controls and baseline architecture notes."]
     };
-    let state = { view: "overview", data: null, factDraft: { subject: "", content: "" }, configTab: "runtime" };
+    let state = {
+      view: "overview",
+      data: null,
+      factDraft: { subject: "", content: "" },
+      configTab: "runtime",
+      consolidationResult: null
+    };
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const fmt = (s) => s ? esc(String(s).replace("T", " ").replace("Z", " UTC")) : "";
     const traceKind = (t) => t.kind || t.event || t.type || "event";
@@ -618,6 +624,40 @@
         </div>
         <div class="bodytext">${esc(e.summary)}</div>
         <div class="meta">${fmt(e.happened_at)} | ${esc(e.source)}</div>
+      </div>`;
+    }
+    function candidateRecord(candidate) {
+      const kind = candidate.kind_hint || "candidate";
+      const title = candidate.subject || kind;
+      const body = candidate.content || candidate.summary || candidate.reason || "";
+      const ids = (candidate.row_ids || []).join(", ");
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">${esc(title)}</div>
+          <span class="badge warn">${esc(kind)}</span>
+        </div>
+        <div class="bodytext">${esc(body)}</div>
+        <div class="meta">rows=${esc(ids || "-")} | ${esc(candidate.reason || "candidate")}</div>
+      </div>`;
+    }
+    function consolidationResultRecord(result) {
+      if (!result) return "";
+      const cls = result.status === "error" ? "bad" : result.status === "stored" ? "ok" : "warn";
+      const decisions = (result.decisions || []).map(decision => `${decision.decision || "-"}${decision.reason ? `: ${decision.reason}` : ""}`).join("\n");
+      const lines = [
+        `rows=${result.batch?.rows_read || 0}`,
+        `marked=${result.marked_count || 0}`,
+        `facts=${(result.facts_written || []).join(", ") || "-"}`,
+        `episodes=${(result.episodes_written || []).join(", ") || "-"}`,
+        result.error ? `error=${result.error}` : "",
+        decisions ? `decisions:\n${decisions}` : ""
+      ].filter(Boolean).join("\n");
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">Last consolidation run</div>
+          <span class="badge ${cls}">${esc(result.status || "unknown")}</span>
+        </div>
+        <div class="bodytext">${esc(lines)}</div>
       </div>`;
     }
     function chatRecord(c) {
@@ -941,6 +981,10 @@
     function renderMemory(data) {
       const facts = data.memory.facts.map(factRecord).join("") || empty("No semantic facts yet.");
       const episodes = data.memory.episodes.map(episodeRecord).join("") || empty("No episodic records yet.");
+      const batch = data.consolidation?.batch || { rows: [], row_ids: [], rows_read: 0 };
+      const candidates = (data.consolidation?.candidates || []).map(candidateRecord).join("") || empty("No candidate for the next batch.");
+      const batchRows = (batch.rows || []).map(chatRecord).join("") || empty("No unconsolidated chat rows.");
+      const result = consolidationResultRecord(state.consolidationResult);
       return `<div class="grid">
         <section class="panel">
           <h2>Add Semantic Fact</h2>
@@ -958,6 +1002,24 @@
           </div>
         </section>
       </div>
+      <section class="panel">
+        <h2>Consolidation</h2>
+        <div class="records">
+          <div class="record">
+            <div class="splitline"><span>Next batch</span><span class="badge warn">${esc(batch.rows_read || 0)} row(s)</span></div>
+            <div class="meta">Manual run only. Model errors do not mark rows consolidated.</div>
+            <div class="actions" style="margin-left:0;margin-top:12px">
+              <button class="primary" data-consolidation-action="run" type="button"${batch.rows_read ? "" : " disabled"}>Run once</button>
+              <button data-consolidation-action="refresh" type="button">Refresh batch</button>
+            </div>
+          </div>
+          ${result}
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <section><h2>Batch Rows</h2><div class="records">${batchRows}</div></section>
+          <section><h2>Candidates</h2><div class="records">${candidates}</div></section>
+        </div>
+      </section>
       <div class="grid">
         <section class="panel"><h2>Semantic Facts</h2><div class="records">${facts}</div></section>
         <section class="panel"><h2>Episodic Events</h2><div class="records">${episodes}</div></section>
@@ -1125,10 +1187,12 @@
             <div class="record"><span class="badge ok">GET</span> /api/runtime/bot</div>
             <div class="record"><span class="badge ok">GET</span> /api/traces</div>
             <div class="record"><span class="badge ok">GET</span> /api/memory</div>
+            <div class="record"><span class="badge ok">GET</span> /api/memory/consolidation</div>
             <div class="record"><span class="badge warn">POST</span> /api/config</div>
             <div class="record"><span class="badge warn">POST</span> /api/bots/{id}/{action}</div>
             <div class="record"><span class="badge warn">POST</span> /api/runtime/bot/start|stop</div>
             <div class="record"><span class="badge warn">POST</span> /api/memory/facts</div>
+            <div class="record"><span class="badge warn">POST</span> /api/memory/consolidation/run</div>
             <div class="record"><span class="badge bad">DELETE</span> /api/memory/facts/{id}</div>
           </div>
         </section>
@@ -1154,6 +1218,7 @@
       else if (state.view === "ops") view.innerHTML = renderOps(state.data);
       else view.innerHTML = renderOverview(state.data);
       bindFactForm();
+      bindConsolidation();
       bindConfigForm();
     }
     function factFormHasFocus() {
@@ -1192,6 +1257,27 @@
         });
         state.factDraft = { subject: "", content: "" };
         await loadSnapshot({ forceRender: true });
+      });
+    }
+    function bindConsolidation() {
+      document.querySelectorAll("[data-consolidation-action]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          const action = button.dataset.consolidationAction;
+          if (action === "run") {
+            button.disabled = true;
+            button.textContent = "Running...";
+            const res = await fetch("/api/memory/consolidation/run", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({})
+            });
+            const data = await res.json().catch(() => ({result: {status: "error", error: "Invalid response"}}));
+            state.consolidationResult = data.result || data;
+          }
+          await loadSnapshot({ forceRender: true });
+        });
       });
     }
     function bindConfigForm() {

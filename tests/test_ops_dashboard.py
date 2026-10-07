@@ -12,6 +12,7 @@ from niko.harness.trace import TraceLogger
 from niko.memory.store import MemoryStore
 from niko.ops.dashboard import TelegramBotProcessManager, create_server
 from bots.telegram.instance_guard import TelegramBotInstanceInfo
+from bots.decision_model.memory import MEMORY_SEMANTIC_FACT, MemoryCandidateDecision
 
 
 class OpsDashboardTests(unittest.TestCase):
@@ -73,6 +74,36 @@ class OpsDashboardTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_memory_consolidation_api_previews_and_runs_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("chat-1", "user", "Ghi nhớ rằng anh thích memory rõ ràng", source="test")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            with patch(
+                "niko.memory.consolidation.classify_memory_candidate",
+                return_value=MemoryCandidateDecision(decision=MEMORY_SEMANTIC_FACT, reason="explicit"),
+            ):
+                server = create_server("127.0.0.1", 0, memory_store=store, trace_logger=trace_logger)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                try:
+                    preview = self._json_get(f"{base_url}/api/memory/consolidation")
+                    self.assertEqual(preview["batch"]["rows_read"], 1)
+                    self.assertEqual(preview["candidates"][0]["kind_hint"], MEMORY_SEMANTIC_FACT)
+
+                    result = self._json_post(f"{base_url}/api/memory/consolidation/run", {})["result"]
+                    self.assertEqual(result["status"], "stored")
+                    self.assertEqual(result["marked_count"], 1)
+
+                    memory = self._json_get(f"{base_url}/api/memory")["memory"]
+                    self.assertEqual(memory["counts"]["facts"], 1)
+                    self.assertEqual(memory["facts"][0]["source"], "consolidation")
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
 
     def test_config_api_updates_and_resets_runtime_overrides(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -21,7 +21,7 @@ from bots.decision_model.memory import (
     decide_memory_retrieval,
     decide_memory_write,
 )
-from niko.memory.consolidation import ConsolidationBatch, ConsolidationResult, MemoryConsolidator
+from niko.memory.consolidation import ConsolidationBatch, ConsolidationResult, ConsolidationRunResult, MemoryConsolidator
 from niko.memory.context import (
     RetrievedMemory,
     asks_for_episode_inventory,
@@ -107,6 +107,14 @@ class MemoryRuntime:
     ) -> ConsolidationResult:
         """Đánh dấu batch đã xử lý; phase sau sẽ gọi sau khi candidate hợp lệ."""
         return self.consolidator.mark_batch_done(row_ids, reason=reason)
+
+    def run_consolidation_once(
+        self,
+        limit: int | None = None,
+        session_id: str | None = None,
+    ) -> ConsolidationRunResult:
+        """Chạy consolidation thủ công một lần, không có scheduler nền."""
+        return self.consolidator.run_once(limit=limit, session_id=session_id)
 
     def record_chat_log(
         self,
