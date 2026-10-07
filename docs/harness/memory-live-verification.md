@@ -98,6 +98,13 @@ hay nội dung riêng tư dài vào tài liệu này.
   `decision=retrieve`, `fact_mode=list`, `episode_mode=none`; trace
   `memory_retrieval` ghi `fact_count=2`, `episode_count=0`, nghĩa là runtime đã
   list facts thay vì search theo chữ `fact`.
+- Regression 2026-10-07 14:49 UTC: dashboard `/api/memory` vẫn trả facts bình
+  thường, nhưng Telegram turn "hiện tại em có những fact nào về anh" bị gate trả
+  `label=retrieve`, `fact_mode=search`, `episode_mode=search`, nên runtime đi
+  nhầm `search_facts(...)` và không list fact inventory. Đã thêm guardrail hẹp ở
+  retrieval layer: khi model đã quyết định `decision=retrieve` cho prompt
+  inventory rõ ràng, execution mode được ép về `fact_mode=list`,
+  `episode_mode=none`, `query=""`.
 - Write gate sau inventory chung: đã tinh chỉnh instructions/state và thêm unit
   regression sau lần live đầu bị nhiễu. Lượt inventory pass nhưng
   write gate chọn `remember` và ghi một episode mới cho chính câu inspect memory;
@@ -145,6 +152,9 @@ hay nội dung riêng tư dài vào tài liệu này.
   rõ lượt chỉ inspect/list memory nên `discard`, và runtime không ghi episode khi
   write gate trả `discard`. Cần live verify lại trên Telegram để xác nhận Nimble
   chọn đúng label trong điều kiện thật.
+- Đã bổ sung regression cho case 14:49: Decision Model có thể trả
+  `retrieve/search`, nhưng câu kiểm kê fact rõ ràng vẫn phải thực thi bằng
+  `fact_mode=list`, `episode_mode=none`.
 - Sau mỗi test live cần ghi lại kết quả vào tài liệu này ngay, gồm pass/fail,
   trace/log đáng chú ý và chỉnh sửa phát sinh.
 
@@ -163,3 +173,58 @@ hay nội dung riêng tư dài vào tài liệu này.
 - Không có Telegram bot crash khi bật retrieval gate/write gate.
 - Memory tab preview/run consolidation không ghi bừa khi prompt là small talk.
 - Full test suite vẫn pass sau khi chỉnh config/docs.
+## Kết quả cập nhật 2026-10-07
+
+### Inventory memory không ghi episode mới
+
+Mục đích: kiểm tra regression sau khi write gate được dạy rằng lượt hỏi inventory/list memory chỉ là thao tác đọc.
+
+Kết quả đã quan sát trong trace/runtime log:
+
+- `memory_gate_decision` chọn `retrieve`.
+- `fact_mode=list`, `episode_mode=none`.
+- `memory_write_decision` chọn `discard`.
+- Không xuất hiện `memory_write_episode` cho lượt inventory sau khi restart/test lại.
+
+Kết luận: test Phase 4 này đã pass. Các lượt hỏi "Niko đang lưu fact nào" hiện được xem là memory inspection, không còn tự sinh episode dài hạn.
+
+### Phase 5 V1 live verification
+
+Kết luận hiện tại: Phase 5 V1 đủ dùng như lớp tạm thời cho baseline chat memory. Luồng delete mơ hồ
+và follow-up chọn ID đã pass live; luồng sửa fact đã phát hiện và vá lỗi thiếu `replacement`, có
+unit test bảo vệ. Các test mở rộng còn lại nên để sang Loop/tool workflow thay vì làm Phase 5 phình
+thêm.
+
+- Unit test targeted đã được chạy thủ công với kết quả `42 passed`.
+- Sau live test ambiguous, phát hiện lượt trả lời `fact #8` bị Decision Model phân loại `none` nên rơi sang Deep vì model chỉ thấy prompt hiện tại. Thiết kế hiện tại đưa vài lượt chat gần nhất vào Decision Model; pending metadata chỉ giữ danh sách ID hợp lệ và làm guardrail cuối.
+- Cùng lúc bổ sung guardrail cho prompt có `quên/xóa`: nếu model lỡ chọn `correct_memory`, runtime sẽ ưu tiên `forget_memory` để đúng ý xóa.
+- Unit test sau sửa: `tests/test_memory_store.py` pass `43 passed`; `tests/test_decision_model.py` pass `15 passed`.
+- Sau khi review lại thiết kế, đã nâng cấp correction gate sang decision context: state gửi Nimble có `current_prompt` và `recent_turns` làm ngữ cảnh chính; `active_workflow`, `pending_action`, `pending_choices`, `pending_replacement` chỉ là metadata phụ cho workflow đang dang dở.
+- Unit test sau decision context: `tests/test_memory_store.py` pass `44 passed`; `tests/test_decision_model.py` pass `15 passed`; `tests/test_telegram_prompt.py` pass `43 passed`.
+- Live retest trên Telegram: lượt `fact #8 nhé` đã có `recent_turn_count=6`, `active_workflow=memory_correction`, `pending_action=forget_memory`, nhưng Nimble vẫn phân loại nhầm `correct_memory` và bot hỏi replacement.
+- Đã thêm guardrail cho reply chỉ chọn fact ID trong pending workflow: nếu model mislabel action, runtime dùng `pending_action` cũ, validate ID trong `pending_choices`, và ghi `model_decision` vào trace.
+- Unit test sau guardrail này: `tests/test_memory_store.py` pass `45 passed`.
+- Live retest tiếp theo cho câu inventory `hiện tại em có những fact gì về anh` cho thấy correction gate bắt nhầm thành `correct_memory`.
+- Đã soi riêng `bots/decision_model/memory/correction.py`, sửa chữ ký `choice_fn` sau khi tách package và thêm read-only guardrail: câu list/inspect memory ép về `none` để retrieval gate xử lý.
+- Unit test sau read-only guardrail: `tests/test_decision_model.py` pass `16 passed`; bộ liên quan memory/decision/dashboard pass `69 passed`.
+- Bật `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1` trong dashboard Config.
+- Thêm một fact test rồi nhắn Telegram yêu cầu quên fact đó.
+- Kiểm tra trace có `memory_correction_decision` và `memory_correction_applied`.
+- Thêm hai fact cùng chủ đề rồi nhắn lệnh quên mơ hồ; Niko phải hỏi lại và không xóa gì.
+- Live test 2026-10-07 15:11 UTC cho lệnh `Niko, quên fact về checklist giúp anh`: pass.
+  Correction gate chọn `forget_memory`, confidence khoảng `0.829`, `recent_turn_count=6`;
+  runtime trả `memory_correction_clarify` với `clarify_reason=ambiguous_fact_match` và
+  `fact_ids=[8, 6, 7]`. Không có `memory_correction_applied` trong turn này, nên chưa xóa gì.
+- Live follow-up 2026-10-07 15:14 UTC cho `fact #8 nhé`: pass.
+  Correction context giữ `active_workflow=memory_correction`, `pending_action=forget_memory`
+  và `pending_choices=[8, 6, 7]`; trace có `memory_correction_applied` với
+  `action=delete_fact`, `fact_id=8`, reply xác nhận đã xóa fact #8. Snapshot memory sau đó
+  chỉ còn fact #6 và #7 trong nhóm checklist.
+- Live test sửa fact 2026-10-07 15:17 UTC: bot hỏi lại đúng vì câu sửa checklist khớp cả
+  fact #7 và #6, chưa mutate dữ liệu. Log cũng cho thấy Nimble gốc chọn nhầm `forget_memory`
+  nhưng Python guardrail đổi intent cuối sang `correct_memory`.
+- Sau test sửa fact, đã vá `correction.py` để khi intent cuối là `correct_memory` nhưng model bỏ
+  trống `replacement`, runtime trích phần sau `thành`/`thay bằng`. Unit test mới pass trong
+  `tests/test_decision_model.py`.
+- Deferred cho Loop/tool workflow: test sửa fact end-to-end sau khi chọn ID và retrieval lại nội dung
+  mới; test xóa fact duy nhất không cần hỏi lại; dashboard delete/update episode nếu sau này cho phép.

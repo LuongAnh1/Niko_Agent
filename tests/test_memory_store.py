@@ -16,9 +16,21 @@ from bots.decision_model.memory import (
     MEMORY_RETRIEVAL_SEARCH,
     MEMORY_SEMANTIC_FACT,
     MEMORY_SKIP,
+    MEMORY_CORRECTION_NONE,
+    MEMORY_CORRECT_MEMORY,
+    MEMORY_FORGET_MEMORY,
+    MEMORY_TARGET_FACT,
+    MEMORY_TARGET_EPISODE,
+    MemoryCorrectionDecision,
     MemoryCandidateDecision,
     MemoryRetrievalDecision,
     MemoryWriteDecision,
+    apply_memory_correction_prompt_hint,
+    build_memory_correction_criteria,
+    build_memory_correction_instructions,
+    build_memory_correction_state,
+    normalize_memory_correction_choice,
+    normalize_memory_target_type,
 )
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.harness.trace import TraceLogger
@@ -1025,6 +1037,434 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertNotIn("Semantic memory / facts", prompt)
         memory_events = [event for event in events if event.get("kind") == "memory_retrieval"]
         self.assertEqual(memory_events[0]["data"]["gate_decision"], MEMORY_SKIP)
+
+
+class MemoryCorrectionRuntimeTests(unittest.TestCase):
+    def _message(self):
+        return telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Tran Anh"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+
+    def _trace(self, temp_dir: str) -> TraceLogger:
+        return TraceLogger(Path(temp_dir) / "traces")
+
+    def test_memory_correction_decision_helpers_define_closed_intent_task(self):
+        state = build_memory_correction_state(
+            "sửa fact checklist thành checklist theo phase",
+            self._message(),
+            decision_context={
+                "recent_turns": [
+                    {
+                        "role": "assistant",
+                        "content": "Anh chọn một trong các fact này giúp em: fact #8, fact #6.",
+                        "route": "memory_correction",
+                    }
+                ],
+                "active_workflow": "memory_correction",
+                "pending_action": MEMORY_FORGET_MEMORY,
+                "pending_choices": [{"type": MEMORY_TARGET_FACT, "id": 8}],
+                "pending_replacement": "",
+            },
+        )
+        criteria = build_memory_correction_criteria()
+        instructions = build_memory_correction_instructions()
+
+        self.assertEqual(state["current_prompt"], "sửa fact checklist thành checklist theo phase")
+        self.assertEqual(state["prompt"], "sửa fact checklist thành checklist theo phase")
+        self.assertEqual(state["active_workflow"], "memory_correction")
+        self.assertEqual(state["pending_action"], MEMORY_FORGET_MEMORY)
+        self.assertEqual(state["pending_choices"], [{"type": MEMORY_TARGET_FACT, "id": 8}])
+        self.assertEqual(state["recent_turns"][0]["route"], "memory_correction")
+        self.assertIn("primary conversation context", state["decision_context"])
+        self.assertIn("auxiliary metadata", state["decision_context"])
+        self.assertIn(MEMORY_CORRECT_MEMORY, criteria)
+        self.assertIn(MEMORY_FORGET_MEMORY, criteria)
+        self.assertIn("replacement", instructions)
+        self.assertIn("primary context", instructions)
+        self.assertIn("auxiliary state", instructions)
+        self.assertEqual(normalize_memory_correction_choice("delete-memory"), MEMORY_FORGET_MEMORY)
+        self.assertEqual(normalize_memory_correction_choice("fix memory"), MEMORY_CORRECT_MEMORY)
+        self.assertEqual(normalize_memory_correction_choice("skip"), "none")
+        self.assertEqual(normalize_memory_target_type("semantic_fact"), MEMORY_TARGET_FACT)
+        self.assertEqual(normalize_memory_target_type("episodic"), MEMORY_TARGET_EPISODE)
+        self.assertEqual(
+            apply_memory_correction_prompt_hint("Niko, quên fact checklist màu xanh", MEMORY_CORRECT_MEMORY),
+            MEMORY_FORGET_MEMORY,
+        )
+
+    def test_memory_correction_disabled_does_not_call_decider_or_mutate(self):
+        def failing_decider(_prompt, _gateway):
+            raise AssertionError("decider should not run while disabled")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            fact_id = store.add_fact("Chat memory", "anh thích checklist rõ ràng", source="test")
+            runtime = MemoryRuntime(store=store, correction_decider=failing_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+            facts = store.list_facts()
+
+        self.assertFalse(result.handled)
+        self.assertEqual([fact.id for fact in facts], [fact_id])
+
+    def test_memory_correction_forgets_unique_fact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            fact_id = store.add_fact("Chat memory", "anh thích checklist rõ ràng", source="test")
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=lambda _prompt, _gateway: MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist rõ ràng",
+                    target_type=MEMORY_TARGET_FACT,
+                    reason="explicit forget",
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact về checklist rõ ràng",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+            facts = store.list_facts()
+
+        self.assertTrue(result.handled)
+        self.assertIn(f"fact #{fact_id}", result.reply)
+        self.assertEqual(facts, [])
+
+    def test_memory_correction_asks_when_forget_match_is_ambiguous(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.add_fact("Chat memory", "anh thích checklist rõ ràng", source="test")
+            second = store.add_fact("Project memory", "checklist phase cần mục đích", source="test")
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=lambda _prompt, _gateway: MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist",
+                    target_type=MEMORY_TARGET_FACT,
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+            facts = store.list_facts()
+
+        self.assertTrue(result.handled)
+        self.assertIn("nhiều fact", result.reply)
+        self.assertEqual({fact.id for fact in facts}, {first, second})
+
+    def test_memory_correction_pending_fact_tag_applies_previous_forget_intent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
+            second = store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
+            seen_contexts: list[dict] = []
+
+            def context_aware_decider(prompt, _gateway, decision_context=None):
+                seen_contexts.append(decision_context or {})
+                if "fact #" in prompt:
+                    recent_turns = decision_context.get("recent_turns", []) if decision_context else []
+                    has_clarifying_context = any(
+                        turn.get("role") == "assistant" and "fact #" in turn.get("content", "")
+                        for turn in recent_turns
+                    )
+                    if not has_clarifying_context:
+                        return MemoryCorrectionDecision(decision=MEMORY_CORRECTION_NONE)
+                    return MemoryCorrectionDecision(
+                        decision=MEMORY_FORGET_MEMORY,
+                        target_type=MEMORY_TARGET_FACT,
+                        reason="followup_choice",
+                    )
+                return MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist",
+                    target_type=MEMORY_TARGET_FACT,
+                    reason="explicit forget",
+                )
+
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=context_aware_decider,
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                clarify = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+                store.log_chat(
+                    "456",
+                    "user",
+                    "quên fact checklist",
+                    source="test",
+                    meta={"route": "incoming"},
+                )
+                store.log_chat(
+                    "456",
+                    "assistant",
+                    clarify.reply,
+                    source="test",
+                    meta={"route": "memory_correction"},
+                )
+                applied = runtime.handle_memory_correction(
+                    "456",
+                    f"fact #{first} nhé",
+                    self._message(),
+                    "trace-2",
+                    self._trace(temp_dir),
+                )
+
+            facts = store.list_facts()
+
+        self.assertTrue(clarify.handled)
+        self.assertIn("nhiều fact", clarify.reply)
+        self.assertTrue(applied.handled)
+        self.assertIn(f"fact #{first}", applied.reply)
+        self.assertEqual([fact.id for fact in facts], [second])
+        self.assertEqual(seen_contexts[1]["active_workflow"], "memory_correction")
+        self.assertEqual(seen_contexts[1]["pending_action"], MEMORY_FORGET_MEMORY)
+        self.assertEqual(seen_contexts[1]["recent_turns"][-1]["role"], "assistant")
+        self.assertEqual({choice["id"] for choice in seen_contexts[1]["pending_choices"]}, {first, second})
+
+    def test_memory_correction_pending_choice_uses_pending_action_when_model_mislabels(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
+            second = store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
+            calls = 0
+
+            def mislabeling_decider(_prompt, _gateway, decision_context=None):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return MemoryCorrectionDecision(
+                        decision=MEMORY_FORGET_MEMORY,
+                        query="checklist",
+                        target_type=MEMORY_TARGET_FACT,
+                        reason="explicit forget",
+                    )
+                self.assertEqual(decision_context["pending_action"], MEMORY_FORGET_MEMORY)
+                return MemoryCorrectionDecision(
+                    decision=MEMORY_CORRECT_MEMORY,
+                    target_type=MEMORY_TARGET_FACT,
+                    reason="model misread selection as correction",
+                )
+
+            runtime = MemoryRuntime(store=store, correction_decider=mislabeling_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                clarify = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+                store.log_chat(
+                    "456",
+                    "assistant",
+                    clarify.reply,
+                    source="test",
+                    meta={"route": "memory_correction"},
+                )
+                applied = runtime.handle_memory_correction(
+                    "456",
+                    f"fact #{first} nhé",
+                    self._message(),
+                    "trace-2",
+                    self._trace(temp_dir),
+                )
+
+            facts = store.list_facts()
+
+        self.assertTrue(applied.handled)
+        self.assertIn(f"fact #{first}", applied.reply)
+        self.assertEqual([fact.id for fact in facts], [second])
+        self.assertEqual(applied.decision["decision"], MEMORY_FORGET_MEMORY)
+        self.assertEqual(applied.decision["model_decision"], MEMORY_CORRECT_MEMORY)
+
+    def test_memory_correction_decision_context_excludes_current_incoming_prompt(self):
+        captured_contexts: list[dict] = []
+
+        def capturing_decider(_prompt, _gateway, decision_context=None):
+            captured_contexts.append(decision_context or {})
+            return MemoryCorrectionDecision(decision="none")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("456", "user", "quên fact checklist màu xanh", source="test", meta={"route": "incoming"})
+            store.log_chat(
+                "456",
+                "assistant",
+                "Anh chọn một trong các fact này giúp em: fact #8, fact #6.",
+                source="test",
+                meta={"route": "memory_correction"},
+            )
+            store.log_chat("456", "user", "fact #8 nhé", source="test", meta={"route": "incoming"})
+            runtime = MemoryRuntime(store=store, correction_decider=capturing_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "fact #8 nhé",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+        self.assertFalse(result.handled)
+        recent_turns = captured_contexts[0]["recent_turns"]
+        self.assertEqual(recent_turns[-1]["role"], "assistant")
+        self.assertNotIn("fact #8 nhé", [turn["content"] for turn in recent_turns])
+
+    def test_memory_correction_updates_unique_fact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            fact_id = store.add_fact("Chat memory", "anh thích checklist ngắn", source="test")
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=lambda _prompt, _gateway: MemoryCorrectionDecision(
+                    decision=MEMORY_CORRECT_MEMORY,
+                    query="checklist ngắn",
+                    target_type=MEMORY_TARGET_FACT,
+                    replacement="anh thích checklist có mục đích rõ ràng theo từng phase",
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "sửa fact checklist ngắn thành checklist có mục đích rõ ràng",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+            fact = store.list_facts()[0]
+
+        self.assertTrue(result.handled)
+        self.assertEqual(fact.id, fact_id)
+        self.assertIn("mục đích rõ ràng", fact.content)
+        self.assertEqual(fact.meta["previous_content"], "anh thích checklist ngắn")
+
+    def test_memory_correction_keeps_episode_read_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            episode_id = store.add_episode("Niko discussed a memory checklist", source="test")
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=lambda _prompt, _gateway: MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="memory checklist",
+                    target_type=MEMORY_TARGET_EPISODE,
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "xóa episode memory checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+
+            episodes = store.list_episodes()
+
+        self.assertTrue(result.handled)
+        self.assertIn("chưa cho sửa hoặc xóa qua chat", result.reply)
+        self.assertEqual([episode.id for episode in episodes], [episode_id])
 
 
 if __name__ == "__main__":

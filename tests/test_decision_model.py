@@ -17,8 +17,11 @@ from bots.decision_model.sticker import (
     normalize_sticker_mood,
 )
 from bots.decision_model.memory import (
+    MEMORY_CORRECT_MEMORY,
+    MEMORY_CORRECTION_NONE,
     MEMORY_DISCARD,
     MEMORY_EPISODIC_EVENT,
+    MEMORY_FORGET_MEMORY,
     MEMORY_LIST_FACTS,
     MEMORY_RETRIEVE,
     MEMORY_RETRIEVAL_LIST,
@@ -34,7 +37,13 @@ from bots.decision_model.memory import (
     build_memory_write_criteria,
     build_memory_write_instructions,
     build_memory_write_state,
+    apply_memory_correction_prompt_hint,
+    apply_memory_retrieval_prompt_hint,
+    decide_memory_correction_intent,
     decide_memory_retrieval,
+    extract_memory_correction_replacement_from_prompt,
+    is_memory_readonly_prompt,
+    memory_inventory_prompt_target,
     normalize_episode_retrieval_mode,
     normalize_fact_retrieval_mode,
     normalize_memory_candidate_choice,
@@ -176,6 +185,58 @@ class DecisionModelTests(unittest.TestCase):
         self.assertEqual(episode_inventory.decision, MEMORY_RETRIEVE)
         self.assertEqual(episode_inventory.fact_mode, MEMORY_RETRIEVAL_NONE)
         self.assertEqual(episode_inventory.episode_mode, MEMORY_RETRIEVAL_RECENT)
+
+    def test_memory_retrieval_inventory_prompt_forces_list_mode_after_model(self):
+        prompt = "Hiện tại em có những fact nào về anh?"
+
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(
+                choice=MEMORY_RETRIEVE,
+                extra={"query": "fact", "fact_mode": "search", "episode_mode": "search"},
+            ),
+        ):
+            decision = decide_memory_retrieval(prompt)
+
+        self.assertEqual(memory_inventory_prompt_target(prompt), "facts")
+        self.assertEqual(apply_memory_retrieval_prompt_hint(prompt, MEMORY_SKIP), MEMORY_SKIP)
+        self.assertEqual(decision.decision, MEMORY_RETRIEVE)
+        self.assertEqual(decision.query, "")
+        self.assertEqual(decision.fact_mode, MEMORY_RETRIEVAL_LIST)
+        self.assertEqual(decision.episode_mode, MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(decision.label, MEMORY_RETRIEVE)
+
+    def test_memory_correction_readonly_inventory_forces_none(self):
+        prompt = "Hiện tại em có những fact gì về anh?"
+
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(choice=MEMORY_CORRECT_MEMORY, extra={"query": "fact"}),
+        ):
+            decision = decide_memory_correction_intent(prompt)
+
+        self.assertTrue(is_memory_readonly_prompt(prompt))
+        self.assertEqual(apply_memory_correction_prompt_hint(prompt, MEMORY_CORRECT_MEMORY), MEMORY_CORRECTION_NONE)
+        self.assertEqual(decision.decision, MEMORY_CORRECTION_NONE)
+        self.assertEqual(decision.label, MEMORY_CORRECT_MEMORY)
+
+    def test_memory_correction_extracts_replacement_when_model_mislabels_fix(self):
+        prompt = (
+            "sửa fact checklist có mục đích rõ ràng thành anh thích checklist có mục đích rõ ràng, "
+            "chia theo phase, và có tiêu chí hoàn thành rõ ràng"
+        )
+
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(choice=MEMORY_FORGET_MEMORY),
+        ):
+            decision = decide_memory_correction_intent(prompt)
+
+        expected = "anh thích checklist có mục đích rõ ràng, chia theo phase, và có tiêu chí hoàn thành rõ ràng"
+        self.assertEqual(decision.decision, MEMORY_CORRECT_MEMORY)
+        self.assertEqual(decision.label, MEMORY_FORGET_MEMORY)
+        self.assertEqual(decision.replacement, expected)
+        self.assertEqual(extract_memory_correction_replacement_from_prompt(prompt), expected)
 
     def test_memory_retrieval_modes_aliases_and_invalid_choices(self):
         self.assertEqual(normalize_fact_retrieval_mode("", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_SEARCH)

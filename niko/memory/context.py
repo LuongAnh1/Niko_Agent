@@ -89,6 +89,11 @@ def memory_write_gate_enabled() -> bool:
     return memory_write_enabled() and env_flag("NIKO_MEMORY_WRITE_GATE_ENABLED", "0")
 
 
+def memory_correction_detection_enabled() -> bool:
+    """Gate dùng Nimble để nhận diện yêu cầu sửa/xóa memory qua chat; default-off."""
+    return memory_write_enabled() and env_flag("NIKO_MEMORY_CORRECTION_DETECTION_ENABLED", "0")
+
+
 def memory_top_k() -> int:
     raw_value = env_value("NIKO_MEMORY_TOP_K", str(DEFAULT_MEMORY_TOP_K)).strip()
     try:

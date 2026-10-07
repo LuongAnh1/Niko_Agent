@@ -77,7 +77,10 @@ user prompt
 Khi `NIKO_MEMORY_GATE_ENABLED=1`, câu hỏi inventory như "đang lưu fact nào" cũng
 đi qua Decision Model. Nimble có thể trả `list_facts`, `recent_episodes`, hoặc
 mode `fact_mode=list` / `episode_mode=recent`; Python chỉ thực thi mode đó bằng
-SQLite store, không bypass bằng keyword riêng.
+SQLite store. Runtime có một guardrail hẹp sau model: nếu model đã mở
+`decision=retrieve` nhưng để mode mặc định là `search` cho một câu inventory rõ
+ràng, retrieval layer ép mode thực thi về `fact_mode=list` hoặc
+`episode_mode=recent` để tránh search rỗng kiểu `search_facts("fact")`.
 
 Fast triage không nhận memory context để giữ JSON sạch.
 
@@ -233,3 +236,46 @@ memory backend/lakehouse/graph riêng khi cần dữ liệu Jira hoặc tài li�
 ## Ghi Chú Về Waku
 
 Niko kế thừa ý tưởng từ Waku: memory store local, semantic/episodic separation, JSONL traces và dashboard quan sát. Niko không dùng provider abstraction, pricing, eval arena hay API loop của Waku trong v1, vì runtime chính vẫn là `fcc-claude` trên máy local.
+## Chat Memory Correction Gate
+
+Từ Phase 5 V1, Niko có một gate riêng để nhận diện lệnh sửa hoặc xóa chat memory qua Telegram.
+Gate này dùng local Decision Model/Nimble để chọn intent, nhưng không cho model tự ghi DB. Đây là
+baseline tạm thời để demo chat memory an toàn; khi Loop/tool slot hoàn chỉnh hơn, phần xác nhận,
+chọn target và mutate memory nên chuyển thành workflow/tool riêng có state bền hơn.
+
+Code Decision Model cho chat memory đã được tách vào `bots/decision_model/memory/`:
+
+- `retrieval.py`: quyết định đọc/search/list facts hoặc recent episodes trước Deep.
+- `write.py`: quyết định có ghi Deep result thành episodic memory không.
+- `candidate.py`: phân loại candidate do consolidation tạo ra.
+- `correction.py`: nhận diện intent sửa/xóa memory; đây là file chính cần soi khi correction gate bắt nhầm câu inventory.
+- `__init__.py`: giữ API cũ `bots.decision_model.memory` để các import hiện tại không phải đổi.
+
+- `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0` mặc định tắt để tránh sửa/xóa bất ngờ trong demo.
+- Khi bật, Decision Model chỉ trả về `none`, `correct_memory` hoặc `forget_memory`, kèm `query`, `target_type`, `replacement` nếu có.
+- Python runtime search facts bằng query/ID, chỉ update/delete khi match đúng một fact rõ ràng.
+- Nếu match nhiều fact, thiếu replacement hoặc target là episode, Niko hỏi lại hoặc báo read-only thay vì mutate.
+- Các event quan sát chính là `memory_correction_decision`, `memory_correction_applied`, `memory_correction_clarify`.
+- Nếu Nimble chọn sai giữa `forget_memory` và `correct_memory`, guardrail theo marker trong prompt có thể sửa intent
+  cuối cùng; nếu `correct_memory` thiếu `replacement`, runtime trích phần sau `thành`/`thay bằng` như lớp an toàn hẹp.
+
+### Decision context cho correction
+
+Correction gate không nên nhìn từng tin nhắn rời rạc. Runtime dựng một context ngắn, có cấu trúc trước khi gọi
+Decision Model:
+
+- `current_prompt`: tin nhắn hiện tại.
+- `recent_turns`: ngữ cảnh chính cho model, gồm vài dòng chat gần nhất trong cùng conversation, đã truncate và bỏ chính incoming prompt hiện tại.
+- `active_workflow`: metadata phụ, ví dụ `memory_correction` khi lượt trước Niko vừa hỏi anh chọn fact ID.
+- `pending_action`: metadata phụ cho thao tác đang chờ, như `forget_memory` hoặc `correct_memory`.
+- `pending_choices`: metadata phụ cho danh sách ID/type mà runtime cho phép chọn, ví dụ `fact #8`, `fact #6`.
+- `pending_replacement`: metadata phụ cho nội dung thay thế nếu đang ở luồng sửa fact.
+
+Decision Model phải phân loại dựa trên `current_prompt` và `recent_turns` trước. Các trường `pending_*` chỉ giúp model hiểu
+rằng câu rất ngắn như `fact #8 nhé` đang nối tiếp câu hỏi trước đó, chứ không thay thế ngữ cảnh hội thoại. Python vẫn
+validate ID có nằm trong `pending_choices` và chỉ Python mới được update/delete SQLite. Nếu model vẫn trả `none` hoặc lỗi,
+runtime có fallback guardrail cho reply dạng fact ID sau một pending workflow, nhưng fallback này chỉ là lớp an toàn cuối.
+Trong trường hợp model đã có context nhưng vẫn phân loại sai một reply chỉ chọn ID, ví dụ đang chờ `forget_memory` nhưng
+model trả `correct_memory`, runtime sẽ ưu tiên `pending_action` cũ và ghi `model_decision` vào trace để debug.
+Với câu chỉ đọc/list memory như `hiện tại em có những fact gì về anh`, `correction.py` có read-only guardrail để ép
+decision về `none` nếu Nimble lỡ trả `correct_memory`; lượt đó sẽ được nhường lại cho retrieval gate (`fact_mode=list`).

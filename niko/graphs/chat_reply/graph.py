@@ -426,6 +426,27 @@ class ChatReplyGraph:
             self._deliver_reply_safely(deliver_reply, final_reply, trace_turn.turn_id)
             return route.kind
 
+        correction = self.memory_runtime.handle_memory_correction(
+            conversation_id,
+            prompt,
+            gateway_message,
+            trace_turn.turn_id,
+            self.trace_logger,
+        )
+        if correction.handled:
+            final_reply = prompts.ensure_reply_suffix(correction.reply)
+            self._record_chat(
+                conversation_id,
+                "assistant",
+                final_reply,
+                gateway_message,
+                route=correction.route,
+                trace_id=trace_turn.turn_id,
+            )
+            self.trace_logger.turn_end(trace_turn.turn_id, reply=final_reply, status="ok", data={"route": correction.route})
+            self._deliver_reply_safely(deliver_reply, final_reply, trace_turn.turn_id)
+            return correction.route
+
         if route.kind == ROUTE_LOCAL_REPLY:
             # Local reply là nhánh rẻ nhất: không gọi Nimble/Fable/Deep.
             final_reply = prompts.ensure_reply_suffix(route.reply)

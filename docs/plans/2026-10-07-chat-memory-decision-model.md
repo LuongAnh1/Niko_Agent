@@ -207,7 +207,9 @@ Những phần còn thiếu hoặc mới ở mức scaffold so với Waku:
 - Đã có manual consolidation v1: đọc batch `chat_log`, tạo candidate bảo thủ,
   phân loại `semantic_fact` / `episodic_event` / `discard`, ghi facts/episodes và mark batch.
 - Chưa có threshold/scheduler tự động cho consolidation.
-- Chưa có memory management qua chat.
+- Đã có memory correction qua chat ở mức V1 tạm thời: intent gate, hỏi lại khi
+  mơ hồ, update/delete fact có trace. Workflow bền hơn nên chuyển sang Loop/tool
+  ở phase sau.
 - Chưa có working-memory model rõ: recent history window, session switch/reload.
 - Chưa có readable `MEMORY.md` mirror.
 - Chưa có eval scenario riêng cho consolidation/correction; unit tests cho gate/search đã có.
@@ -261,7 +263,7 @@ Các decision point phù hợp:
 | `memory_retrieval_gate` | Đã có v1, default-off | Turn này có cần đọc long-term memory không? | `skip` hoặc `retrieve` + query |
 | `memory_write_gate` | Đã có v1, default-off | Turn này có thông tin đáng nhớ không? | `discard` hoặc `remember` |
 | `memory_type_classifier` | Đã có v1 | Memory ứng viên là fact, episode hay không nên lưu? | `semantic_fact`, `episodic_event`, `discard` |
-| `memory_correction_intent` | Cần thêm | User đang yêu cầu sửa/quên memory không? | `none`, `correct_memory`, `forget_memory` |
+| `memory_correction_intent` | Đã có V1 tạm | User đang yêu cầu sửa/quên memory không? | `none`, `correct_memory`, `forget_memory` |
 
 Pattern chung nên dùng:
 
@@ -300,24 +302,25 @@ Ranh giới quan trọng:
 
 ### Phase 1: Memory Decision Layer
 
-Trạng thái: đã triển khai `memory_retrieval_gate`, `memory_write_gate` và
-`memory_type_classifier` v1. `memory_correction_intent` vẫn để phase sau.
+Trạng thái: đã triển khai `memory_retrieval_gate`, `memory_write_gate`,
+`memory_type_classifier` và `memory_correction_intent` v1. Correction hiện là
+lớp tạm trong chat runtime; phase Loop/tool sẽ cần thay bằng workflow rõ hơn.
 
 Mục tiêu: chuẩn hóa cách Niko dùng local Ollama/Nimble cho các quyết định nhỏ
 trong memory pipeline.
 
-Thêm một module memory-decision dùng chung, ví dụ:
+Thêm một package memory-decision dùng chung:
 
 ```text
-bots/decision_model/memory.py
+bots/decision_model/memory/
 ```
 
-Module này dùng lại `systemone_choice(...)` và cung cấp các hàm hẹp:
+Package này dùng lại `systemone_choice(...)` và cung cấp các hàm hẹp:
 
 - `decide_memory_retrieval(...)` đã có.
 - `decide_memory_write(...)` đã có.
 - `classify_memory_candidate(...)` đã có.
-- `decide_memory_correction_intent(...)` chưa có.
+- `decide_memory_correction_intent(...)` đã có V1 tạm.
 
 Các hàm này chỉ trả dataclass/metadata quyết định, không search store và không
 ghi database. Caller ở graph/memory pipeline quyết định hành động tiếp theo.
@@ -446,7 +449,11 @@ Test cần có:
 Mục tiêu: user có thể nói “cái đó sai”, “quên cái này đi” và Niko xử lý rõ
 ràng.
 
-Vì Niko chưa có tool loop hoàn chỉnh, triển khai nhẹ trước:
+Trạng thái: đã triển khai V1 tạm thời cho chat memory local. Vì Niko chưa có
+tool loop hoàn chỉnh, phần này cố ý nhẹ: Decision Model chỉ nhận diện intent,
+Python giữ pending fact IDs trong RAM, validate lựa chọn, rồi update/delete
+SQLite có trace. Khi Loop/tool slot hoàn chỉnh hơn, luồng này nên chuyển thành
+workflow/tool có state bền, thay vì tiếp tục mở rộng pending logic trong chat.
 
 ```text
 Incoming prompt
@@ -466,6 +473,9 @@ Incoming prompt
   một dạng structured instruction hoặc route riêng, chưa để model tự sửa tự do.
 
 Không nên cho Deep tự ghi/sửa memory tùy ý ở bước đầu.
+Live Phase 5 V1 đã xác nhận lệnh quên mơ hồ hỏi lại, follow-up chọn `fact #...`
+xóa đúng record, và lệnh sửa mơ hồ không mutate dữ liệu. Các test update
+end-to-end sau khi chọn ID được defer cho Loop/tool workflow.
 
 ### Phase 6: Working Memory Rõ Ràng Hơn
 
@@ -513,7 +523,7 @@ Sau đó mới thêm judge/eval mềm cho chất lượng trả lời.
 
 Em đề xuất bắt đầu bằng ba việc nhỏ, ít rủi ro:
 
-1. Thêm `bots/decision_model/memory.py` với `memory_retrieval_gate` và metadata
+1. Thêm `bots/decision_model/memory/` với `memory_retrieval_gate` và metadata
    trace/runtime log.
 2. Hardening `_fts_query` và test tiếng Việt.
 3. Sau khi retrieval quan sát rõ, thêm `memory_write_gate` rồi mới làm batch

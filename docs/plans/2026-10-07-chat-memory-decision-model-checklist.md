@@ -40,7 +40,7 @@ không phải biết chi tiết gate, inventory, search và format context.
 Mục đích: tạo lớp quyết định nhẹ bằng local Ollama/Nimble để Niko hỏi các câu
 hẹp về memory, thay vì để Deep agent tự quyết định mọi thứ.
 
-- [x] Thêm `bots/decision_model/memory.py`.
+- [x] Thêm `bots/decision_model/memory/`.
 - [x] Dùng lại `systemone_choice(...)` thay vì tạo client Ollama riêng.
 - [x] Thêm `MemoryRetrievalDecision` cho kết quả retrieval gate.
 - [x] Thêm `decide_memory_retrieval(...)`.
@@ -118,6 +118,10 @@ ngữ cảnh.
   `fact_mode=list|search|none`, `episode_mode=recent|search|none`.
 - [x] Inventory chung phải đi `fact_mode=list`; inventory theo chủ đề thật đi
   `fact_mode=search` kèm `query`; không tự đoán bằng stopword list dài.
+- [x] Sau log live 14:49, thêm guardrail hẹp cho execution mode: nếu Decision
+  Model đã mở `decision=retrieve` nhưng trả mode mặc định `search` cho câu kiểm
+  kê fact/episode rõ ràng, runtime ép về `fact_mode=list` hoặc
+  `episode_mode=recent` để không rơi vào `search_facts("fact")`.
 - [x] Ghi nhận retrieval gate `skip/retrieve`, write gate `remember/discard` và
   memory candidate classifier đã là Decision Model.
 - [x] Rà soát consolidation trong `niko/memory/consolidation.py`.
@@ -194,15 +198,15 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 Mục đích: cho người dùng sửa hoặc quên memory một cách rõ ràng, có kiểm soát,
 thay vì để fact sai nằm mãi trong SQLite.
 
-- [ ] Thiết kế `memory_correction_intent` với label `none`, `correct_memory`, `forget_memory`.
-- [ ] Thêm config `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED`.
-- [ ] Thêm trace/runtime log `memory_correction_decision`.
-- [ ] Khi user nói “quên/sửa memory”, search facts/episodes liên quan trước.
-- [ ] Nếu match chắc chắn, update/delete có trace.
-- [ ] Nếu mơ hồ, hỏi lại user hoặc route Deep giải thích.
+- [x] Thiết kế `memory_correction_intent` với label `none`, `correct_memory`, `forget_memory`.
+- [x] Thêm config `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED`.
+- [x] Thêm trace/runtime log `memory_correction_decision`.
+- [x] Khi user nói “quên/sửa memory”, search facts/episodes liên quan trước.
+- [x] Nếu match chắc chắn, update/delete có trace.
+- [x] Nếu mơ hồ, hỏi lại user hoặc route Deep giải thích.
 - [ ] Dashboard hỗ trợ update fact rõ ràng hơn nếu chưa đủ.
 - [ ] Dashboard hỗ trợ delete episode nếu cần.
-- [ ] Không để Deep tự sửa memory tự do ở phase này.
+- [x] Không để Deep tự sửa memory tự do ở phase này.
 
 ## 6. Phase 6: Working Memory Rõ Ràng Hơn
 
@@ -228,6 +232,8 @@ và cảm giác “có vẻ chạy”.
 - [x] Unit test gate lỗi fail-open.
 - [x] Unit test inventory question đi qua Decision Model và trả `list_facts` hoặc
   `fact_mode=list`.
+- [x] Unit test regression cho case model trả `retrieve/search` ở câu kiểm kê
+  fact: mode thực thi cuối cùng phải là `fact_mode=list`, `episode_mode=none`.
 - [x] Unit test trace có gate metadata.
 - [ ] Eval prompt mẫu cho câu không cần memory.
 - [ ] Eval prompt mẫu cho câu hỏi cần memory trực tiếp.
@@ -263,3 +269,57 @@ multi-user hoặc business memory backend.
 - [ ] Không nối mặc định sang lakehouse/Jira.
 - [ ] Không để Deep tự ghi/sửa memory tự do.
 - [ ] Không làm graph schema cho memory trong repo Niko.
+## Cập nhật 2026-10-07 - Phase 4/5
+
+### Phase 4 live verification - inventory không tạo memory mới
+
+Mục đích: xác nhận câu hỏi kiểu kiểm tra inventory memory chỉ đọc facts/episodes hiện có, không bị write gate ghi ngược thành episode/fact mới.
+
+- [x] Live verify trên Telegram: hỏi Niko đang lưu fact nào.
+- [x] Kiểm tra trace/log có `memory_gate_decision` với `decision=retrieve`, `fact_mode=list`, `episode_mode=none`.
+- [x] Kiểm tra `memory_write_decision=discard` sau khi sửa write gate.
+- [x] Xác nhận không có `memory_write_episode` mới cho lượt inventory sau lần restart/test mới.
+
+### Phase 5 V1 - sửa/xóa memory qua chat
+
+Mục đích: cho Niko hiểu các lệnh sửa/quên memory bằng Decision Model, nhưng vẫn để Python kiểm soát search/update/delete để tránh model tự mutate dữ liệu.
+Đây là lớp tạm thời trước khi có Loop/tool workflow đúng nghĩa; các pending choices đang giữ trong RAM và chỉ đủ cho demo/baseline chat.
+
+- [x] Thêm intent gate `memory_correction` trong Decision Model với labels `none`, `correct_memory`, `forget_memory`.
+- [x] Thêm config dashboard `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED` và để mặc định tắt.
+- [x] Tích hợp vào `ChatReplyGraph` sau nhánh busy, trước local/fast/deep route thông thường.
+- [x] Hỗ trợ xóa fact khi match đúng một fact rõ ràng.
+- [x] Hỗ trợ sửa fact khi match đúng một fact và có `replacement`.
+- [x] Nếu match nhiều fact hoặc thiếu replacement thì hỏi lại, không mutate DB.
+- [x] Giữ episode read-only qua chat trong V1.
+- [x] Ghi trace/runtime log cho `memory_correction_decision`, `memory_correction_applied`, `memory_correction_clarify`.
+- [x] Unit test thủ công lần đầu: `tests/test_memory_store.py` pass `42 passed`.
+- [x] Sửa follow-up chọn ID sau ambiguous match: reply `fact #8` được phân loại với vài lượt chat gần nhất thay vì rơi sang Deep.
+- [x] Thêm guardrail: prompt nói rõ `quên/xóa` sẽ ưu tiên `forget_memory` nếu model lỡ chọn `correct_memory`.
+- [x] Unit test sau sửa pending: `tests/test_memory_store.py` pass `43 passed`; `tests/test_decision_model.py` pass `15 passed`.
+- [x] Thêm nhóm Decision Context cho correction.
+  Mục đích: giúp Nimble phân loại follow-up dựa trên `current_prompt` và vài lượt chat gần nhất trước, thay vì nhìn `fact #8 nhé` như một prompt độc lập.
+- [x] State correction có `current_prompt`, `recent_turns`, `active_workflow`, `pending_action`, `pending_choices`, `pending_replacement`.
+- [x] Runtime bỏ chính incoming prompt hiện tại khỏi `recent_turns` để tránh lặp context.
+- [x] Pending workflow chỉ là metadata phụ để nối workflow/validate ID; fallback fact ID chỉ còn là guardrail cuối khi model vẫn trả `none` hoặc lỗi.
+- [x] Unit test sau Decision Context: `tests/test_memory_store.py` pass `44 passed`; `tests/test_decision_model.py` pass `15 passed`; `tests/test_telegram_prompt.py` pass `43 passed`.
+- [x] Live retest phát hiện Nimble có context nhưng vẫn mislabel `fact #8 nhé` thành `correct_memory`; thêm guardrail cho reply chỉ chọn ID để dùng `pending_action` cũ và ghi `model_decision`.
+- [x] Unit test sau guardrail chọn ID: `tests/test_memory_store.py` pass `45 passed`.
+- [x] Tách Decision Model memory từ `bots/decision_model/memory.py` thành package `bots/decision_model/memory/`.
+  Mục đích: chia riêng `retrieval.py`, `write.py`, `candidate.py`, `correction.py` để khoanh vùng lỗi từng gate, trước mắt tập trung soi `correction.py`.
+- [x] Soi `correction.py`: sửa lỗi chữ ký `choice_fn` sau refactor package và thêm read-only guardrail để câu inventory/list facts không bị correction gate bắt nhầm thành `correct_memory`.
+- [x] Unit test sau read-only guardrail: `tests/test_decision_model.py` pass `16 passed`; bộ liên quan memory/decision/dashboard pass `69 passed`.
+- [ ] Live test Telegram: bật config, thêm fact test, gửi lệnh quên fact duy nhất, xác nhận fact bị xóa đúng. Deferred vì delete flow đã pass qua ambiguous + follow-up, còn V1 là lớp tạm.
+- [x] Live test Telegram: gửi lệnh quên fact mơ hồ, xác nhận Niko hỏi lại và không xóa gì.
+  Kết quả 2026-10-07 15:11 UTC: `decision=forget_memory`, `clarify_reason=ambiguous_fact_match`,
+  `fact_ids=[8, 6, 7]`, không có `memory_correction_applied`.
+- [x] Live test Telegram: trả lời bằng ID sau ambiguous match, xác nhận Niko xóa đúng fact đã chọn.
+  Kết quả 2026-10-07 15:14 UTC: `pending_action=forget_memory`, `pending_choices=[8, 6, 7]`,
+  `memory_correction_applied action=delete_fact fact_id=8`; snapshot sau đó còn fact #6 và #7.
+- [x] Live test Telegram: gửi lệnh sửa fact mơ hồ, xác nhận Niko hỏi lại và không mutate dữ liệu.
+  Kết quả 2026-10-07 15:17 UTC: match `fact_ids=[7, 6]`, `clarify_reason=ambiguous_fact_match`;
+  Nimble label gốc lệch `forget_memory` nhưng guardrail đưa decision cuối về `correct_memory`.
+- [x] Sửa guardrail replacement: khi intent cuối là `correct_memory` nhưng model bỏ trống `replacement`,
+  runtime trích phần sau `thành`/`thay bằng`; unit test `tests/test_decision_model.py` pass `18 passed`.
+- [ ] Live test Telegram: chọn ID sau lệnh sửa và retrieval sau đó dùng nội dung mới. Deferred cho Loop/tool workflow
+  vì Phase 5 V1 đã đủ chứng minh correction gate hỏi lại/mutate có kiểm soát.

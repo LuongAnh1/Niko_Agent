@@ -204,14 +204,14 @@ guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã con
 
 ```mermaid
 flowchart TB
-    Prompt[Incoming prompt] --> Intent{memory_correction_intent<br/>planned}
+    Prompt[Incoming prompt] --> Intent{memory_correction_intent<br/>V1 temporary}
     Intent -->|none| NormalFlow[Luồng chat bình thường]
     Intent -->|correct_memory| Search[Search facts/episodes liên quan]
     Intent -->|forget_memory| Search
     Search --> Confidence{Match đủ chắc?}
-    Confidence -->|yes, correct| Update[Update fact/episode có trace]
-    Confidence -->|yes, forget| Delete[Delete fact/episode có trace]
-    Confidence -->|no| Clarify[Hỏi lại user hoặc route Deep giải thích]
+    Confidence -->|yes, correct| Update[Update fact có trace<br/>episode read-only in V1]
+    Confidence -->|yes, forget| Delete[Delete fact có trace<br/>episode read-only in V1]
+    Confidence -->|no| Clarify[Hỏi lại user, lưu pending IDs trong RAM]
 
     Update --> Trace[memory_correction_decision / memory_write_* trace]
     Delete --> Trace
@@ -221,11 +221,14 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
     class NormalFlow done;
-    class Prompt,Intent,Search,Confidence,Update,Delete,Clarify,Trace planned;
+    class Prompt,Intent,Search,Confidence,Update,Delete,Clarify,Trace done;
 ```
 
 Deep agent không nên tự sửa/xóa memory tùy ý. Correction cần search lấy record ID
-trước, rồi mới update/delete có trace.
+trước, rồi mới update/delete có trace. Phase 5 V1 hiện đủ làm baseline tạm cho
+chat memory local; khi Loop/tool slot trưởng thành, phần confirm target và mutate
+memory nên chuyển thành workflow/tool có state bền thay vì pending RAM trong
+runtime.
 
 ## 7. Các Lớp Dữ Liệu
 
@@ -258,11 +261,11 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | --- | --- | --- |
 | 0 | Ranh giới chat memory vs lakehouse/Jira | done |
 | 0.5 | `MemoryRuntime` làm cổng pipeline trung tâm | done |
-| 1 | Decision model memory tasks | retrieval/write/classifier done, correction planned |
+| 1 | Decision model memory tasks | retrieval/write/classifier done, correction V1 temporary |
 | 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
 | 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
-| 5 | Correction/forget qua chat/dashboard | planned |
+| 5 | Correction/forget qua chat/dashboard | V1 temporary, delete flow live-verified |
 | 6 | Working memory rõ: recent/current/long-term | planned |
 | 7 | Eval riêng cho memory | unit tests and live verification done, eval scenarios planned |
 

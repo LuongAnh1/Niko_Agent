@@ -235,6 +235,13 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Dùng Nimble lọc xem Deep job có đáng ghi episode không. Bật sau khi runtime log đã dễ quan sát.",
             },
             {
+                "name": "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED",
+                "label": "Memory correction detection",
+                "default": "0",
+                "type": "bool",
+                "help": "Bật Nimble để nhận diện yêu cầu sửa hoặc xóa chat memory qua Telegram; Python vẫn kiểm soát update/delete.",
+            },
+            {
                 "name": "NIKO_MEMORY_TOP_K",
                 "label": "Memory top K",
                 "type": "number",

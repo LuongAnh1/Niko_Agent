@@ -38,6 +38,10 @@ separate business backend lane that Niko can retrieve from later.
   decisions, memory candidate classification, and warmup script for keeping the
   model loaded. This layer decides labels/modes only; it should not generate
   free-form user replies.
+- `bots/decision_model/memory/`: Memory-specific Decision Model package. Keep
+  retrieval, write, candidate, and correction prompts/normalizers in separate
+  files here so each decision surface can be debugged independently. Public
+  imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
@@ -53,9 +57,9 @@ separate business backend lane that Niko can retrieve from later.
 - `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
   and consolidation state. Uses FTS5 when available, with LIKE fallback.
 - `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
-  retrieval modes (`search/list/recent/none`), write gate, store search/list,
-  chat log writes, episode writes, consolidation scaffold, and context
-  formatting before Deep.
+  retrieval modes (`search/list/recent/none`), write gate, memory correction
+  decision context, store search/list, chat log writes, episode writes,
+  consolidation scaffold, and context formatting before Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
@@ -126,6 +130,15 @@ Important boundaries:
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
   reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
   episodes and retrieval modes, but it does not write SQLite data itself.
+- Memory correction sends `current_prompt` plus `recent_turns` as the primary
+  short-term conversation context. `active_workflow` and `pending_choices` are
+  auxiliary guardrail metadata for short follow-ups like `fact #8 nhé`; when a
+  reply only selects a pending fact ID, Python validates it against the pending
+  choices and uses the pending action even if the model mislabels the action.
+  Python still performs all update/delete operations. This correction flow is a
+  Phase 5 V1 temporary chat baseline; when the Loop/tool slot matures, memory
+  correction should become an explicit workflow/tool with durable state instead
+  of accumulating more ad-hoc chat pending logic.
 - Tool/Loop is represented in the dashboard as an intended harness slot, but it
   is not a complete tool router yet.
 
@@ -250,6 +263,7 @@ NIKO_MEMORY_RETRIEVAL_ENABLED=1
 NIKO_MEMORY_GATE_ENABLED=0
 NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_WRITE_GATE_ENABLED=0
+NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
 NIKO_MEMORY_TOP_K=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
