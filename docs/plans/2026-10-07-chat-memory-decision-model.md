@@ -504,6 +504,11 @@ không chặn recent conversation.
 Trong v1, `conversation_id` chỉ dùng cho recent chat window và Deep job lock.
 Long-term facts/episodes vẫn là memory chung của instance.
 
+Ghi chú sau live test 2026-10-07: working memory cho Deep khác với context của
+correction gate. Correction gate hiện chỉ chạy khi `current_prompt` có tín hiệu
+sửa/xóa/quên rõ ràng hoặc khi user đang chọn fact ID trong một pending workflow;
+câu trung tính không được kế thừa recent correction history cũ.
+
 ### Phase 7: Eval Cho Chat Memory
 
 Mục tiêu: memory không chỉ “có vẻ chạy”, mà có test chứng minh.

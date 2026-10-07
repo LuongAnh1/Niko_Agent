@@ -68,7 +68,7 @@ def build_memory_correction_state(
     gateway_message=None,
     decision_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """State hẹp cho intent correction, ưu tiên current prompt và vài turn chat gần nhất."""
+    """State hẹp cho intent correction, lấy current prompt làm bằng chứng chính."""
     state: dict[str, Any] = {
         "current_prompt": truncate_memory_gate_text(prompt),
         # Giữ key cũ để test/caller cũ không gãy trong lúc chuyển sang current_prompt.
@@ -80,9 +80,9 @@ def build_memory_correction_state(
         "pending_replacement": "",
         "decision_context": (
             "Only detect whether the user explicitly asks Niko to correct or forget "
-            "existing long-term chat memory. Treat current_prompt plus recent_turns "
-            "as the primary conversation context. Use active_workflow and pending_* "
-            "only as auxiliary metadata to resolve short references and allowed IDs. "
+            "existing long-term chat memory. Treat current_prompt as the primary "
+            "evidence. Use recent_turns, active_workflow, and pending_* only when "
+            "the current prompt is a short follow-up inside an active correction flow. "
             "Do not execute changes."
         ),
     }
@@ -117,7 +117,7 @@ def normalize_memory_correction_context(context: dict[str, Any]) -> dict[str, An
 
 
 def normalize_recent_turns(value: Any) -> list[dict[str, str]]:
-    """Giữ vài turn chat gần nhất làm ngữ cảnh chính cho model hiểu follow-up."""
+    """Giữ vài turn gần nhất chỉ để giải nghĩa follow-up sửa/xóa đang dang dở."""
     if not isinstance(value, list):
         return []
     turns: list[dict[str, str]] = []
@@ -164,10 +164,10 @@ def build_memory_correction_instructions() -> str:
     """Luật intent correction: model chỉ chọn intent và trích query/replacement."""
     return (
         "Classify whether the user explicitly asks Niko to modify long-term chat memory. "
-        "Use `current_prompt` together with `recent_turns` as the primary context. "
-        "Use `active_workflow`, `pending_action`, and `pending_choices` only as "
-        "auxiliary state when the recent conversation shows the current prompt is a "
-        "short follow-up such as 'fact #8', 'cái đó', or 'cái đầu tiên'. "
+        "Use `current_prompt` as the primary evidence. Use `recent_turns`, "
+        "`active_workflow`, `pending_action`, and `pending_choices` only as auxiliary "
+        "state when the current prompt is a short follow-up such as 'fact #8', "
+        "'cái đó', or 'cái đầu tiên' inside an active correction flow. "
         "Choose none for ordinary questions, memory lookup/listing, new facts to remember, "
         "small talk, or vague complaints. Choose forget_memory only when the user clearly "
         "asks to delete, remove, forget, or stop remembering an existing memory. Choose "
@@ -351,7 +351,9 @@ def has_delete_memory_marker(normalized_prompt: str) -> bool:
         "delete",
         "remove",
         "forget",
-        "bo nho",
+        "dung nho",
+        "khong can nho",
+        "stop remembering",
     )
     return any(marker in normalized_prompt for marker in markers)
 
@@ -361,12 +363,15 @@ def has_correct_memory_marker(normalized_prompt: str) -> bool:
     markers = (
         "sua",
         "cap nhat",
-        "doi",
         "update",
         "fix",
         "correct",
         "replace",
         "change",
+        "doi fact",
+        "doi memory",
+        "doi thanh",
+        "doi sang",
         "thay bang",
         "thay thanh",
         "thay the",

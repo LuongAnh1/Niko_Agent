@@ -216,7 +216,12 @@ class DecisionModelTests(unittest.TestCase):
             decision = decide_memory_correction_intent(prompt)
 
         self.assertTrue(is_memory_readonly_prompt(prompt))
+        self.assertTrue(is_memory_readonly_prompt("Bộ nhớ hiện đang lưu gì về anh?"))
         self.assertEqual(apply_memory_correction_prompt_hint(prompt, MEMORY_CORRECT_MEMORY), MEMORY_CORRECTION_NONE)
+        self.assertEqual(
+            apply_memory_correction_prompt_hint("Bộ nhớ hiện đang lưu gì về anh?", MEMORY_FORGET_MEMORY),
+            MEMORY_CORRECTION_NONE,
+        )
         self.assertEqual(decision.decision, MEMORY_CORRECTION_NONE)
         self.assertEqual(decision.label, MEMORY_CORRECT_MEMORY)
 

@@ -207,6 +207,41 @@ thêm.
 - Live retest tiếp theo cho câu inventory `hiện tại em có những fact gì về anh` cho thấy correction gate bắt nhầm thành `correct_memory`.
 - Đã soi riêng `bots/decision_model/memory/correction.py`, sửa chữ ký `choice_fn` sau khi tách package và thêm read-only guardrail: câu list/inspect memory ép về `none` để retrieval gate xử lý.
 - Unit test sau read-only guardrail: `tests/test_decision_model.py` pass `16 passed`; bộ liên quan memory/decision/dashboard pass `69 passed`.
+- Live test 2026-10-07 16:16 UTC cho câu Phase 6 `Trong bài test phase 6 này, từ khóa tạm thời là quả mận xanh.` cho thấy lỗi giao thoa Phase 5/6: route ban đầu là `fast_agent`, nhưng correction gate đọc 6 recent turns toàn nội dung sửa/xóa fact checklist và bắt nhầm thành `correct_memory` với `clarify_reason=missing_replacement`.
+- Kết luận sau khi đối chiếu Waku: working memory/recent history nên là context được scope theo run hoặc workflow. Gate nguy hiểm như correction không nên tự động ăn toàn bộ recent history; prompt hiện tại phải là bằng chứng chính.
+- Đã sửa correction workflow: prompt trung tính không có marker sửa/xóa/quên sẽ bypass Decision Model và ghi `memory_correction_skipped`; reply chỉ chọn pending fact ID dùng `pending_action` trong Python, không gọi model lần hai.
+- Unit test targeted sau fix scope correction context: `tests/test_memory_store.py::MemoryCorrectionRuntimeTests` và test read-only trong `tests/test_decision_model.py` pass `11 passed`.
+- Live retest 2026-10-07 16:36 UTC sau khi restart Telegram Bot: pass. Prompt trung tính Phase 6 ghi
+  `memory_correction_skipped`, runtime log có `model=python_precheck`,
+  `reason=no_explicit_correction_signal`, `recent_turn_count=0`, rồi route thường tiếp tục bằng
+  `fast_agent`. Không có `memory_correction_clarify` hay `memory_correction_applied` cho turn này.
+- Đã thêm checklist live riêng cho Phase 6/7 tại
+  `docs/plans/2026-10-07-chat-memory-live-test-checklist.md` để các prompt tiếp theo có expected
+  trace/log rõ ràng trước khi test.
+- Automated preflight 2026-10-07 trước khi test live tiếp: `rtk proxy git diff --check` pass,
+  targeted pytest cho correction/decision/eval/telegram routing pass `78 passed`, full suite pass
+  `144 passed`.
+- Live test Phase 6 working memory 2026-10-07 16:57 UTC: pass. Prompt hỏi lại từ khóa tạm thời
+  đi `deep_agent`; correction precheck ghi `memory_correction_skipped` với
+  `model=python_precheck`, `reason=no_explicit_correction_signal`, `recent_turn_count=0`.
+  Deep retrieval ghi `gate_decision=skip`, `gate_fact_mode=none`, `gate_episode_mode=none`,
+  `fact_count=0`, `episode_count=0`, nhưng vẫn có `recent_turn_count=6`. Bot nhắc đúng
+  "quả mận xanh", và write gate chọn `discard` nên không tạo episode dài hạn cho lượt test.
+- Live test inventory long-term memory 2026-10-07 17:01 UTC: pass. Prompt hỏi Niko đang lưu
+  fact nào đi `deep_agent`; correction precheck ghi `memory_correction_skipped` với
+  `model=python_precheck`. Retrieval gate chọn `decision=retrieve`, `label=list_facts`,
+  `fact_mode=list`, `episode_mode=none`; trace `memory_retrieval` ghi `fact_count=2`,
+  `episode_count=0`. Write gate chọn `discard`, nên lượt inspect memory không tạo episode mới.
+- Live test correction delete fact tạm 2026-10-07 17:07 UTC: pass. Prompt xóa fact
+  "checklist màu tím" vào correction flow; model chọn `forget_memory`. Runtime tìm nhiều
+  fact khớp nên hỏi lại với `fact_ids=[9, 6, 7]`, không xóa ngay. Follow-up `fact #9 nha`
+  dùng `memory_correction_context_fallback`, giữ pending action `forget_memory`, apply
+  `delete_fact fact_id=9`; scan SQLite sau đó không còn fact nào chứa nội dung màu tím.
+- Live retest inventory sau delete 2026-10-07 17:14 UTC: pass. Retrieval gate vẫn chọn
+  `decision=retrieve`, `label=list_facts`, `fact_mode=list`, `episode_mode=none`;
+  trace ghi `fact_ids=[7, 6]`, `fact_count=2`, `episode_count=0`, `recent_turn_count=6`.
+  Bot liệt kê đúng hai fact còn lại và nhắc fact #9 đã xóa dựa trên recent working memory,
+  không phải vì fact #9 còn trong long-term memory. Write gate tiếp tục `discard`.
 - Bật `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1` trong dashboard Config.
 - Thêm một fact test rồi nhắn Telegram yêu cầu quên fact đó.
 - Kiểm tra trace có `memory_correction_decision` và `memory_correction_applied`.

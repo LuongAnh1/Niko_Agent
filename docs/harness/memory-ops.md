@@ -267,7 +267,7 @@ Code Decision Model cho chat memory đã được tách vào `bots/decision_mode
 - `retrieval.py`: quyết định đọc/search/list facts hoặc recent episodes trước Deep.
 - `write.py`: quyết định có ghi Deep result thành episodic memory không.
 - `candidate.py`: phân loại candidate do consolidation tạo ra.
-- `correction.py`: nhận diện intent sửa/xóa memory; đây là file chính cần soi khi correction gate bắt nhầm câu inventory.
+- `correction.py`: nhận diện intent sửa/xóa memory; đây là file chính cần soi khi correction gate bắt nhầm câu inventory hoặc bị ngữ cảnh cũ kéo lệch.
 - `__init__.py`: giữ API cũ `bots.decision_model.memory` để các import hiện tại không phải đổi.
 
 Workflow thực thi nằm ở `niko/memory/correction_workflow.py`; `MemoryRuntime`
@@ -284,21 +284,21 @@ mutate SQLite.
 
 ### Decision context cho correction
 
-Correction gate không nên nhìn từng tin nhắn rời rạc. Runtime dựng một context ngắn, có cấu trúc trước khi gọi
+Correction gate không nên nhìn từng tin nhắn rời rạc, nhưng cũng không được để ngữ cảnh cũ lấn át prompt hiện tại. Runtime dựng một context ngắn, có cấu trúc trước khi gọi
 Decision Model:
 
-- `current_prompt`: tin nhắn hiện tại.
-- `recent_turns`: ngữ cảnh chính cho model, gồm vài dòng chat gần nhất trong cùng conversation, đã truncate và bỏ chính incoming prompt hiện tại.
+- `current_prompt`: tin nhắn hiện tại, là bằng chứng chính.
+- `recent_turns`: chỉ được mở khi prompt hiện tại có tín hiệu sửa/xóa/quên rõ ràng hoặc là follow-up chọn fact ID trong workflow đang chờ; đã truncate và bỏ chính incoming prompt hiện tại.
 - `active_workflow`: metadata phụ, ví dụ `memory_correction` khi lượt trước Niko vừa hỏi anh chọn fact ID.
 - `pending_action`: metadata phụ cho thao tác đang chờ, như `forget_memory` hoặc `correct_memory`.
 - `pending_choices`: metadata phụ cho danh sách ID/type mà runtime cho phép chọn, ví dụ `fact #8`, `fact #6`.
 - `pending_replacement`: metadata phụ cho nội dung thay thế nếu đang ở luồng sửa fact.
 
-Decision Model phải phân loại dựa trên `current_prompt` và `recent_turns` trước. Các trường `pending_*` chỉ giúp model hiểu
-rằng câu rất ngắn như `fact #8 nhé` đang nối tiếp câu hỏi trước đó, chứ không thay thế ngữ cảnh hội thoại. Python vẫn
-validate ID có nằm trong `pending_choices` và chỉ Python mới được update/delete SQLite. Nếu model vẫn trả `none` hoặc lỗi,
-runtime có fallback guardrail cho reply dạng fact ID sau một pending workflow, nhưng fallback này chỉ là lớp an toàn cuối.
-Trong trường hợp model đã có context nhưng vẫn phân loại sai một reply chỉ chọn ID, ví dụ đang chờ `forget_memory` nhưng
-model trả `correct_memory`, runtime sẽ ưu tiên `pending_action` cũ và ghi `model_decision` vào trace để debug.
+Decision Model phải phân loại dựa trên `current_prompt` trước. Các trường `recent_turns` và `pending_*` chỉ giúp hiểu
+các câu đang nối tiếp workflow sửa/xóa, không được biến một prompt trung tính thành lệnh mutate memory. Python vẫn
+validate ID có nằm trong `pending_choices` và chỉ Python mới được update/delete SQLite. Với reply chỉ chọn fact ID trong
+pending workflow, runtime bypass model, dùng `pending_action` cũ và ghi `memory_correction_context_fallback`.
 Với câu chỉ đọc/list memory như `hiện tại em có những fact gì về anh`, `correction.py` có read-only guardrail để ép
 decision về `none` nếu Nimble lỡ trả `correct_memory`; lượt đó sẽ được nhường lại cho retrieval gate (`fact_mode=list`).
+Với câu trung tính như `Trong bài test phase 6 này, từ khóa tạm thời là ...`, runtime ghi `memory_correction_skipped`
+và không gửi recent correction history sang Nimble.

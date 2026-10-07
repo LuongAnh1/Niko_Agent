@@ -20,7 +20,7 @@ không chỉ dựa vào cảm giác khi live test Telegram. Unit test tương �
 
 | ID | Nhóm | Prompt mẫu | Setup | Kỳ vọng |
 | --- | --- | --- | --- | --- |
-| M-01 | No memory | `haha oke` | Có fact sẵn, retrieval gate trả `skip` | Không inject `Relevant semantic facts`, trace có `gate_decision=skip` |
+| M-01 | Long-term skip | `haha oke` | Có fact sẵn, retrieval gate trả `skip` | Không inject `Relevant semantic facts`/`Relevant episodic events`; recent working memory vẫn có thể tồn tại, trace có `gate_decision=skip` |
 | M-02 | Direct fact | `Anh thích checklist kiểu gì?` | Fact: `Anh thích checklist có mục đích rõ và chia theo phase` | Inject đúng fact vào `Relevant semantic facts` |
 | M-03 | Indirect fact | `Lúc viết docs em nên trình bày thế nào?` | Retrieval gate trả query `checklist mục đích phase` | Inject đúng fact dù prompt không hỏi trực tiếp "anh thích gì" |
 | M-04 | Gate failure | `checklist phases` | Retrieval decider lỗi như Ollama down | Fail-open bằng raw prompt, trace có `gate_error` |

@@ -8,6 +8,9 @@ và kiến trúc muốn xây theo kế hoạch trong `docs/plans/2026-10-07-chat
 Mục tiêu là nhìn vào đây để biết dữ liệu đi qua đâu, quyết định nào do model nhỏ
 phụ trách, phần nào đã có, phần nào còn là phase sau.
 
+Checklist live cho đợt test Phase 6/7 hiện nằm ở
+`docs/plans/2026-10-07-chat-memory-live-test-checklist.md`.
+
 ## Legend
 
 - `done`: đã có trong code hiện tại.
@@ -46,12 +49,13 @@ làm nơi lưu mặc định cho mọi tin nhắn Telegram.
 
 ```mermaid
 flowchart TB
-    Gateway[Gateway<br/>Telegram] --> ChatGraph[ChatReplyGraph<br/>route / deep job / reply]
+    Gateway[Gateway<br/>Telegram] --> ChatGraph[ChatReplyGraph<br/>route / correction / deep job / reply]
+    ChatGraph --> MemoryRuntime[MemoryRuntime<br/>correction / write / retrieve facade]
     ChatGraph --> DeepRuntime[niko.runtime<br/>build Deep prompt]
-    DeepRuntime --> MemoryRuntime[MemoryRuntime<br/>memory pipeline]
+    DeepRuntime --> MemoryRuntime
 
     MemoryRuntime --> RetrievalGate{Retrieval gate<br/>skip / retrieve}
-    RetrievalGate -->|skip| NoMemory[No memory context]
+    RetrievalGate -->|skip| RecentOnly[Recent-only context<br/>no long-term facts/episodes]
     RetrievalGate -->|retrieve + query| Retriever[Search/list memory]
     RetrievalGate -->|error fail-open| Retriever
 
@@ -69,13 +73,19 @@ flowchart TB
     WriteGate -->|error fail-open| Episode
 
     MemoryRuntime --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
-    CorrectionPath --> CorrectionGate{Correction gate<br/>none / correct / forget}
+    CorrectionPath --> CorrectionPrecheck{Prompt có tín hiệu<br/>sửa/xóa/quên?}
+    CorrectionPrecheck -->|no| NoCorrection[Luồng chat bình thường]
+    CorrectionPrecheck -->|pending fact ID| CorrectionPending[Python pending action<br/>validate allowed IDs]
+    CorrectionPrecheck -->|yes| CorrectionGate{Correction gate<br/>none / correct / forget}
     CorrectionGate -->|none| NoCorrection[Luồng chat bình thường]
     CorrectionGate -->|correct / forget| CorrectionSearch[Search/list target facts]
     CorrectionSearch --> Store
     CorrectionSearch --> CorrectionMatch{Target rõ?}
     CorrectionMatch -->|yes| CorrectionApply[Update/delete fact<br/>trace + runtime log]
     CorrectionMatch -->|no| CorrectionClarify[Clarify reply<br/>pending IDs in RAM]
+    CorrectionPending --> CorrectionPendingMatch{ID thuộc pending choices?}
+    CorrectionPendingMatch -->|yes| CorrectionApply
+    CorrectionPendingMatch -->|no| CorrectionClarify
 
     MemoryRuntime --> Trace[Trace JSONL]
     MemoryRuntime --> RuntimeLog[Runtime log<br/>Bots dashboard]
@@ -88,11 +98,15 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionGate,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,NoMemory,NoEpisode done;
+    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionPrecheck,CorrectionGate,CorrectionPending,CorrectionPendingMatch,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,RecentOnly,NoEpisode done;
 ```
 
 Điểm kiểm soát chính là `MemoryRuntime`. Graph và runtime không nên tự biết chi
 tiết gate/search/write/correction nữa; chúng chỉ gọi pipeline memory.
+
+Luồng hiện tại có hai điểm gọi chính vào `MemoryRuntime`: `ChatReplyGraph` gọi trực
+tiếp để xử lý correction/write và ghi `chat_log`; `niko.runtime` gọi khi cần dựng
+memory context cho Deep. Vì vậy correction gate không nằm bên trong Deep runtime.
 
 ## 3. Retrieval Flow Cho Deep
 
@@ -115,8 +129,8 @@ sequenceDiagram
     else retrieval gate enabled
         Mem->>DM: decide_memory_retrieval
         alt skip
-            Mem->>Trace: memory_gate_decision skip
-            Mem-->>Deep: no memory context
+            Mem->>Trace: memory_gate_decision + memory_retrieval metadata
+            Mem-->>Deep: recent conversation only, no long-term facts/episodes
         else retrieve + search mode
             Mem->>Store: search_facts/search_episodes(query)
             Mem->>Trace: memory_retrieval + gate metadata
@@ -140,7 +154,9 @@ sequenceDiagram
 ```
 
 Nguyên tắc: retrieval gate lỗi thì fail-open, vì bỏ lỡ memory cần thiết thường tệ
-hơn việc retrieve hơi dư. Fast triage không nhận memory context để giữ route JSON sạch.
+hơn việc retrieve hơi dư. Khi gate trả `skip`, runtime chỉ bỏ qua long-term
+`facts/episodes`; recent conversation window vẫn có thể được inject như working memory
+ngắn hạn cho Deep. Fast triage không nhận memory context để giữ route JSON sạch.
 
 Inventory không còn bypass gate bằng keyword Python. Câu kiểu "đang lưu fact nào"
 vẫn đi qua Decision Model; model chọn `list_facts`, `recent_episodes`, hoặc trả
@@ -221,7 +237,10 @@ guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã con
 
 ```mermaid
 flowchart TB
-    Prompt[Incoming prompt] --> Intent{memory_correction_intent<br/>V1 temporary}
+    Prompt[Incoming prompt] --> Precheck{Explicit sửa/xóa/quên<br/>or pending fact ID?}
+    Precheck -->|no| NormalFlow[Luồng chat bình thường]
+    Precheck -->|pending fact ID| Pending[Use pending_action in Python<br/>validate ID]
+    Precheck -->|yes| Intent{memory_correction_intent<br/>V1 temporary}
     Intent -->|none| NormalFlow[Luồng chat bình thường]
     Intent -->|correct_memory| Search[Search facts/episodes liên quan]
     Intent -->|forget_memory| Search
@@ -229,8 +248,12 @@ flowchart TB
     Confidence -->|yes, correct| Update[Update fact có trace<br/>episode read-only in V1]
     Confidence -->|yes, forget| Delete[Delete fact có trace<br/>episode read-only in V1]
     Confidence -->|no| Clarify[Hỏi lại user, lưu pending IDs trong RAM]
+    Pending --> Validate{ID thuộc pending choices?}
+    Validate -->|yes, correct| Update
+    Validate -->|yes, forget| Delete
+    Validate -->|no| Clarify
 
-    Update --> Trace[memory_correction_decision<br/>memory_correction_clarify<br/>memory_correction_applied]
+    Update --> Trace[memory_correction_skipped<br/>memory_correction_decision<br/>memory_correction_context_fallback<br/>memory_correction_clarify<br/>memory_correction_applied]
     Delete --> Trace
     Clarify --> NormalFlow
 
@@ -242,10 +265,14 @@ flowchart TB
 ```
 
 Deep agent không nên tự sửa/xóa memory tùy ý. Correction cần search lấy record ID
-trước, rồi mới update/delete có trace. Phase 5 V1 hiện đủ làm baseline tạm cho
-chat memory local; khi Loop/tool slot trưởng thành, phần confirm target và mutate
-memory nên chuyển thành workflow/tool có state bền thay vì pending RAM trong
-runtime.
+trước, rồi mới update/delete có trace. Decision Model ở correction gate chỉ trả
+intent/query/replacement; Python runtime mới validate target và mutate SQLite.
+Precheck ở đầu luồng giữ `current_prompt` làm bằng chứng chính: nếu prompt không có
+tín hiệu sửa/xóa/quên và không phải reply chọn pending fact ID, runtime bỏ qua
+correction gate để recent history cũ không kéo sai intent. Phase 5 V1 hiện đủ làm
+baseline tạm cho chat memory local; khi Loop/tool slot trưởng thành, phần confirm
+target và mutate memory nên chuyển thành workflow/tool có state bền thay vì pending
+RAM trong runtime.
 
 ## 7. Các Lớp Dữ Liệu
 
@@ -281,7 +308,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
 | 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
-| 5 | Correction/forget qua chat/dashboard | V1 temporary, delete flow live-verified |
+| 5 | Correction/forget qua chat/dashboard | V1 temporary, delete/update/ambiguous/precheck skip live-verified |
 | 6 | Working memory rõ: recent/current/long-term | done v1 |
 | 7 | Eval riêng cho memory | done v1: deterministic eval scenarios + unit tests |
 

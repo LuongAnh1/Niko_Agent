@@ -4,6 +4,7 @@ Ngày lập: 2026-10-07
 Tài liệu gốc: [Kế Hoạch Chat Memory Decision Model](2026-10-07-chat-memory-decision-model.md)
 Phạm vi: chat memory single-user trong `Niko_Agent`
 Checklist kiểm tra live: [Memory Live Verification](../harness/memory-live-verification.md)
+Checklist live Phase 6/7: [Chat Memory Live Test Checklist](2026-10-07-chat-memory-live-test-checklist.md)
 
 Checklist này bám theo các phase trong kế hoạch gốc. Mỗi nhóm có mục đích để khi
 đọc lại mình biết checkbox đó phục vụ phần nào của memory pipeline, không chỉ là
@@ -190,7 +191,7 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Thêm dashboard/manual trigger nếu cần debug consolidation.
 - [x] Tinh chỉnh write gate để các lượt chỉ inspect/list memory thường `discard`,
   tránh ghi episode nhiễu khi người dùng chỉ hỏi Niko đang nhớ gì.
-- [ ] Live verify trên Telegram: hỏi Niko đang lưu fact nào, kiểm tra
+- [x] Live verify trên Telegram: hỏi Niko đang lưu fact nào, kiểm tra
   `memory_write_decision=discard` và không có `memory_write_episode` mới cho lượt inspect.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
@@ -310,6 +311,10 @@ Mục đích: cho Niko hiểu các lệnh sửa/quên memory bằng Decision Mod
   Mục đích: chia riêng `retrieval.py`, `write.py`, `candidate.py`, `correction.py` để khoanh vùng lỗi từng gate, trước mắt tập trung soi `correction.py`.
 - [x] Soi `correction.py`: sửa lỗi chữ ký `choice_fn` sau refactor package và thêm read-only guardrail để câu inventory/list facts không bị correction gate bắt nhầm thành `correct_memory`.
 - [x] Unit test sau read-only guardrail: `tests/test_decision_model.py` pass `16 passed`; bộ liên quan memory/decision/dashboard pass `69 passed`.
+- [x] Live test Phase 6 phát hiện correction gate đọc recent correction history và bắt nhầm câu trung tính `từ khóa tạm thời là quả mận xanh` thành `correct_memory`.
+  Mục đích: kiểm soát ranh giới giữa working memory cho Deep và context cho gate sửa/xóa memory, tránh để lịch sử sửa fact cũ chi phối prompt mới.
+- [x] Siết correction context: chỉ chạy Decision Model khi `current_prompt` có tín hiệu sửa/xóa/quên rõ ràng; recent turns chỉ mở trong workflow correction liên quan; pending fact-ID follow-up được Python xử lý bằng `pending_action`.
+- [x] Unit test targeted sau scope fix: `tests/test_memory_store.py::MemoryCorrectionRuntimeTests` và test read-only trong `tests/test_decision_model.py` pass `11 passed`.
 - [ ] Live test Telegram: bật config, thêm fact test, gửi lệnh quên fact duy nhất, xác nhận fact bị xóa đúng. Deferred vì delete flow đã pass qua ambiguous + follow-up, còn V1 là lớp tạm.
 - [x] Live test Telegram: gửi lệnh quên fact mơ hồ, xác nhận Niko hỏi lại và không xóa gì.
   Kết quả 2026-10-07 15:11 UTC: `decision=forget_memory`, `clarify_reason=ambiguous_fact_match`,
@@ -317,6 +322,11 @@ Mục đích: cho Niko hiểu các lệnh sửa/quên memory bằng Decision Mod
 - [x] Live test Telegram: trả lời bằng ID sau ambiguous match, xác nhận Niko xóa đúng fact đã chọn.
   Kết quả 2026-10-07 15:14 UTC: `pending_action=forget_memory`, `pending_choices=[8, 6, 7]`,
   `memory_correction_applied action=delete_fact fact_id=8`; snapshot sau đó còn fact #6 và #7.
+- [x] Live test Telegram: thêm fact tạm màu tím, gửi lệnh quên fact đó, xác nhận Niko hỏi lại
+  khi match nhiều fact rồi xóa đúng fact tạm sau khi user chọn ID.
+  Kết quả 2026-10-07 17:07 UTC: `decision=forget_memory`, `fact_ids=[9, 6, 7]`, follow-up
+  `fact #9 nha` ghi `memory_correction_context_fallback` và `memory_correction_applied action=delete_fact fact_id=9`;
+  scan SQLite sau đó không còn fact chứa nội dung màu tím.
 - [x] Live test Telegram: gửi lệnh sửa fact mơ hồ, xác nhận Niko hỏi lại và không mutate dữ liệu.
   Kết quả 2026-10-07 15:17 UTC: match `fact_ids=[7, 6]`, `clarify_reason=ambiguous_fact_match`;
   Nimble label gốc lệch `forget_memory` nhưng guardrail đưa decision cuối về `correct_memory`.
