@@ -7,7 +7,8 @@ Tài liệu này mô tả baseline harness của Niko: trace JSONL, SQLite memor
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
 - `niko/harness/runtime_log.py`: ghi runtime log JSONL cho tab Bots.
 - `niko/memory/store.py`: SQLite memory store.
-- `niko/memory/context.py`: retrieve semantic/episodic memory và build context cho Deep agent.
+- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, inventory, search store và format context.
+- `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
 - `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
 - `niko/ops/config_schema.py`: schema, validate, mask secret và snapshot cho tab Config.
@@ -49,18 +50,22 @@ Deep agent nhận memory context khi:
 ```env
 NIKO_MEMORY_ENABLED=1
 NIKO_MEMORY_RETRIEVAL_ENABLED=1
+NIKO_MEMORY_GATE_ENABLED=0
 ```
 
 Flow retrieval:
 
 ```text
 user prompt
-  -> retrieve_memory_context
+  -> optional memory_retrieval_gate
+  -> MemoryRuntime.retrieve_for_deep
   -> search/list facts
   -> search/list episodes
   -> format memory context
   -> inject vào prompt Deep agent
 ```
+
+`retrieve_memory_context(...)` vẫn tồn tại như wrapper tương thích, nhưng cổng chính của pipeline là `MemoryRuntime`. Cách tách này giống tinh thần Waku hơn: runtime/graph chỉ gọi một memory pipeline, còn policy gate/search/format nằm trong memory layer.
 
 Fast triage không nhận memory context để giữ JSON sạch.
 
@@ -69,13 +74,18 @@ Fast triage không nhận memory context để giữ JSON sạch.
 Khi một turn được xử lý:
 
 - `chat_log` có thể được ghi cho incoming user message và assistant reply.
-- Nếu Deep job hoàn tất, graph tạo một episode cơ bản gồm prompt, answer và followups.
+- Nếu Deep job hoàn tất, `MemoryRuntime` có thể tạo một episode cơ bản gồm prompt, answer và followups.
+- `NIKO_MEMORY_WRITE_GATE_ENABLED=1` bật Nimble write gate để quyết định Deep episode nào đáng lưu dài hạn.
+- Write gate chỉ chặn `episodes`; `chat_log` vẫn là operational log để debug/dashboard.
+- Nếu write gate lỗi, Niko fail-open và vẫn ghi episode baseline.
 - Semantic facts hiện chủ yếu được thêm thủ công qua dashboard hoặc API.
 
 Các event trace liên quan:
 
 - `memory_retrieval`
 - `memory_write_chat_log`
+- `memory_write_decision`
+- `memory_write_gate_error`
 - `memory_write_episode`
 - `memory_write_error`
 
@@ -178,9 +188,10 @@ Baseline cũng cố tình bộc lộ điểm yếu:
 - Facts chưa được tự trích xuất ổn định.
 - Episodes còn là summary đơn giản.
 - Chưa có schema graph/Knowledge Graph.
-- Chưa có lakehouse storage layer.
+- Chưa có lakehouse storage layer cho Jira/business data.
 
-Các điểm yếu này chính là lý do để phát triển memory pipeline, lakehouse và graph mining ở bước sau.
+Các điểm yếu này là lý do để phát triển chat memory local trước, rồi nối sang
+memory backend/lakehouse/graph riêng khi cần dữ liệu Jira hoặc tài liệu nghiệp vụ.
 
 ## Ghi Chú Về Waku
 

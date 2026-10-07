@@ -83,7 +83,22 @@ Trên dashboard:
 
 ## Vai Trò Của Decision Model Và Fast Agent
 
-Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm triage local. Trong luồng dashboard-first, warmup bằng tab `Bots -> Decision Model -> Warmup`; action này chạy nền và dùng `NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS` riêng để tránh cắt request khi model đang cold-start. Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, Ollama giữ model loaded cho tới khi bấm `Bots -> Decision Model -> Stop`, chạy `ollama stop nimble`, hoặc restart Ollama.
+Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm các quyết
+định nhỏ, nhanh và có label đóng. Hiện tại nó đã làm triage local
+`reply_now/send_to_deep` và chọn sticker mood. Hướng memory upgrade là dùng cùng
+model này cho các decision point hẹp hơn trong chat memory: có cần retrieve
+memory không, turn này có gì đáng nhớ không, memory ứng viên là semantic fact hay
+episodic event, và user có đang yêu cầu sửa/quên memory không.
+
+Trong luồng dashboard-first, warmup bằng tab `Bots -> Decision Model -> Warmup`;
+action này chạy nền và dùng `NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS` riêng để
+tránh cắt request khi model đang cold-start. Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`,
+Ollama giữ model loaded cho tới khi bấm `Bots -> Decision Model -> Stop`, chạy
+`ollama stop nimble`, hoặc restart Ollama.
+
+Decision model không thay Deep agent và không tự ghi/sửa memory tùy ý. Nó chỉ trả
+label/query/metadata để `ChatReplyGraph` hoặc memory pipeline quyết định bước kế
+tiếp.
 
 Fast Agent dùng `NIKO_FAST_AGENT_COMMAND` để sinh ngôn ngữ khi cần. Fast nên dùng model nhẹ/nhanh và có các task:
 
@@ -133,12 +148,22 @@ Deep agent nhận memory context khi:
 
 - `NIKO_MEMORY_ENABLED=1`
 - `NIKO_MEMORY_RETRIEVAL_ENABLED=1`
+- Nếu `NIKO_MEMORY_GATE_ENABLED=1`, Nimble local quyết định turn Deep này có cần
+  search memory không. Gate `skip` thì Deep không nhận memory context; gate lỗi
+  thì fail-open và retrieval chạy như cũ.
 
 Retrieval hiện tại:
 
 - Nếu hỏi kiểu “có fact nào”, store có thể list/search facts.
 - Các câu thường dùng `search_facts` và `search_episodes`.
 - Context được format thành block `Semantic memory / facts` và `Episodic memory / events`.
+
+`memory_retrieval_gate` đang default-off để không đổi hành vi demo hiện tại. Khi
+bật trong dashboard Config, gate dùng Decision Model trước khi search store. Nếu
+gate chọn `skip`, Deep không nhận memory context. Nếu gate chọn `retrieve`,
+pipeline dùng query do gate đề xuất, hoặc raw prompt nếu model không trả query.
+Nếu gate lỗi, retrieval fail-open bằng raw prompt để tránh bỏ lỡ memory thật sự
+cần.
 
 Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
 

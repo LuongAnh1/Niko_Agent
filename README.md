@@ -30,7 +30,8 @@ niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
-niko/memory/context.py           # Retrieve memory context cho Deep agent
+niko/memory/runtime.py           # Khung điều phối retrieval/gate/format memory
+niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/ops/                       # Mini Niko Ops dashboard
   dashboard.py                   # HTTP server/entrypoint mỏng
   bots.py                        # Start/stop Telegram Bot, warmup/stop Decision Model
@@ -102,7 +103,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
-- `Memory & Trace`: memory, trace và runtime log.
+- `Memory & Trace`: memory, retrieval/write gate, trace và runtime log.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -156,16 +157,17 @@ Các kịch bản demo nhanh:
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`, `turn_end`.
 - Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
-Chi tiết hơn xem [docs/demo-guide.md](docs/demo-guide.md).
+Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 
 ## Tài Liệu
 
-- [Kiến trúc](docs/architecture.md)
-- [Luồng chat Telegram](docs/telegram-chat-flow.md)
-- [Harness Memory & Ops](docs/niko-harness-memory-ops.md)
+- [Kiến trúc](docs/harness/architecture.md)
+- [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
+- [Harness Memory & Ops](docs/harness/memory-ops.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
-- [Demo Guide](docs/demo-guide.md)
-- [Memory Roadmap](docs/memory-roadmap.md)
+- [Demo Guide](docs/demo/demo-guide.md)
+- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)
+- [Memory Roadmap](docs/memory/roadmap.md)
 
 ## Ranh Giới Baseline
 
@@ -175,7 +177,7 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 - Retrieval là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.
-- Lakehouse/Knowledge Graph sẽ là hướng cải tiến sau, đọc dữ liệu từ SQLite/JSONL baseline.
+- Lakehouse/Knowledge Graph là lane memory backend nghiệp vụ riêng cho Jira/tài liệu; nó không phải nơi lưu mặc định chat Telegram, và Niko chỉ nên nối vào khi cần context business.
 
 ## Test
 

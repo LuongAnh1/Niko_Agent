@@ -72,7 +72,8 @@ niko/
     runtime_log.py     # JSONL runtime log cho tab Bots
   memory/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
-    context.py         # Retrieve memory context cho Deep agent
+    runtime.py         # MemoryRuntime điều phối retrieval/write gate và format context
+    context.py         # Dataclass, formatter và wrapper tương thích
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
     bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
@@ -95,9 +96,9 @@ niko/
 
 `niko.graphs.chat_reply` là graph nghiệp vụ chat. Nó quyết định route local/fast/deep/busy, quản lý deep job background, ghi trace, ghi chat log và episode sau deep job.
 
-`niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, retrieve memory context rồi gọi `fcc-claude`.
+`niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, gọi `MemoryRuntime` để lấy memory context rồi gọi `fcc-claude`.
 
-`niko.memory` là memory baseline. Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback search nếu không có FTS5.
+`niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval gate, write gate và format context cho Deep; store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback search nếu không có FTS5.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
@@ -127,7 +128,7 @@ Các nhóm config chính trong dashboard:
 - `Agent Commands`: Claude/Fast command, workdir, timeout, hook file, identity.
 - `Decision Model`: Ollama/Nimble base URL, model, triage/warmup/stop timeout, keep alive.
 - `Sticker`: bật/tắt sticker, sticker set/config/mode, timeout.
-- `Memory & Trace`: memory, trace, runtime log.
+- `Memory & Trace`: memory, retrieval/write gate, trace, runtime log.
 - `Replies`: suffix, wait/busy/error text.
 
 Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
@@ -170,11 +171,12 @@ Chưa có:
 - Long-running loop nhiều bước có tool execution.
 - Automatic semantic extraction đáng tin cậy từ mọi đoạn chat.
 - Embedding/rerank/graph reasoning.
-- Lakehouse/Knowledge Graph production layer.
+- Lakehouse/Knowledge Graph production layer cho Jira/business data.
 
 ## Hướng Mở Rộng
 
 - Thêm gateway mới: tạo folder trong `bots/`, parse message về `ChatGatewayMessage`, rồi gọi `ChatReplyGraph`.
 - Thêm nghiệp vụ mới: tạo graph mới trong `niko/graphs/`.
 - Thêm tool/loop: dùng `Tool Slot` hiện có như điểm mở rộng, nhưng giữ Telegram gateway mỏng.
-- Cải tiến memory: đọc dữ liệu từ SQLite/JSONL baseline, chuẩn hóa thành lakehouse, dựng graph schema, rồi dùng graph/semantic retrieval để thay thế baseline search.
+- Cải tiến chat memory: làm chắc retrieval/write gate, consolidation và correction trên SQLite local trước.
+- Cải tiến memory nghiệp vụ: nối sang lane lakehouse/Jira qua retrieval/tool slot khi cần dữ liệu issue/tài liệu, không trộn vào chat memory v1.

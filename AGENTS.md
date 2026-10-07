@@ -24,6 +24,10 @@ and introduce Jira as a future task/business-data gateway. The important story i
 that Niko should eventually analyze real task/issue data rather than only the
 scattered text a user pastes into chat.
 
+Keep chat memory and business/lakehouse memory separate in docs and design:
+Telegram chat memory is local interaction memory; Jira/lakehouse memory is a
+separate business backend lane that Niko can retrieve from later.
+
 ## Architecture Map
 
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
@@ -47,8 +51,11 @@ scattered text a user pastes into chat.
   table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
 - `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, and
   `episodes`. Uses FTS5 when available, with LIKE fallback.
-- `niko/memory/context.py`: Retrieves semantic/episodic memory and formats the
-  memory context injected into the Deep agent.
+- `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate, write
+  gate, inventory questions, store search, chat log writes, episode writes, and
+  context formatting before Deep.
+- `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
+  compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
 - `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
 - `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
@@ -177,13 +184,15 @@ bot process already owns that lock.
 ## Important Docs
 
 - `README.md`: high-level setup and baseline explanation.
-- `docs/architecture.md`: repo layout, module boundaries, and runtime state.
-- `docs/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
-- `docs/niko-harness-memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
+- `docs/harness/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
+- `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
-- `docs/demo-guide.md`: demo script for showing the harness to a supervisor.
-- `docs/memory-roadmap.md`: path from baseline memory to lakehouse/KG work.
+- `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
+- `docs/plans/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
+  implementation plan using the local Decision Model.
+- `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
 
 ## Environment And State
 
@@ -223,7 +232,9 @@ NIKO_TRACE_ENABLED=1
 NIKO_RUNTIME_LOG_ENABLED=1
 NIKO_MEMORY_ENABLED=1
 NIKO_MEMORY_RETRIEVAL_ENABLED=1
+NIKO_MEMORY_GATE_ENABLED=0
 NIKO_MEMORY_WRITE_ENABLED=1
+NIKO_MEMORY_WRITE_GATE_ENABLED=0
 NIKO_MEMORY_TOP_K=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
