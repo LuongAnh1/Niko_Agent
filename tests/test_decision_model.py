@@ -15,6 +15,16 @@ from bots.decision_model.sticker import (
     build_sticker_mood_criteria,
     normalize_sticker_mood,
 )
+from bots.decision_model.memory import (
+    MEMORY_DISCARD,
+    MEMORY_RETRIEVE,
+    MEMORY_REMEMBER,
+    MEMORY_SKIP,
+    build_memory_retrieval_criteria,
+    build_memory_write_criteria,
+    normalize_memory_retrieval_choice,
+    normalize_memory_write_choice,
+)
 from bots.decision_model.triage import (
     ROUTE_REPLY_NOW,
     ROUTE_SEND_TO_DEEP,
@@ -78,6 +88,7 @@ class DecisionModelTests(unittest.TestCase):
                         "choice": "reply_now",
                         "confidence": 0.91,
                         "probabilities": {"reply_now": 0.91, "send_to_deep": 0.09},
+                        "reason": "small talk",
                     }
                 },
                 "usage": {"input_tokens": 10, "output_tokens": 1},
@@ -89,6 +100,7 @@ class DecisionModelTests(unittest.TestCase):
         self.assertEqual(decision.confidence, 0.91)
         self.assertEqual(decision.probabilities["send_to_deep"], 0.09)
         self.assertEqual(decision.model, "nimble")
+        self.assertEqual(decision.extra["reason"], "small talk")
 
     def test_route_choice_aliases(self):
         self.assertEqual(normalize_route_choice("reply_now"), ROUTE_REPLY_NOW)
@@ -117,6 +129,30 @@ class DecisionModelTests(unittest.TestCase):
         )
 
         self.assertEqual(moods, ["happy", "coding", "neutral"])
+
+    def test_memory_retrieval_choice_aliases_and_criteria(self):
+        criteria = build_memory_retrieval_criteria()
+
+        self.assertIn(MEMORY_SKIP, criteria)
+        self.assertIn(MEMORY_RETRIEVE, criteria)
+        self.assertEqual(normalize_memory_retrieval_choice("read memory"), MEMORY_RETRIEVE)
+        self.assertEqual(normalize_memory_retrieval_choice("no memory"), MEMORY_SKIP)
+
+        with self.assertRaises(RuntimeError):
+            normalize_memory_retrieval_choice("maybe")
+
+    def test_memory_write_choice_aliases_and_criteria(self):
+        criteria = build_memory_write_criteria()
+
+        self.assertIn(MEMORY_REMEMBER, criteria)
+        self.assertIn(MEMORY_DISCARD, criteria)
+        self.assertEqual(normalize_memory_write_choice("save"), MEMORY_REMEMBER)
+        self.assertEqual(normalize_memory_write_choice("write memory"), MEMORY_REMEMBER)
+        self.assertEqual(normalize_memory_write_choice("no memory"), MEMORY_DISCARD)
+        self.assertEqual(normalize_memory_write_choice("skip"), MEMORY_DISCARD)
+
+        with self.assertRaises(RuntimeError):
+            normalize_memory_write_choice("maybe")
 
 
 if __name__ == "__main__":

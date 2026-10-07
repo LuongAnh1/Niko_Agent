@@ -14,7 +14,7 @@ import unicodedata
 from typing import Any
 
 from niko.config import env_flag, env_value
-from niko.memory.store import Episode, Fact, MemoryStore, default_memory_store
+from niko.memory.store import Episode, Fact, MemoryStore
 
 
 DEFAULT_MEMORY_TOP_K = 4
@@ -73,15 +73,43 @@ class RetrievedMemory:
     facts: list[Fact]
     episodes: list[Episode]
     enabled: bool
+    gate_enabled: bool = False
+    gate_decision: str = ""
+    gate_query: str = ""
+    gate_reason: str = ""
+    gate_confidence: float | None = None
+    gate_label: str = ""
+    gate_probabilities: dict[str, float] | None = None
+    gate_model: str = ""
+    gate_error: str = ""
 
     def to_meta(self) -> dict[str, Any]:
-        return {
+        meta: dict[str, Any] = {
             "enabled": self.enabled,
             "fact_ids": [fact.id for fact in self.facts],
             "episode_ids": [episode.id for episode in self.episodes],
             "fact_count": len(self.facts),
             "episode_count": len(self.episodes),
         }
+        if self.gate_enabled:
+            meta["gate_enabled"] = True
+            if self.gate_decision:
+                meta["gate_decision"] = self.gate_decision
+            if self.gate_query:
+                meta["gate_query"] = self.gate_query
+            if self.gate_reason:
+                meta["gate_reason"] = self.gate_reason
+            if self.gate_confidence is not None:
+                meta["gate_confidence"] = self.gate_confidence
+            if self.gate_label:
+                meta["gate_label"] = self.gate_label
+            if self.gate_probabilities:
+                meta["gate_probabilities"] = self.gate_probabilities
+            if self.gate_model:
+                meta["gate_model"] = self.gate_model
+            if self.gate_error:
+                meta["gate_error"] = self.gate_error
+        return meta
 
 
 def memory_enabled() -> bool:
@@ -92,6 +120,16 @@ def memory_retrieval_enabled() -> bool:
     return memory_enabled() and env_flag("NIKO_MEMORY_RETRIEVAL_ENABLED", "1")
 
 
+def memory_gate_enabled() -> bool:
+    """Gate dùng Nimble để quyết định có retrieve memory hay không; default-off."""
+    return memory_retrieval_enabled() and env_flag("NIKO_MEMORY_GATE_ENABLED", "0")
+
+
+def memory_write_gate_enabled() -> bool:
+    """Gate dùng Nimble để quyết định Deep episode nào đáng ghi dài hạn; default-off."""
+    return memory_write_enabled() and env_flag("NIKO_MEMORY_WRITE_GATE_ENABLED", "0")
+
+
 def memory_top_k() -> int:
     raw_value = env_value("NIKO_MEMORY_TOP_K", str(DEFAULT_MEMORY_TOP_K)).strip()
     try:
@@ -100,32 +138,58 @@ def memory_top_k() -> int:
         return DEFAULT_MEMORY_TOP_K
 
 
+def evaluate_memory_gate(prompt: str, gateway_message=None, *, bypass: bool = False) -> dict[str, Any]:
+    """Chạy retrieval gate nếu bật; lỗi thì fail-open bằng raw prompt."""
+    from niko.memory.runtime import default_memory_runtime
+
+    return default_memory_runtime().evaluate_retrieval_gate(prompt, gateway_message, bypass=bypass)
+
+
+def log_memory_gate_decision(gate_state: dict[str, Any]) -> None:
+    """Ghi log ngắn cho tab Bots; lỗi log không được ảnh hưởng turn."""
+    try:
+        from niko.harness.runtime_log import default_runtime_logger
+
+        default_runtime_logger().event(
+            "memory",
+            "memory_gate_decision",
+            (
+                "Memory gate: "
+                f"decision={gate_state.get('decision') or 'disabled'} "
+                f"query={gate_state.get('query') or '-'}"
+            ),
+            data={key: value for key, value in gate_state.items() if value not in ("", None, {})},
+        )
+    except Exception:
+        pass
+
+
+def log_memory_gate_error(gate_state: dict[str, Any]) -> None:
+    """Gate lỗi thì chỉ log, còn retrieval fail-open ở caller."""
+    try:
+        from niko.harness.runtime_log import default_runtime_logger
+
+        default_runtime_logger().event(
+            "memory",
+            "memory_gate_error",
+            f"Memory gate loi, fail-open retrieval: {gate_state.get('error')}",
+            level="warning",
+            data={key: value for key, value in gate_state.items() if value not in ("", None, {})},
+        )
+    except Exception:
+        pass
+
+
 def retrieve_memory_context(
     prompt: str,
     gateway_message=None,
     store: MemoryStore | None = None,
 ) -> RetrievedMemory:
     """Truy xuất facts/episodes liên quan cho một prompt."""
-    if not memory_retrieval_enabled():
-        return RetrievedMemory(text="", facts=[], episodes=[], enabled=False)
+    from niko.memory.runtime import MemoryRuntime, default_memory_runtime
 
-    store = store or default_memory_store()
-    top_k = memory_top_k()
-    fact_inventory = asks_for_fact_inventory(prompt)
-    episode_inventory = asks_for_episode_inventory(prompt)
-    # Câu hỏi "đang lưu fact nào" cần list inventory, không search theo chữ "fact".
-    if fact_inventory and not fact_inventory_filter_words(prompt):
-        facts = store.list_facts(top_k)
-    else:
-        facts = store.search_facts(prompt, top_k=top_k)
-    if episode_inventory:
-        episodes = store.recent_episodes(top_k)
-    elif fact_inventory:
-        episodes = []
-    else:
-        episodes = store.search_episodes(prompt, top_k=top_k)
-    text = format_memory_context(facts, episodes, gateway_message=gateway_message)
-    return RetrievedMemory(text=text, facts=facts, episodes=episodes, enabled=True)
+    runtime = MemoryRuntime(store=store) if store is not None else default_memory_runtime()
+    return runtime.retrieve_for_deep(prompt, gateway_message=gateway_message)
 
 
 def build_memory_context(prompt: str, gateway_message=None, store: MemoryStore | None = None) -> str:

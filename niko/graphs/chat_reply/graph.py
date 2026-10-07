@@ -15,8 +15,8 @@ from typing import Callable
 
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger, TraceTurn, default_trace_logger
-from niko.memory.context import compact_episode_summary, memory_write_enabled
-from niko.memory.store import MemoryStore, default_memory_store, utc_now
+from niko.memory.runtime import MemoryRuntime
+from niko.memory.store import MemoryStore, default_memory_store
 import niko.graphs.chat_reply.prompts as prompts
 from niko.graphs.chat_reply.router import (
     ROUTE_BUSY_REPLY,
@@ -89,12 +89,14 @@ class ChatReplyGraph:
     def __init__(
         self,
         memory_store: MemoryStore | None = None,
+        memory_runtime: MemoryRuntime | None = None,
         trace_logger: TraceLogger | None = None,
     ) -> None:
         self.deep_jobs: dict[str, DeepAgentJob] = {}
         self.deep_jobs_lock = threading.Lock()
         self.deep_agent_lock = threading.Lock()
         self._memory_store = memory_store
+        self._memory_runtime = memory_runtime
         self._trace_logger = trace_logger
 
     @property
@@ -102,6 +104,12 @@ class ChatReplyGraph:
         if self._memory_store is None:
             self._memory_store = default_memory_store()
         return self._memory_store
+
+    @property
+    def memory_runtime(self) -> MemoryRuntime:
+        if self._memory_runtime is None:
+            self._memory_runtime = MemoryRuntime(store=self.memory_store)
+        return self._memory_runtime
 
     @property
     def trace_logger(self) -> TraceLogger:
@@ -573,28 +581,16 @@ class ChatReplyGraph:
         meta: dict | None = None,
     ) -> None:
         """Ghi chat_log vận hành; đây chưa phải semantic/episodic memory."""
-        if not memory_write_enabled():
-            return
-        metadata = {
-            "route": route,
-            "trace_id": trace_id,
-            "user_key": gateway_message.user.key,
-            "chat_id": gateway_message.chat_id,
-            "chat_type": gateway_message.chat_type,
-        }
-        if meta:
-            metadata.update(meta)
-        try:
-            row_id = self.memory_store.log_chat(
-                conversation_id,
-                role,
-                content,
-                source=gateway_message.platform or "chat",
-                meta=metadata,
-            )
-            self.trace_logger.event(trace_id, "memory_write_chat_log", {"row_id": row_id, "role": role, "route": route})
-        except Exception as exc:
-            self.trace_logger.event(trace_id, "memory_write_error", {"target": "chat_log", "error": str(exc)})
+        self.memory_runtime.record_chat_log(
+            conversation_id,
+            role,
+            content,
+            gateway_message,
+            route,
+            trace_id,
+            self.trace_logger,
+            meta=meta,
+        )
 
     def _record_deep_episode(
         self,
@@ -606,25 +602,17 @@ class ChatReplyGraph:
         trace_id: str,
     ) -> None:
         """Ghi episode baseline sau khi Deep hoàn tất, kèm followup nếu có."""
-        if not memory_write_enabled():
-            return
         followups = active_job.followups if active_job else []
-        summary = compact_episode_summary(prompt, answer, followups=followups)
-        try:
-            episode_id = self.memory_store.add_episode(
-                summary,
-                happened_at=utc_now(),
-                source="niko_deep",
-                meta={
-                    "conversation_id": conversation_id,
-                    "trace_id": trace_id,
-                    "user_key": gateway_message.user.key,
-                    "followups": followups,
-                },
-            )
-            self.trace_logger.event(trace_id, "memory_write_episode", {"episode_id": episode_id})
-        except Exception as exc:
-            self.trace_logger.event(trace_id, "memory_write_error", {"target": "episodes", "error": str(exc)})
+        self.memory_runtime.record_deep_episode(
+            conversation_id,
+            prompt,
+            answer,
+            gateway_message,
+            followups,
+            trace_id,
+            self.trace_logger,
+            route="deep_agent",
+        )
 
 
 __all__ = [

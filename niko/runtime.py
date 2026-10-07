@@ -147,9 +147,9 @@ def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, t
     memory_context = ""
     try:
         from niko.harness.trace import default_trace_logger
-        from niko.memory.context import retrieve_memory_context
+        from niko.memory.runtime import default_memory_runtime
 
-        retrieved_memory = retrieve_memory_context(prompt, gateway_message)
+        retrieved_memory = default_memory_runtime().retrieve_for_deep(prompt, gateway_message)
         memory_context = retrieved_memory.text
         if trace_id:
             logger = trace_logger or default_trace_logger()

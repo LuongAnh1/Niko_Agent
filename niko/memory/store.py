@@ -93,7 +93,7 @@ def _json_loads(value: str | None) -> dict[str, Any]:
 def _words(query: str, limit: int = 12) -> list[str]:
     """Rút các từ có ích cho FTS/LIKE, bỏ stopword chat phổ biến."""
     normalized_query = _normalize_for_search(query)
-    words = re.findall(r"[\w]+", normalized_query, flags=re.UNICODE)
+    words = re.findall(r"[^\W_]+", normalized_query, flags=re.UNICODE)
     seen: set[str] = set()
     unique_words: list[str] = []
     for word in words:
@@ -116,8 +116,9 @@ def _fts_query(query: str) -> str:
     return " OR ".join(f'"{word}"' for word in _words(query))
 
 
-def _like_patterns(query: str) -> list[str]:
-    return [f"%{word}%" for word in _words(query, limit=8)]
+def _word_match_score(words: list[str], text: str) -> int:
+    haystack_words = set(re.findall(r"[^\W_]+", _normalize_for_search(text), flags=re.UNICODE))
+    return sum(1 for word in words if word in haystack_words)
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,7 @@ class MemoryStore:
                     content TEXT NOT NULL,
                     source TEXT NOT NULL DEFAULT '',
                     meta_json TEXT NOT NULL DEFAULT '{}',
+                    consolidated INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
 
@@ -227,7 +229,20 @@ class MemoryStore:
                 );
                 """
             )
+            self._ensure_chat_log_migrations(conn)
             self._ensure_fts(conn)
+
+    def _ensure_chat_log_migrations(self, conn: sqlite3.Connection) -> None:
+        """Bổ sung cột mới cho DB cũ mà không cần hệ migration riêng ở baseline."""
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(chat_log)").fetchall()}
+        if "consolidated" not in columns:
+            conn.execute("ALTER TABLE chat_log ADD COLUMN consolidated INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_log_consolidated_id
+                ON chat_log(consolidated, id)
+            """
+        )
 
     def _ensure_fts(self, conn: sqlite3.Connection) -> None:
         """Tạo FTS5 nếu có; thiếu FTS thì search sẽ tự fallback."""
@@ -363,8 +378,8 @@ class MemoryStore:
 
     def search_facts(self, query: str, top_k: int = 5) -> list[Fact]:
         """Tìm facts bằng FTS trước, rồi LIKE/normalize fallback."""
-        if not query.strip():
-            return self.list_facts(top_k)
+        if not _words(query):
+            return []
 
         with self._lock, self.connection() as conn:
             fts = _fts_query(query)
@@ -388,9 +403,10 @@ class MemoryStore:
             return self._search_facts_like(conn, query, top_k)
 
     def _search_facts_like(self, conn: sqlite3.Connection, query: str, top_k: int) -> list[Fact]:
-        patterns = _like_patterns(query)
-        if not patterns:
+        words = _words(query, limit=8)
+        if not words:
             return []
+        patterns = [f"%{word}%" for word in words]
         where = " OR ".join(["lower(subject || ' ' || content) LIKE ?"] * len(patterns))
         rows = conn.execute(
             f"""
@@ -399,23 +415,27 @@ class MemoryStore:
             ORDER BY id DESC
             LIMIT ?
             """,
-            (*patterns, max(1, top_k)),
+            (*patterns, max(50, top_k * 10)),
         ).fetchall()
-        if rows:
-            return [self._row_to_fact(row) for row in rows]
+        matches = self._rank_fact_rows(rows, words, top_k)
+        if matches:
+            return matches
         return self._search_facts_normalized(conn, query, top_k)
 
     def _search_facts_normalized(self, conn: sqlite3.Connection, query: str, top_k: int) -> list[Fact]:
         words = _words(query, limit=8)
         if not words:
             return []
+        rows = conn.execute("SELECT * FROM facts ORDER BY id DESC").fetchall()
+        return self._rank_fact_rows(rows, words, top_k)
+
+    def _rank_fact_rows(self, rows: list[sqlite3.Row], words: list[str], top_k: int) -> list[Fact]:
         matches: list[tuple[int, sqlite3.Row]] = []
-        for row in conn.execute("SELECT * FROM facts ORDER BY id DESC"):
-            haystack = _normalize_for_search(f"{row['subject']} {row['content']}")
-            score = sum(1 for word in words if word in haystack)
+        for row in rows:
+            score = _word_match_score(words, f"{row['subject']} {row['content']}")
             if score:
                 matches.append((score, row))
-        matches.sort(key=lambda item: (-item[0], -int(item[1]["id"])))
+        matches.sort(key=lambda item: -item[0])
         return [self._row_to_fact(row) for _, row in matches[: max(1, top_k)]]
 
     def add_episode(
@@ -459,8 +479,8 @@ class MemoryStore:
 
     def search_episodes(self, query: str, top_k: int = 5) -> list[Episode]:
         """Tìm episode bằng FTS nếu có, fallback LIKE nếu không."""
-        if not query.strip():
-            return self.recent_episodes(top_k)
+        if not _words(query):
+            return []
 
         with self._lock, self.connection() as conn:
             fts = _fts_query(query)
@@ -484,9 +504,10 @@ class MemoryStore:
             return self._search_episodes_like(conn, query, top_k)
 
     def _search_episodes_like(self, conn: sqlite3.Connection, query: str, top_k: int) -> list[Episode]:
-        patterns = _like_patterns(query)
-        if not patterns:
+        words = _words(query, limit=8)
+        if not words:
             return []
+        patterns = [f"%{word}%" for word in words]
         where = " OR ".join(["lower(summary) LIKE ?"] * len(patterns))
         rows = conn.execute(
             f"""
@@ -495,9 +516,28 @@ class MemoryStore:
             ORDER BY happened_at DESC, id DESC
             LIMIT ?
             """,
-            (*patterns, max(1, top_k)),
+            (*patterns, max(50, top_k * 10)),
         ).fetchall()
-        return [self._row_to_episode(row) for row in rows]
+        matches = self._rank_episode_rows(rows, words, top_k)
+        if matches:
+            return matches
+        return self._search_episodes_normalized(conn, query, top_k)
+
+    def _search_episodes_normalized(self, conn: sqlite3.Connection, query: str, top_k: int) -> list[Episode]:
+        words = _words(query, limit=8)
+        if not words:
+            return []
+        rows = conn.execute("SELECT * FROM episodes ORDER BY happened_at DESC, id DESC").fetchall()
+        return self._rank_episode_rows(rows, words, top_k)
+
+    def _rank_episode_rows(self, rows: list[sqlite3.Row], words: list[str], top_k: int) -> list[Episode]:
+        matches: list[tuple[int, sqlite3.Row]] = []
+        for row in rows:
+            score = _word_match_score(words, str(row["summary"]))
+            if score:
+                matches.append((score, row))
+        matches.sort(key=lambda item: -item[0])
+        return [self._row_to_episode(row) for _, row in matches[: max(1, top_k)]]
 
     def chat_history(self, session_id: str, limit: int = 30) -> list[dict[str, Any]]:
         """Lấy lịch sử một conversation theo thứ tự cũ -> mới."""
@@ -512,6 +552,62 @@ class MemoryStore:
                 (session_id, max(1, limit)),
             ).fetchall()
             return [self._row_to_chat(row) for row in reversed(rows)]
+
+    def list_unconsolidated_chat(
+        self,
+        limit: int = 50,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Lấy batch chat log thô chưa đi qua consolidation theo thứ tự cũ -> mới."""
+        limit = max(1, int(limit))
+        with self._lock, self.connection() as conn:
+            if session_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM chat_log
+                    WHERE consolidated = 0 AND session_id = ?
+                    ORDER BY id ASC
+                    LIMIT ?
+                    """,
+                    (session_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM chat_log
+                    WHERE consolidated = 0
+                    ORDER BY id ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            return [self._row_to_chat(row) for row in rows]
+
+    def mark_chat_consolidated(self, row_ids: list[int] | tuple[int, ...]) -> int:
+        """Đánh dấu đúng các dòng đã đọc xong; dòng mới tới trong lúc xử lý không bị đụng."""
+        clean_ids: list[int] = []
+        for row_id in row_ids:
+            try:
+                normalized_id = int(row_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_id > 0:
+                clean_ids.append(normalized_id)
+        clean_ids = sorted(set(clean_ids))
+        if not clean_ids:
+            return 0
+
+        placeholders = ", ".join(["?"] * len(clean_ids))
+        with self._lock, self.connection() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE chat_log
+                SET consolidated = 1
+                WHERE consolidated = 0 AND id IN ({placeholders})
+                """,
+                tuple(clean_ids),
+            )
+            return int(cursor.rowcount)
 
     def recent_chat(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock, self.connection() as conn:
@@ -604,6 +700,7 @@ class MemoryStore:
             "source": str(row["source"]),
             "created_at": str(row["created_at"]),
             "meta": _json_loads(row["meta_json"]),
+            "consolidated": bool(int(row["consolidated"])),
         }
 
 

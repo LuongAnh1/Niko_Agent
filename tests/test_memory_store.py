@@ -1,17 +1,109 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from bots.decision_model.memory import (
+    MEMORY_DISCARD,
+    MEMORY_REMEMBER,
+    MEMORY_RETRIEVE,
+    MEMORY_SKIP,
+    MemoryRetrievalDecision,
+    MemoryWriteDecision,
+)
 from niko.chat_gateway import telegram_message_to_gateway
 from niko.harness.trace import TraceLogger
-from niko.memory.context import retrieve_memory_context
+from niko.memory.consolidation import MemoryConsolidator
+from niko.memory.context import RetrievedMemory, retrieve_memory_context
+from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.runtime import call_deep_agent
 
 
 class MemoryStoreTests(unittest.TestCase):
+    def test_chat_log_consolidation_migration_adds_column_to_old_db(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "memory.sqlite3"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE chat_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        source TEXT NOT NULL DEFAULT '',
+                        meta_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL
+                    );
+                    INSERT INTO chat_log(session_id, role, content, source, meta_json, created_at)
+                    VALUES ('chat-1', 'user', 'hello', 'test', '{}', '2026-10-07T00:00:00Z');
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            store = MemoryStore(db_path)
+
+            with store.connection() as conn:
+                columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_log)").fetchall()}
+            rows = store.list_unconsolidated_chat()
+
+        self.assertIn("consolidated", columns)
+        self.assertEqual(rows[0]["id"], 1)
+        self.assertFalse(rows[0]["consolidated"])
+
+    def test_unconsolidated_chat_batch_orders_and_filters_by_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.log_chat("chat-1", "user", "tin dau", source="test")
+            other = store.log_chat("chat-2", "user", "tin khac", source="test")
+            second = store.log_chat("chat-1", "assistant", "tin hai", source="test")
+
+            marked_count = store.mark_chat_consolidated([first])
+            all_rows = store.list_unconsolidated_chat(limit=10)
+            session_rows = store.list_unconsolidated_chat(limit=10, session_id="chat-1")
+
+        self.assertEqual(marked_count, 1)
+        self.assertEqual([row["id"] for row in all_rows], [other, second])
+        self.assertEqual([row["id"] for row in session_rows], [second])
+        self.assertTrue(all(not row["consolidated"] for row in all_rows))
+
+    def test_consolidator_preview_and_mark_batch_does_not_touch_new_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.log_chat("chat-1", "user", "can nho cai nay", source="test")
+            second = store.log_chat("chat-1", "assistant", "da ghi nhan", source="test")
+            consolidator = MemoryConsolidator(store=store, batch_size=2)
+
+            batch = consolidator.preview_next_batch()
+            third = store.log_chat("chat-1", "user", "tin moi den sau batch", source="test")
+            result = consolidator.mark_batch_done(batch.row_ids, reason="unit_test")
+            remaining = store.list_unconsolidated_chat(limit=10)
+
+        self.assertEqual(batch.row_ids, [first, second])
+        self.assertEqual(result.status, "marked")
+        self.assertEqual(result.marked_count, 2)
+        self.assertEqual([row["id"] for row in remaining], [third])
+
+    def test_memory_runtime_exposes_consolidation_scaffold(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            row_id = store.log_chat("chat-1", "user", "memory scaffold", source="test")
+            runtime = MemoryRuntime(store=store)
+
+            batch = runtime.preview_consolidation_batch(limit=5)
+            result = runtime.mark_consolidation_batch(batch.row_ids, reason="unit_test")
+            remaining = store.list_unconsolidated_chat(limit=5)
+
+        self.assertEqual(batch.row_ids, [row_id])
+        self.assertEqual(result.marked_count, 1)
+        self.assertEqual(remaining, [])
+
     def test_add_search_and_delete_fact(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
@@ -33,6 +125,61 @@ class MemoryStoreTests(unittest.TestCase):
 
             self.assertEqual(episodes[0].id, episode_id)
             self.assertIn("Jira", episodes[0].summary)
+
+    def test_empty_or_wordless_search_returns_no_memory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+            store.add_episode("Niko discussed harness memory with the user")
+
+            self.assertEqual(store.search_facts(""), [])
+            self.assertEqual(store.search_facts("   "), [])
+            self.assertEqual(store.search_facts("?!_"), [])
+            self.assertEqual(store.search_episodes(""), [])
+            self.assertEqual(store.search_episodes("   "), [])
+            self.assertEqual(store.search_episodes("?!_"), [])
+
+    def test_search_splits_underscore_terms(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            fact_id = store.add_fact("Runtime", "Niko agent stores dashboard config", source="test")
+            episode_id = store.add_episode("Niko agent warmed up the decision model", source="test")
+
+            facts = store.search_facts("niko_agent")
+            episodes = store.search_episodes("niko_agent")
+
+            self.assertEqual(facts[0].id, fact_id)
+            self.assertEqual(episodes[0].id, episode_id)
+
+    def test_search_does_not_match_token_prefixes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Carpet", "Blue carpet sample", source="test")
+            store.add_episode("The team cleaned a blue carpet", source="test")
+
+            self.assertEqual(store.search_facts("car"), [])
+            self.assertEqual(store.search_episodes("car"), [])
+
+    def test_search_fallback_without_fts_uses_normalized_tokens(self):
+        cuong = "C\u01b0\u1eddng"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            fact_id = store.add_fact(cuong, "Niko agent owner", source="test")
+            episode_id = store.add_episode(f"{cuong} adjusted Niko agent memory", source="test")
+            with store.connection() as conn:
+                conn.execute("DROP TABLE IF EXISTS facts_fts")
+                conn.execute("DROP TABLE IF EXISTS episodes_fts")
+
+            facts = store.search_facts("Cuong")
+            episodes = store.search_episodes("Cuong")
+            prefix_facts = store.search_facts("own")
+            prefix_episodes = store.search_episodes("adj")
+
+        self.assertEqual(facts[0].id, fact_id)
+        self.assertEqual(episodes[0].id, episode_id)
+        self.assertEqual(prefix_facts, [])
+        self.assertEqual(prefix_episodes, [])
 
     def test_retrieve_memory_context_formats_semantic_and_episodic_memory(self):
         message = telegram_message_to_gateway(
@@ -65,6 +212,260 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("Episodic memory", memory.text)
         self.assertEqual(memory.to_meta()["fact_count"], 1)
         self.assertEqual(memory.to_meta()["episode_count"], 1)
+
+    def test_memory_runtime_retrieve_for_deep_matches_context_wrapper(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+            runtime = MemoryRuntime(store=store)
+
+            with patch.dict(
+                os.environ,
+                {"NIKO_MEMORY_ENABLED": "1", "NIKO_MEMORY_RETRIEVAL_ENABLED": "1"},
+                clear=False,
+            ):
+                runtime_memory = runtime.retrieve_for_deep("semantic facts SQLite", message)
+                wrapper_memory = retrieve_memory_context("semantic facts SQLite", message, store=store)
+
+        self.assertEqual(runtime_memory.text, wrapper_memory.text)
+        self.assertEqual(runtime_memory.to_meta(), wrapper_memory.to_meta())
+
+    def test_retrieve_memory_context_delegates_to_memory_runtime(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            expected = RetrievedMemory(text="memory text", facts=[], episodes=[], enabled=True)
+
+            with patch("niko.memory.runtime.MemoryRuntime.retrieve_for_deep", return_value=expected) as retrieve:
+                memory = retrieve_memory_context("anything", message, store=store)
+
+        self.assertIs(memory, expected)
+        retrieve.assert_called_once_with("anything", gateway_message=message)
+
+    def test_memory_runtime_accepts_fake_retrieval_decider(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+            runtime = MemoryRuntime(
+                store=store,
+                retrieval_decider=lambda _prompt, _message: MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    query="semantic facts SQLite",
+                    reason="test gate",
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                memory = runtime.retrieve_for_deep("em co nho khong", message)
+
+        self.assertEqual(memory.to_meta()["gate_decision"], MEMORY_RETRIEVE)
+        self.assertEqual(memory.to_meta()["gate_query"], "semantic facts SQLite")
+        self.assertIn("Niko stores semantic facts in SQLite", memory.text)
+
+    def test_memory_runtime_write_gate_off_records_deep_episode(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            decider = Mock(return_value=MemoryWriteDecision(decision=MEMORY_DISCARD))
+            runtime = MemoryRuntime(store=store, write_decider=decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_GATE_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                runtime.record_deep_episode(
+                    "456",
+                    "phan tich giup anh",
+                    "day la cau tra loi",
+                    message,
+                    [],
+                    "turn-1",
+                    trace_logger,
+                )
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        decider.assert_not_called()
+        self.assertEqual(snapshot["counts"]["episodes"], 1)
+        self.assertIn("phan tich giup anh", snapshot["episodes"][0]["summary"])
+        self.assertFalse(any(event.get("kind") == "memory_write_decision" for event in events))
+
+    def test_memory_runtime_write_gate_remember_records_episode_and_trace(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime = MemoryRuntime(
+                store=store,
+                write_decider=lambda _prompt, _answer, _followups, _message, _route: MemoryWriteDecision(
+                    decision=MEMORY_REMEMBER,
+                    reason="substantive task",
+                    confidence=0.9,
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                runtime.record_deep_episode(
+                    "456",
+                    "phan tich giup anh",
+                    "day la cau tra loi",
+                    message,
+                    ["them context"],
+                    "turn-1",
+                    trace_logger,
+                )
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        self.assertEqual(snapshot["counts"]["episodes"], 1)
+        decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
+        self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_REMEMBER)
+        self.assertEqual(decision_events[0]["data"]["confidence"], 0.9)
+        self.assertTrue(any(event.get("kind") == "memory_write_episode" for event in events))
+
+    def test_memory_runtime_write_gate_discard_skips_episode_but_keeps_chat_log(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime = MemoryRuntime(
+                store=store,
+                write_decider=lambda _prompt, _answer, _followups, _message, _route: MemoryWriteDecision(
+                    decision=MEMORY_DISCARD,
+                    reason="small talk",
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                runtime.record_chat_log("456", "assistant", "chao anh", message, "local_reply", "turn-1", trace_logger)
+                runtime.record_deep_episode("456", "chao", "chao anh", message, [], "turn-1", trace_logger)
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        self.assertEqual(snapshot["counts"]["chat_log"], 1)
+        self.assertEqual(snapshot["counts"]["episodes"], 0)
+        decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
+        self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_DISCARD)
+
+    def test_memory_runtime_write_gate_error_fail_open_records_episode(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+
+        def failing_decider(_prompt, _answer, _followups, _message, _route):
+            raise RuntimeError("ollama offline")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime = MemoryRuntime(store=store, write_decider=failing_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                runtime.record_deep_episode(
+                    "456",
+                    "phan tich giup anh",
+                    "day la cau tra loi",
+                    message,
+                    [],
+                    "turn-1",
+                    trace_logger,
+                )
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        self.assertEqual(snapshot["counts"]["episodes"], 1)
+        error_events = [event for event in events if event.get("kind") == "memory_write_gate_error"]
+        self.assertIn("ollama offline", error_events[0]["data"]["error"])
+        decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
+        self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_REMEMBER)
 
     def test_fact_inventory_question_lists_recent_facts(self):
         message = telegram_message_to_gateway(
@@ -161,6 +562,18 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn(cuong, memory.text)
         self.assertNotIn(ve_ngoai, memory.text)
 
+    def test_vietnamese_episode_search_uses_normalized_terms(self):
+        cuong = "C\u01b0\u1eddng"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            episode_id = store.add_episode(f"Niko \u0111\u00e3 trao \u0111\u1ed5i v\u1edbi {cuong} v\u1ec1 memory", source="test")
+
+            episodes = store.search_episodes("Cuong", top_k=3)
+
+        self.assertEqual(episodes[0].id, episode_id)
+        self.assertIn(cuong, episodes[0].summary)
+
     def test_generic_weather_statement_does_not_match_fact_by_stopwords(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
@@ -169,6 +582,140 @@ class MemoryStoreTests(unittest.TestCase):
             facts = store.search_facts("anh khẳng định với em nay trời nắng", top_k=3)
 
         self.assertEqual(facts, [])
+
+    def test_memory_gate_skip_does_not_search_store(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ), patch(
+                "niko.memory.runtime.decide_memory_retrieval",
+                return_value=MemoryRetrievalDecision(decision=MEMORY_SKIP, reason="standalone"),
+            ), patch.object(store, "search_facts", wraps=store.search_facts) as search_facts, patch.object(
+                store, "search_episodes", wraps=store.search_episodes
+            ) as search_episodes:
+                memory = retrieve_memory_context("thời tiết hôm nay", message, store=store)
+
+        self.assertTrue(memory.enabled)
+        self.assertEqual(memory.text, "")
+        self.assertEqual(memory.to_meta()["gate_decision"], MEMORY_SKIP)
+        search_facts.assert_not_called()
+        search_episodes.assert_not_called()
+
+    def test_memory_gate_retrieve_uses_gate_query(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ), patch(
+                "niko.memory.runtime.decide_memory_retrieval",
+                return_value=MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    query="semantic facts SQLite",
+                    reason="asks about memory",
+                    confidence=0.8,
+                ),
+            ), patch.object(store, "search_facts", wraps=store.search_facts) as search_facts:
+                memory = retrieve_memory_context("em có nhớ không", message, store=store)
+
+        self.assertEqual(memory.to_meta()["gate_decision"], MEMORY_RETRIEVE)
+        self.assertEqual(memory.to_meta()["gate_query"], "semantic facts SQLite")
+        self.assertEqual(memory.to_meta()["gate_confidence"], 0.8)
+        self.assertIn("Niko stores semantic facts in SQLite", memory.text)
+        search_facts.assert_called_once()
+        self.assertEqual(search_facts.call_args.args[0], "semantic facts SQLite")
+
+    def test_memory_gate_error_fail_open_retrieves_raw_prompt(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ), patch(
+                "niko.memory.runtime.decide_memory_retrieval",
+                side_effect=RuntimeError("ollama offline"),
+            ):
+                memory = retrieve_memory_context("semantic facts SQLite", message, store=store)
+
+        meta = memory.to_meta()
+        self.assertEqual(meta["gate_decision"], MEMORY_RETRIEVE)
+        self.assertIn("ollama offline", meta["gate_error"])
+        self.assertIn("Niko stores semantic facts in SQLite", memory.text)
+
+    def test_fact_inventory_bypasses_memory_gate_and_lists_facts(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ), patch("niko.memory.runtime.decide_memory_retrieval") as gate:
+                memory = retrieve_memory_context("em đang lưu fact nào", message, store=store)
+
+        gate.assert_not_called()
+        self.assertEqual(memory.to_meta()["gate_label"], "inventory_bypass")
+        self.assertIn("Niko stores semantic facts in SQLite", memory.text)
 
     def test_deep_agent_prompt_includes_memory_context(self):
         message = telegram_message_to_gateway(
@@ -193,7 +740,7 @@ class MemoryStoreTests(unittest.TestCase):
                     "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
                 },
                 clear=True,
-            ), patch("niko.memory.context.default_memory_store", return_value=store), patch(
+            ), patch("niko.memory.runtime.default_memory_store", return_value=store), patch(
                 "niko.runtime.run_cli", return_value="OK"
             ) as run_cli:
                 self.assertEqual(call_deep_agent("semantic facts SQLite", message, trace_id="turn-1", trace_logger=trace_logger), "OK")
@@ -204,6 +751,46 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("Semantic memory / facts", prompt)
         self.assertIn("Niko stores semantic facts in SQLite", prompt)
         self.assertTrue(any(event.get("kind") == "memory_retrieval" for event in events))
+
+    def test_deep_agent_trace_includes_memory_gate_metadata(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "Can Niko use memory?",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                    "NIKO_PROMPT_HOOK_FILE": "",
+                    "CHAT_IDENTITY_ENABLED": "0",
+                    "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
+                },
+                clear=True,
+            ), patch("niko.memory.runtime.default_memory_store", return_value=store), patch(
+                "niko.memory.runtime.decide_memory_retrieval",
+                return_value=MemoryRetrievalDecision(decision=MEMORY_SKIP, reason="standalone"),
+            ), patch(
+                "niko.runtime.run_cli", return_value="OK"
+            ) as run_cli:
+                self.assertEqual(call_deep_agent("generic standalone", message, trace_id="turn-1", trace_logger=trace_logger), "OK")
+
+            prompt = run_cli.call_args.args[1]
+            events = trace_logger.read_events()
+
+        self.assertNotIn("Semantic memory / facts", prompt)
+        memory_events = [event for event in events if event.get("kind") == "memory_retrieval"]
+        self.assertEqual(memory_events[0]["data"]["gate_decision"], MEMORY_SKIP)
 
 
 if __name__ == "__main__":

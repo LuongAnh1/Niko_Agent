@@ -32,6 +32,7 @@ class ChoiceDecision:
     probabilities: dict[str, float] = field(default_factory=dict)
     model: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,11 @@ def parse_systemone_choice_response(response: dict[str, Any], question_name: str
         probabilities=probabilities,
         model=model,
         usage=usage,
+        extra={
+            str(key): value
+            for key, value in answer.items()
+            if key not in {"type", "choice", "confidence", "probabilities"}
+        },
     )
 
 
