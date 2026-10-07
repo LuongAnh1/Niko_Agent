@@ -22,6 +22,8 @@ rtk python -m niko.ops.dashboard
    - `NIKO_MEMORY_GATE_ENABLED=1`
    - `NIKO_MEMORY_WRITE_ENABLED=1`
    - `NIKO_MEMORY_WRITE_GATE_ENABLED=1`
+   - `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1` nếu đang test auto consolidation.
+   - `NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES=1` hoặc `2` để test nhanh, sau đó trả về ngưỡng demo.
 5. Trong tab `Bots`, start Telegram Bot từ dashboard.
 
 Nếu test đang tập trung vào retrieval gate, có thể giữ write gate tắt để log dễ
@@ -40,6 +42,7 @@ hiện trong log.
 | Write `remember` | `Lên kế hoạch sửa memory runtime để tuần sau anh demo với thầy.` | `memory_write_decision` có `decision=remember`; có `memory_write_episode`. |
 | Consolidation fact | `Ghi nhớ rằng anh thích checklist có mục đích rõ ràng.` | Memory tab `Refresh batch` có candidate `semantic_fact`; `Run once` ghi fact source `consolidation`. |
 | Consolidation discard | `haha oke` | Candidate `discard`; run once mark rows nhưng không ghi fact/episode. |
+| Auto consolidation | Hai exchange ngắn, trong đó có một câu `Ghi nhớ rằng...` | Khi bật auto và đủ ngưỡng, trace/runtime log có `memory_consolidation_auto_started/finished`; fact/episode được ghi với source `consolidation`. |
 
 ## Quan Sát Trên Dashboard
 
@@ -53,6 +56,10 @@ Trong tab `Bots` hoặc bảng runtime log, tìm các event:
 - `memory_write_gate_error`: write gate lỗi; episode baseline vẫn được ghi nếu memory write bật.
 - `memory_write_episode`: có episode mới khi write gate cho phép.
 - `consolidation`: xem kết quả trong Memory tab sau khi bấm `Run once`.
+- `memory_consolidation_auto_started`: auto worker bắt đầu xử lý một batch đủ complete exchange.
+- `memory_consolidation_auto_finished`: auto worker kết thúc, có `status`, `marked_count`, `facts_written`, `episodes_written`.
+- `memory_consolidation_auto_skipped`: auto bật nhưng chưa đủ exchange hoặc worker đang chạy.
+- `memory_consolidation_auto_error`: auto worker lỗi; batch không được mark nếu classifier lỗi.
 
 Trong tab `Traces`, kiểm tra một turn Deep có đủ thứ tự tối thiểu:
 
@@ -76,6 +83,8 @@ turn_end
   operational log.
 - Nếu consolidation classifier lỗi, batch không được mark `consolidated=1`; anh
   có thể chạy lại sau khi model ổn.
+- Nếu auto consolidation bật nhưng chỉ có wait/busy reply, batch không được chạy;
+  auto chỉ tính assistant reply thật như `local_reply`, `fast_agent`, `deep_agent_final`.
 - Nếu config đến từ OS env, dashboard phải hiển thị field bị khóa và không ghi
   đè vào `config.json`.
 
@@ -165,6 +174,8 @@ hay nội dung riêng tư dài vào tài liệu này.
 - `Refresh batch` chỉ đọc batch/candidate, không ghi memory.
 - `Run once` mới gọi classifier, ghi fact/episode nếu được chọn, rồi mark đúng
   rows trong batch là consolidated.
+- Auto consolidation được bật/tắt trong `Config -> Memory & Trace`; mặc định tắt
+  để tránh xử lý backlog cũ bất ngờ khi demo.
 
 ## Khi Nào Coi Là Pass
 
@@ -172,6 +183,8 @@ hay nội dung riêng tư dài vào tài liệu này.
 - Mỗi prompt mẫu tạo đúng event kỳ vọng trong Runtime Log hoặc Trace.
 - Không có Telegram bot crash khi bật retrieval gate/write gate.
 - Memory tab preview/run consolidation không ghi bừa khi prompt là small talk.
+- Khi bật auto consolidation với ngưỡng thấp, trace/runtime log phải cho thấy auto
+  chỉ chạy sau complete exchange và không tính wait/busy reply.
 - Full test suite vẫn pass sau khi chỉnh config/docs.
 ## Kết quả cập nhật 2026-10-07
 

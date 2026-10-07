@@ -14,7 +14,8 @@ Kịch bản eval deterministic nằm ở [Chat Memory Eval Scenarios](memory-ev
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
 - `niko/memory/working_memory.py`: dựng recent conversation window tạm thời từ `chat_log` cho Deep prompt và correction context.
 - `niko/memory/correction_workflow.py`: workflow sửa/xóa fact qua chat, gồm pending choices, validate ID, update/delete và correction trace/log.
-- `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated và mark-done có kiểm soát.
+- `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated,
+  tạo candidate, classify, ghi/mark có kiểm soát cho manual và auto path.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
 - `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
 - `niko/ops/config_schema.py`: schema, validate, mask secret và snapshot cho tab Config.
@@ -47,9 +48,9 @@ SQLite hiện có ba nhóm dữ liệu:
 
 `chat_log` không phải Semantic/Episodic Memory theo nghĩa dùng để suy luận. Nó là log vận hành để xem lại hội thoại. Semantic/Episodic hiện nằm ở `facts` và `episodes`.
 `chat_log` hiện có cờ `consolidated` để scaffold consolidation biết batch nào đã
-được xử lý xong. Manual consolidation v1 đã có thể tạo candidate bảo thủ, gọi
-Decision Model để phân loại, rồi ghi facts/episodes với source `consolidation`;
-threshold/scheduler tự động vẫn là phase sau.
+được xử lý xong. Consolidation v1 đã có thể tạo candidate bảo thủ, gọi Decision
+Model để phân loại, rồi ghi facts/episodes với source `consolidation`. Auto
+consolidation default-off có thể chạy nền sau khi đủ complete exchange.
 
 Nếu SQLite hỗ trợ FTS5, store dùng full-text search. Nếu không có FTS5, store fallback về LIKE search có giới hạn.
 
@@ -114,12 +115,24 @@ Khi một turn được xử lý:
 - Nếu write gate lỗi, Niko fail-open và vẫn ghi episode baseline.
 - Semantic facts hiện chủ yếu được thêm thủ công qua dashboard hoặc API.
 
-## Manual Consolidation
+## Consolidation
 
 Dashboard Memory tab có khối `Consolidation` để chạy thủ công một batch
 `chat_log` chưa consolidated. Luồng này tạo candidate bằng rule bảo thủ, dùng
 Nimble chỉ để phân loại `semantic_fact`, `episodic_event` hoặc `discard`, rồi mới
 ghi vào `facts`/`episodes` với `source=consolidation`.
+
+Trạng thái hiện tại:
+
+- `Refresh batch` chỉ preview batch/candidate kế tiếp, không ghi memory và không
+  mark `chat_log`.
+- `Run once` là trigger thủ công xử lý đúng một batch hiện tại.
+- `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=0` mặc định tắt để không xử lý backlog
+  bất ngờ trong demo.
+- Khi bật auto, runtime chỉ trigger sau assistant reply thật và chỉ khi đủ
+  `NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES` complete exchanges.
+- Wait/busy reply không tính là complete exchange; worker chạy nền và có lock
+  chống chạy trùng trong cùng process.
 
 Guardrail hiện tại:
 
@@ -127,7 +140,8 @@ Guardrail hiện tại:
   kiểu “ghi nhớ”, “lưu fact”, “từ giờ”.
 - Nếu classifier/Ollama lỗi, batch không bị mark consolidated để có thể retry.
 - Nếu classifier trả `discard`, batch có thể được mark done mà không tạo memory dài hạn.
-- Chưa có scheduler nền; mọi consolidation v1 chạy qua API/dashboard thủ công.
+- Auto chỉ chạy một batch mỗi lần trigger; backlog cũ có thể xử lý dần qua các
+  turn sau hoặc bằng `Run once`.
 
 Các event trace liên quan:
 
@@ -139,6 +153,10 @@ Các event trace liên quan:
 - `memory_write_gate_error`
 - `memory_write_episode`
 - `memory_write_error`
+- `memory_consolidation_auto_started`
+- `memory_consolidation_auto_finished`
+- `memory_consolidation_auto_skipped`
+- `memory_consolidation_auto_error`
 
 Với retrieval gate, trace/runtime log cần đọc cùng lúc `gate_decision`,
 `gate_label`, `gate_query`, `gate_fact_mode` và `gate_episode_mode`. Inventory

@@ -3,6 +3,10 @@
 File này chỉ ghép các API quan sát/vận hành lại với nhau: trace, memory,
 runtime log, config và bot controls. Logic riêng của từng mảng nằm ở module
 chuyên trách để dashboard không trở thành nơi chứa policy của agent.
+
+Các endpoint consolidation trong dashboard là thao tác vận hành thủ công:
+Refresh batch chỉ preview read-only, Run once mới xử lý một batch. Scheduler tự
+động theo N tin nhắn chưa nằm trong dashboard entrypoint hiện tại.
 """
 
 from __future__ import annotations
@@ -136,6 +140,7 @@ def make_handler(
                 )
                 return
             if parsed.path == "/api/memory/consolidation":
+                # Refresh batch: chỉ xem batch/candidate kế tiếp, không ghi memory và không mark row.
                 batch = consolidator.preview_next_batch(limit=self._query_limit(parsed.query, default=12))
                 self._send(
                     *json_bytes(
@@ -174,6 +179,7 @@ def make_handler(
                     self._send(*json_bytes({"error": "invalid consolidation limit"}, status=400))
                     return
                 session_id = str(data.get("session_id", "")).strip() or None
+                # Run once: trigger thủ công đúng một batch; không có loop/scheduler nền ở endpoint này.
                 result = consolidator.run_once(limit=limit, session_id=session_id)
                 status = 500 if result.status == "error" else 200
                 self._send(*json_bytes({"result": result.to_dict()}, status=status))

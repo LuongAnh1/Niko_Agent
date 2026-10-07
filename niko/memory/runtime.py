@@ -4,6 +4,9 @@
 policy retrieval, gate bằng decision model, retrieval modes, search/list store,
 write gate và consolidation vào một pipeline rõ ràng.
 
+Consolidation có hai đường: dashboard/API thủ công và auto hook default-off sau
+complete exchange. Auto hook chỉ spawn background worker, không chặn reply.
+
 Luồng sửa/xóa memory đi qua `MemoryCorrectionWorkflow`. Runtime chỉ giữ facade để
 ChatReplyGraph không phải biết chi tiết pending state, search target hay mutate DB.
 """
@@ -27,6 +30,7 @@ from bots.decision_model.memory import (
     decide_memory_retrieval,
     decide_memory_write,
 )
+from niko.config import env_flag, env_value
 from niko.memory.consolidation import ConsolidationBatch, ConsolidationResult, ConsolidationRunResult, MemoryConsolidator
 from niko.memory.correction_workflow import MemoryCorrectionDecider, MemoryCorrectionResult, MemoryCorrectionWorkflow
 from niko.memory.context import (
@@ -51,9 +55,29 @@ from niko.memory.working_memory import recent_chat_window
 MemoryRetrievalDecider = Callable[[str, object | None], MemoryRetrievalDecision]
 MemoryWriteDecider = Callable[[str, str, list[str] | None, object | None, str], MemoryWriteDecision]
 
+AUTO_CONSOLIDATION_SKIP_ROUTES = {"deep_agent_wait", "busy_reply"}
+DEFAULT_CONSOLIDATION_EXCHANGE_THRESHOLD = 6
+
+
+def memory_consolidation_auto_enabled() -> bool:
+    """Auto consolidation default-off để demo không bất ngờ xử lý backlog cũ."""
+    return memory_write_enabled() and env_flag("NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED", "0")
+
+
+def memory_consolidation_exchange_threshold() -> int:
+    """Số complete exchange cần đủ trước khi auto consolidation chạy một batch."""
+    raw_value = env_value(
+        "NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES",
+        str(DEFAULT_CONSOLIDATION_EXCHANGE_THRESHOLD),
+    ).strip()
+    try:
+        return max(1, min(50, int(raw_value)))
+    except ValueError:
+        return DEFAULT_CONSOLIDATION_EXCHANGE_THRESHOLD
+
 
 class MemoryRuntime:
-    """Cổng memory trung tâm cho retrieval modes, write gate, chat log và consolidation."""
+    """Cổng memory trung tâm cho retrieval, write, correction và consolidation."""
 
     def __init__(
         self,
@@ -68,6 +92,7 @@ class MemoryRuntime:
         self._write_decider = write_decider
         self._correction_decider = correction_decider
         self._consolidator = consolidator
+        self._auto_consolidation_lock = threading.Lock()
         self._correction_workflow = MemoryCorrectionWorkflow(
             store_provider=lambda: self.store,
             correction_decider=correction_decider,
@@ -80,7 +105,7 @@ class MemoryRuntime:
 
     @property
     def consolidator(self) -> MemoryConsolidator:
-        """Consolidation đi qua runtime để giữ một cổng memory thống nhất."""
+        """Consolidation đi qua runtime để giữ một cổng thống nhất."""
         return self._consolidator or MemoryConsolidator(store=self.store)
 
     def retrieve_for_deep(self, prompt: str, gateway_message=None) -> RetrievedMemory:
@@ -141,7 +166,7 @@ class MemoryRuntime:
         limit: int | None = None,
         session_id: str | None = None,
     ) -> ConsolidationBatch:
-        """Xem batch chat log kế tiếp mà chưa ghi fact/episode hay mark consolidated."""
+        """Preview read-only batch kế tiếp; dùng cho Refresh batch trên dashboard."""
         return self.consolidator.preview_next_batch(limit=limit, session_id=session_id)
 
     def mark_consolidation_batch(
@@ -149,7 +174,7 @@ class MemoryRuntime:
         row_ids: list[int] | tuple[int, ...],
         reason: str = "manual",
     ) -> ConsolidationResult:
-        """Đánh dấu batch đã xử lý; phase sau sẽ gọi sau khi candidate hợp lệ."""
+        """Đánh dấu batch đã xử lý sau khi caller manual/auto có guardrail riêng."""
         return self.consolidator.mark_batch_done(row_ids, reason=reason)
 
     def run_consolidation_once(
@@ -157,8 +182,57 @@ class MemoryRuntime:
         limit: int | None = None,
         session_id: str | None = None,
     ) -> ConsolidationRunResult:
-        """Chạy consolidation thủ công một lần, không có scheduler nền."""
+        """Chạy consolidation thủ công đúng một batch, không có scheduler nền."""
         return self.consolidator.run_once(limit=limit, session_id=session_id)
+
+    def run_auto_consolidation_once(
+        self,
+        conversation_id: str,
+        trace_id: str = "",
+        trace_logger=None,
+    ) -> ConsolidationRunResult:
+        """Chạy auto consolidation một batch nếu conversation đã đủ complete exchange."""
+        threshold = memory_consolidation_exchange_threshold()
+        batch = self.consolidator.preview_complete_exchange_batch(threshold, session_id=conversation_id)
+        if batch.is_empty:
+            data = {
+                "conversation_id": conversation_id,
+                "exchange_threshold": threshold,
+                "reason": "insufficient_complete_exchanges",
+            }
+            self._trace_consolidation_event(trace_logger, trace_id, "memory_consolidation_auto_skipped", data)
+            log_memory_consolidation_auto(
+                "memory_consolidation_auto_skipped",
+                "Auto consolidation skipped: insufficient complete exchanges.",
+                data=data,
+            )
+            return ConsolidationRunResult("empty", batch, [], [], [], [], 0)
+
+        start_data = {
+            "conversation_id": conversation_id,
+            "exchange_threshold": threshold,
+            "row_ids": batch.row_ids,
+            "rows_read": batch.rows_read,
+        }
+        self._trace_consolidation_event(trace_logger, trace_id, "memory_consolidation_auto_started", start_data)
+        log_memory_consolidation_auto(
+            "memory_consolidation_auto_started",
+            "Auto consolidation started.",
+            data=start_data,
+        )
+
+        result = self.consolidator.run_complete_exchange_once(threshold, session_id=conversation_id)
+        result_data = self._consolidation_result_data(result, conversation_id, threshold)
+        event = "memory_consolidation_auto_error" if result.status == "error" else "memory_consolidation_auto_finished"
+        level = "warning" if result.status == "error" else "info"
+        self._trace_consolidation_event(trace_logger, trace_id, event, result_data)
+        log_memory_consolidation_auto(
+            event,
+            f"Auto consolidation finished: status={result.status}, marked={result.marked_count}.",
+            level=level,
+            data=result_data,
+        )
+        return result
 
     def record_chat_log(
         self,
@@ -192,8 +266,47 @@ class MemoryRuntime:
                 meta=metadata,
             )
             trace_logger.event(trace_id, "memory_write_chat_log", {"row_id": row_id, "role": role, "route": route})
+            self.maybe_start_auto_consolidation(conversation_id, role, route, trace_id, trace_logger)
         except Exception as exc:
             trace_logger.event(trace_id, "memory_write_error", {"target": "chat_log", "error": str(exc)})
+
+    def maybe_start_auto_consolidation(
+        self,
+        conversation_id: str,
+        role: str,
+        route: str,
+        trace_id: str,
+        trace_logger,
+    ) -> None:
+        """Sau assistant reply thật, thử bật worker auto consolidation nếu config cho phép."""
+        if not memory_consolidation_auto_enabled():
+            return
+        if not self._is_completed_assistant_reply(role, route):
+            return
+        if not self._auto_consolidation_lock.acquire(blocking=False):
+            data = {"conversation_id": conversation_id, "reason": "already_running"}
+            self._trace_consolidation_event(trace_logger, trace_id, "memory_consolidation_auto_skipped", data)
+            log_memory_consolidation_auto(
+                "memory_consolidation_auto_skipped",
+                "Auto consolidation skipped: worker already running.",
+                data=data,
+            )
+            return
+
+        try:
+            self._start_auto_consolidation_thread(conversation_id, trace_id, trace_logger)
+        except Exception:
+            self._auto_consolidation_lock.release()
+            raise
+
+    def _start_auto_consolidation_thread(self, conversation_id: str, trace_id: str, trace_logger) -> None:
+        """Start worker riêng để auto consolidation không khóa đường trả lời Telegram."""
+        thread = threading.Thread(
+            target=self._run_auto_consolidation_worker,
+            args=(conversation_id, trace_id, trace_logger),
+            daemon=True,
+        )
+        thread.start()
 
     def record_deep_episode(
         self,
@@ -360,6 +473,56 @@ class MemoryRuntime:
         """Compatibility wrapper cho test/caller cũ; implementation nằm ở workflow."""
         return self._correction_workflow.evaluate_intent(prompt, gateway_message, decision_context)
 
+    def _run_auto_consolidation_worker(self, conversation_id: str, trace_id: str, trace_logger) -> None:
+        try:
+            self.run_auto_consolidation_once(conversation_id, trace_id=trace_id, trace_logger=trace_logger)
+        except Exception as exc:
+            data = {"conversation_id": conversation_id, "error": str(exc)}
+            self._trace_consolidation_event(trace_logger, trace_id, "memory_consolidation_auto_error", data)
+            log_memory_consolidation_auto(
+                "memory_consolidation_auto_error",
+                f"Auto consolidation loi: {exc}",
+                level="warning",
+                data=data,
+            )
+        finally:
+            self._auto_consolidation_lock.release()
+
+    @staticmethod
+    def _is_completed_assistant_reply(role: str, route: str) -> bool:
+        normalized_role = str(role or "").strip().lower()
+        normalized_route = str(route or "").strip()
+        return normalized_role == "assistant" and normalized_route not in AUTO_CONSOLIDATION_SKIP_ROUTES
+
+    @staticmethod
+    def _trace_consolidation_event(trace_logger, trace_id: str, event: str, data: dict[str, object]) -> None:
+        if trace_logger is None:
+            return
+        try:
+            trace_logger.event(trace_id, event, data)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _consolidation_result_data(
+        result: ConsolidationRunResult,
+        conversation_id: str,
+        threshold: int,
+    ) -> dict[str, object]:
+        data: dict[str, object] = {
+            "conversation_id": conversation_id,
+            "exchange_threshold": threshold,
+            "status": result.status,
+            "rows_read": result.batch.rows_read,
+            "row_ids": result.batch.row_ids,
+            "facts_written": result.facts_written,
+            "episodes_written": result.episodes_written,
+            "marked_count": result.marked_count,
+        }
+        if result.error:
+            data["error"] = result.error
+        return data
+
     def _decide_retrieval(self, prompt: str, gateway_message=None) -> MemoryRetrievalDecision:
         decider = self._retrieval_decider or decide_memory_retrieval
         return decider(prompt, gateway_message)
@@ -470,6 +633,28 @@ def log_memory_write_decision(gate_state: dict[str, object]) -> None:
         pass
 
 
+def log_memory_consolidation_auto(
+    event: str,
+    message: str,
+    *,
+    level: str = "info",
+    data: dict[str, object] | None = None,
+) -> None:
+    """Ghi runtime log cho auto consolidation; lỗi log không ảnh hưởng chat turn."""
+    try:
+        from niko.harness.runtime_log import default_runtime_logger
+
+        default_runtime_logger().event(
+            "memory",
+            event,
+            message,
+            level=level,
+            data=data or {},
+        )
+    except Exception:
+        pass
+
+
 def log_memory_write_gate_error(gate_state: dict[str, object]) -> None:
     """Write gate lỗi thì chỉ log; caller fail-open để vẫn ghi episode baseline."""
     try:
@@ -506,4 +691,6 @@ __all__ = [
     "MemoryRetrievalDecider",
     "MemoryWriteDecider",
     "default_memory_runtime",
+    "memory_consolidation_auto_enabled",
+    "memory_consolidation_exchange_threshold",
 ]

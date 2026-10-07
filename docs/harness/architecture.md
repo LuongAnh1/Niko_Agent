@@ -104,10 +104,14 @@ niko/
 
 `niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval
 gate, retrieval modes (`search/list/recent/none`), recent working memory, write
-gate, correction facade, manual consolidation và format context cho Deep.
+gate, correction facade, manual/auto consolidation và format context cho Deep.
 `MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
 Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
 search nếu không có FTS5.
+
+Consolidation có đường manual qua dashboard/API (`Refresh batch`, `Run once`) và
+đường auto default-off sau complete exchange. Auto chỉ chạy khi bật
+`NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1`.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
@@ -176,7 +180,7 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 - Memory correction V1 qua chat: nhận diện sửa/xóa fact, hỏi lại khi mơ hồ và
   update/delete SQLite có trace. Đây là lớp tạm trước khi có Loop/tool workflow.
 - Manual semantic facts qua dashboard.
-- Episodic record sau deep job và manual consolidation batch từ `chat_log`.
+- Episodic record sau deep job và consolidation batch từ `chat_log`.
 - JSONL trace và Mini Ops dashboard.
 
 Chưa có:

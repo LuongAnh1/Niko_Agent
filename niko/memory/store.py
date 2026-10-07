@@ -24,6 +24,7 @@ from niko.config import env_value, resolve_project_path
 
 DEFAULT_NIKO_STATE_DIR = "niko/.runtime"
 DEFAULT_MEMORY_DB_NAME = "niko_memory.sqlite3"
+TRANSIENT_ASSISTANT_ROUTES = {"deep_agent_wait", "busy_reply"}
 SEARCH_STOPWORDS = {
     "anh",
     "chi",
@@ -582,6 +583,47 @@ class MemoryStore:
                     (limit,),
                 ).fetchall()
             return [self._row_to_chat(row) for row in rows]
+
+    def list_unconsolidated_complete_exchange_batch(
+        self,
+        exchange_threshold: int = 6,
+        session_id: str | None = None,
+        max_rows: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Lấy batch chỉ khi đủ số exchange hoàn tất để auto consolidation chạy nền.
+
+        Một exchange hoàn tất cần có ít nhất một user row theo sau bởi assistant
+        reply thật. Các assistant route tạm như wait/busy không kết thúc exchange,
+        vì lúc đó câu trả lời chính vẫn chưa xong.
+        """
+        threshold = max(1, int(exchange_threshold))
+        rows = self.list_unconsolidated_chat(limit=max(2, int(max_rows)), session_id=session_id)
+        completed = 0
+        pending_user = False
+        end_index = -1
+
+        for index, row in enumerate(rows):
+            role = str(row.get("role", "")).strip().lower()
+            if role == "user":
+                pending_user = True
+                continue
+            if role != "assistant" or not pending_user:
+                continue
+
+            meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+            route = str(meta.get("route", "")).strip()
+            if route in TRANSIENT_ASSISTANT_ROUTES:
+                continue
+
+            completed += 1
+            pending_user = False
+            end_index = index
+            if completed >= threshold:
+                break
+
+        if completed < threshold or end_index < 0:
+            return []
+        return rows[: end_index + 1]
 
     def mark_chat_consolidated(self, row_ids: list[int] | tuple[int, ...]) -> int:
         """Đánh dấu đúng các dòng đã đọc xong; dòng mới tới trong lúc xử lý không bị đụng."""

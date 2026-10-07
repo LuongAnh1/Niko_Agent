@@ -168,6 +168,19 @@ class OpsDashboardTests(unittest.TestCase):
                         field for field in memory["fields"] if field["name"] == "NIKO_MEMORY_GATE_ENABLED"
                     )
                     self.assertIn("Deep", retrieval_gate["help"])
+                    auto_consolidation = next(
+                        field
+                        for field in memory["fields"]
+                        if field["name"] == "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED"
+                    )
+                    self.assertEqual(auto_consolidation["default"], "0")
+                    self.assertIn("backlog", auto_consolidation["help"])
+                    auto_threshold = next(
+                        field
+                        for field in memory["fields"]
+                        if field["name"] == "NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES"
+                    )
+                    self.assertIn("Wait/busy", auto_threshold["help"])
 
                     decision = next(section for section in updated["sections"] if section["id"] == "decision")
                     keep_alive = next(

@@ -242,6 +242,20 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Bật Nimble để nhận diện yêu cầu sửa hoặc xóa chat memory qua Telegram; Python vẫn kiểm soát update/delete.",
             },
             {
+                "name": "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED",
+                "label": "Auto consolidation",
+                "type": "bool",
+                "default": "0",
+                "help": "Tự gom chat_log thành facts/episodes sau khi đủ số exchange hoàn tất. Default tắt để tránh xử lý backlog bất ngờ trong demo.",
+            },
+            {
+                "name": "NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES",
+                "label": "Auto consolidation exchanges",
+                "type": "number",
+                "default": "6",
+                "help": "Số cặp user/assistant hoàn tất cần đủ trước khi auto consolidation chạy một batch nền. Wait/busy reply không tính là hoàn tất.",
+            },
+            {
                 "name": "NIKO_MEMORY_TOP_K",
                 "label": "Memory top K",
                 "type": "number",
