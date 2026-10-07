@@ -519,18 +519,21 @@ Nên có deterministic tests:
 
 Sau đó mới thêm judge/eval mềm cho chất lượng trả lời.
 
-## Khuyến Nghị Bước Đầu Cho Niko
+## Khuyến Nghị Bước Tiếp Theo Cho Niko
 
-Em đề xuất bắt đầu bằng ba việc nhỏ, ít rủi ro:
+Các bước đầu đã hoàn thành: `bots/decision_model/memory/` đã tách package,
+retrieval/write/candidate/correction gates đã có test và trace, search tiếng Việt
+đã được harden, manual consolidation đã chạy được qua dashboard/API.
 
-1. Thêm `bots/decision_model/memory/` với `memory_retrieval_gate` và metadata
-   trace/runtime log.
-2. Hardening `_fts_query` và test tiếng Việt.
-3. Sau khi retrieval quan sát rõ, thêm `memory_write_gate` rồi mới làm batch
-   consolidation.
+Em đề xuất bước tiếp theo nên là ba việc nhỏ, ít rủi ro:
 
-Lý do: consolidation tự động ghi memory là bước nhạy hơn. Nếu retrieval còn chưa
-quan sát rõ, fact tự động sinh ra sẽ khó debug.
+1. Tách Loop/tool workflow cho memory correction để thay pending state trong RAM.
+2. Làm recent working-memory window rõ hơn trước khi Deep chạy.
+3. Thêm eval prompt mẫu cho retrieval/write/correction thay vì chỉ live test thủ công.
+
+Lý do: Phase 5 V1 đã đủ an toàn cho baseline, nhưng nếu tiếp tục nhồi thêm sửa/xóa
+memory vào chat runtime thì luồng sẽ khó debug hơn. Loop/tool workflow sẽ hợp hơn
+cho xác nhận target, mutate DB và audit trail.
 
 Không triển khai trong bước đầu:
 

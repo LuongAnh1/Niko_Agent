@@ -17,7 +17,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `chat_log`: lịch sử hội thoại đã xử lý.
   - `facts`: Semantic Memory thủ công hoặc tạo từ consolidation bảo thủ.
   - `episodes`: Episodic Memory sinh ra sau deep job.
-  - retrieval/write gate và consolidation scaffold cho các bước memory tiếp theo.
+  - retrieval/write/correction gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
 - Manual memory consolidation: Memory tab có thể preview/run một batch `chat_log` để tạo facts/episodes có provenance `consolidation`.
 
@@ -32,7 +32,7 @@ niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
-niko/memory/runtime.py           # Khung điều phối retrieval modes/write gate/format memory
+niko/memory/runtime.py           # Khung điều phối retrieval/write/correction/consolidation
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
 niko/ops/                       # Mini Niko Ops dashboard
@@ -106,7 +106,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
-- `Memory & Trace`: memory, retrieval/write gate, trace và runtime log.
+- `Memory & Trace`: memory, retrieval/write/correction gate, trace và runtime log.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -157,8 +157,9 @@ Các kịch bản demo nhanh:
 - Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> Router -> Reply` hoặc `Gateway -> Router -> Fast Agent -> Reply`.
 - Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
+- Yêu cầu Niko quên/sửa fact test: correction gate hỏi lại khi mơ hồ và chỉ update/delete khi đã rõ ID.
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`,
-  `memory_gate_decision`, `memory_write_decision`, `turn_end`.
+  `memory_gate_decision`, `memory_write_decision`, `memory_correction_decision`, `turn_end`.
 - Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
 Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
@@ -178,6 +179,7 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại cố ý đơn giản để phục vụ demo và đo điểm yếu:
 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit/manual consolidation.
+- Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
 - Retrieval là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

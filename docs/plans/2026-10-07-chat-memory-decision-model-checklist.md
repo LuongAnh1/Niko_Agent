@@ -52,7 +52,7 @@ hẹp về memory, thay vì để Deep agent tự quyết định mọi thứ.
 - [x] Export `MemoryRetrievalDecision` và `decide_memory_retrieval` từ `bots.decision_model`.
 - [x] Thiết kế tiếp `decide_memory_write(...)`.
 - [x] Thiết kế tiếp `classify_memory_candidate(...)`.
-- [ ] Thiết kế tiếp `decide_memory_correction_intent(...)`.
+- [x] Thiết kế tiếp `decide_memory_correction_intent(...)` ở mức Phase 5 V1 tạm thời.
 - [x] Trong dashboard Config, mỗi cấu hình mới của Decision/Memory layer phải có
   chú thích rõ dùng để làm gì, ảnh hưởng runtime nào, và khi nào nên bật/tắt.
 

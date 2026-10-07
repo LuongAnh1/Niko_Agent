@@ -165,6 +165,12 @@ pipeline dùng query do gate đề xuất, hoặc raw prompt nếu model không 
 Nếu gate lỗi, retrieval fail-open bằng raw prompt để tránh bỏ lỡ memory thật sự
 cần.
 
+Memory correction chạy trước local/fast/deep route thông thường khi
+`NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`. Đây là Phase 5 V1 tạm thời: Nimble
+chỉ chọn intent `none/correct_memory/forget_memory`, còn Python runtime search
+facts, hỏi lại khi mơ hồ, validate `fact #...` trong pending choices và mới
+update/delete SQLite có trace. Episode vẫn read-only qua chat ở V1.
+
 Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
 
 ## Trace Events Chính
@@ -178,6 +184,9 @@ Mỗi turn có thể có các event:
 - `deep_job_queued`
 - `deep_job_started`
 - `memory_retrieval`
+- `memory_correction_decision`
+- `memory_correction_clarify`
+- `memory_correction_applied`
 - `deep_agent_call_started`
 - `deep_agent_call_finished`
 - `wait_reply_delivered`
@@ -200,6 +209,8 @@ User Telegram message
      -> ChatReplyGraph.handle_message
         -> write turn_start + incoming chat log
         -> decide route
+        -> memory correction intent?
+           -> clarify/apply correction and reply, stop
 
 Route:
   local_reply

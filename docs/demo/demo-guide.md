@@ -128,6 +128,31 @@ Kỳ vọng:
 
 Ý nghĩa demo: harness có notion cơ bản về conversation/job đang chạy.
 
+## Kịch Bản 6: Memory Correction V1
+
+Chuẩn bị một fact test trong dashboard tab Memory, ví dụ:
+
+```text
+Subject: Demo correction
+Content: anh thích checklist màu xanh trong demo tạm.
+```
+
+Gửi lệnh quên/sửa fact có chủ đề dễ khớp:
+
+```text
+@Niko2_Bot quên fact về checklist màu xanh giúp anh
+```
+
+Kỳ vọng:
+
+- Nếu chỉ match một fact test, bot xác nhận đã xóa fact đó.
+- Nếu match nhiều fact, bot phải hỏi lại ID và chưa xóa gì.
+- Khi anh trả lời `fact #...`, trace có `memory_correction_applied`.
+- Runtime log có `memory_correction_decision` và có thể có `memory_correction_clarify`.
+
+Ý nghĩa demo: Phase 5 V1 cho phép sửa/quên memory có kiểm soát, nhưng đây vẫn là
+lớp tạm trước khi chuyển sang Loop/tool workflow có state bền hơn.
+
 ## Xem Dữ Liệu Sau Demo
 
 Dashboard:
