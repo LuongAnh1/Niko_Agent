@@ -10,20 +10,32 @@ trong Ollama cho tới khi `ollama stop nimble` hoặc restart Ollama.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import sys
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from bots.decision_model.client import load_decision_model_config
 from bots.decision_model.triage import decide_fast_route
-from niko.config import load_env_files
+from niko.config import env_value, load_env_files
+
+
+def warmup_timeout_seconds() -> float:
+    """Warmup dung timeout rieng vi lan load dau co the lau hon triage thuong."""
+    raw = env_value("NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS", "90").strip()
+    try:
+        return max(0.1, float(raw))
+    except ValueError:
+        return 90.0
 
 
 def main() -> int:
     """Nạp env rồi gửi một prompt nhỏ đủ rõ để kích hoạt model."""
     load_env_files()
-    decision = decide_fast_route("hello")
+    config = replace(load_decision_model_config(), timeout_seconds=warmup_timeout_seconds())
+    decision = decide_fast_route("hello", config=config)
     confidence = "" if decision.confidence is None else f" confidence={decision.confidence:.3f}"
     print(
         "Decision model warmed up: "

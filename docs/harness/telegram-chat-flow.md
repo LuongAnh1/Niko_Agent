@@ -11,7 +11,9 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 - `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
 - `niko.runtime`: gọi Claude CLI cho Deep agent và inject memory context.
 - `niko.harness.trace`: ghi JSONL trace.
+- `niko.harness.runtime_log`: ghi runtime log cho tab Bots.
 - `niko.memory`: lưu chat log, semantic facts, episodic events.
+- `bots/telegram/instance_guard.py`: single-instance lock để dashboard/terminal không start trùng Telegram long polling.
 
 ## Gateway Telegram
 
@@ -29,6 +31,11 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 10. Nếu bật sticker, gateway chạy worker nền: hỏi Nimble local chọn mood sticker,
     rồi map mood đó sang file_id Telegram. Nếu Nimble chọn `no_sticker` hoặc lỗi,
     bot bỏ qua sticker.
+
+Trước khi gọi Telegram API dài hạn, gateway lấy lock tại
+`niko/.runtime/telegram_bot.lock`. Nếu đã có process khác giữ lock và PID còn
+sống, bot mới thoát sớm với log `telegram_instance_conflict` thay vì để Telegram
+báo `409 Conflict` ở `getUpdates`.
 
 Gateway không quyết định dùng local/Fast/Deep. Nó cũng không retrieve memory.
 Decision model trong sticker chỉ chọn mood trang trí sau reply, không ảnh hưởng
@@ -76,13 +83,22 @@ Trên dashboard:
 
 ## Vai Trò Của Decision Model Và Fast Agent
 
-Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm triage local. Chạy warmup:
+Decision model dùng Ollama/Nimble qua `NIKO_DECISION_MODEL_*` để làm các quyết
+định nhỏ, nhanh và có label đóng. Hiện tại nó đã làm triage local
+`reply_now/send_to_deep` và chọn sticker mood. Hướng memory upgrade là dùng cùng
+model này cho các decision point hẹp hơn trong chat memory: có cần retrieve
+memory không, turn này có gì đáng nhớ không, memory ứng viên là semantic fact hay
+episodic event, và user có đang yêu cầu sửa/quên memory không.
 
-```bash
-rtk python -m bots.decision_model.warmup
-```
+Trong luồng dashboard-first, warmup bằng tab `Bots -> Decision Model -> Warmup`;
+action này chạy nền và dùng `NIKO_DECISION_MODEL_WARMUP_TIMEOUT_SECONDS` riêng để
+tránh cắt request khi model đang cold-start. Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`,
+Ollama giữ model loaded cho tới khi bấm `Bots -> Decision Model -> Stop`, chạy
+`ollama stop nimble`, hoặc restart Ollama.
 
-Nếu `NIKO_DECISION_MODEL_KEEP_ALIVE=-1`, Ollama giữ model loaded cho tới khi `ollama stop nimble` hoặc restart Ollama.
+Decision model không thay Deep agent và không tự ghi/sửa memory tùy ý. Nó chỉ trả
+label/query/metadata để `ChatReplyGraph` hoặc memory pipeline quyết định bước kế
+tiếp.
 
 Fast Agent dùng `NIKO_FAST_AGENT_COMMAND` để sinh ngôn ngữ khi cần. Fast nên dùng model nhẹ/nhanh và có các task:
 
@@ -132,12 +148,32 @@ Deep agent nhận memory context khi:
 
 - `NIKO_MEMORY_ENABLED=1`
 - `NIKO_MEMORY_RETRIEVAL_ENABLED=1`
+- Nếu `NIKO_MEMORY_GATE_ENABLED=1`, Nimble local quyết định turn Deep này có cần
+  search long-term memory không. Gate `skip` thì Deep không nhận facts/episodes;
+  gate lỗi thì fail-open và retrieval chạy như cũ.
 
 Retrieval hiện tại:
 
+- Recent conversation được dựng từ `chat_log` theo `conversation_id` và inject
+  như working memory ngắn hạn để Deep hiểu follow-up.
 - Nếu hỏi kiểu “có fact nào”, store có thể list/search facts.
 - Các câu thường dùng `search_facts` và `search_episodes`.
-- Context được format thành block `Semantic memory / facts` và `Episodic memory / events`.
+- Context được format thành các section `Recent conversation`, `Relevant semantic facts`
+  và `Relevant episodic events`; current user message nằm ở section riêng cuối prompt.
+
+`memory_retrieval_gate` đang default-off để không đổi hành vi demo hiện tại. Khi
+bật trong dashboard Config, gate dùng Decision Model trước khi search store. Nếu
+gate chọn `skip`, Deep không nhận memory context. Nếu gate chọn `retrieve`,
+pipeline dùng query do gate đề xuất, hoặc raw prompt nếu model không trả query.
+Nếu gate lỗi, retrieval fail-open bằng raw prompt để tránh bỏ lỡ memory thật sự
+cần. Nếu gate chọn `skip`, recent conversation vẫn có thể được inject vì đó là
+working memory ngắn hạn, không phải long-term retrieval.
+
+Memory correction chạy trước local/fast/deep route thông thường khi
+`NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`. Đây là Phase 5 V1 tạm thời: Nimble
+chỉ chọn intent `none/correct_memory/forget_memory`, còn Python runtime search
+facts, hỏi lại khi mơ hồ, validate `fact #...` trong pending choices và mới
+update/delete SQLite có trace. Episode vẫn read-only qua chat ở V1.
 
 Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
 
@@ -152,6 +188,9 @@ Mỗi turn có thể có các event:
 - `deep_job_queued`
 - `deep_job_started`
 - `memory_retrieval`
+- `memory_correction_decision`
+- `memory_correction_clarify`
+- `memory_correction_applied`
 - `deep_agent_call_started`
 - `deep_agent_call_finished`
 - `wait_reply_delivered`
@@ -160,7 +199,7 @@ Mỗi turn có thể có các event:
 - `turn_end`
 - `reply_delivery_error`
 
-Dashboard đọc các event này để hiển thị live harness graph và trace tail.
+Dashboard đọc các event này để hiển thị live harness graph và trace tail. Các log vận hành thay cho terminal, ví dụ `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`, được ghi vào `niko/.runtime/logs/YYYY-MM-DD.jsonl` và hiển thị trong tab Bots.
 
 ## Luồng Chi Tiết
 
@@ -174,6 +213,8 @@ User Telegram message
      -> ChatReplyGraph.handle_message
         -> write turn_start + incoming chat log
         -> decide route
+        -> memory correction intent?
+           -> clarify/apply correction and reply, stop
 
 Route:
   local_reply
@@ -208,14 +249,14 @@ Deep background:
 
 - Tool router chưa hoàn chỉnh.
 - Loop mới là khung/slot trên dashboard, chưa phải multi-step planner thực thụ.
-- Semantic facts chủ yếu thêm thủ công.
+- Semantic facts chủ yếu thêm thủ công hoặc từ explicit/manual consolidation.
 - Episodic memory mới tóm tắt deep job.
 - Retrieval còn dựa trên text search, chưa có embedding/rerank/Knowledge Graph.
 
 ## Test Liên Quan
 
 ```bash
-python -m unittest discover
+python -m pytest
 ```
 
 Scenario chính đang được test:

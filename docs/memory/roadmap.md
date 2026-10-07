@@ -1,6 +1,18 @@
 # Memory Roadmap
 
-Tài liệu này nối trạng thái hiện tại của `Niko_Agent` với hướng phát triển đồ án: cải tiến memory của agent bằng Semantic/Episodic Memory, pipeline dữ liệu, lakehouse và knowledge graph.
+Tài liệu này nối trạng thái hiện tại của `Niko_Agent` với hướng phát triển đồ
+án. Cần tách hai lane:
+
+- Chat memory trong Niko: memory local cho tương tác Telegram/người dùng.
+- Lakehouse/Jira memory backend: tầng dữ liệu nghiệp vụ riêng trong repo
+  `Ai-Memory-Lakehouse-Graph-Mining`, dùng Public Jira/tài liệu/issue/comment
+  làm nguồn dữ liệu.
+
+Nếu anh muốn xem kế hoạch gần hơn cho memory trong chat/tương tác người dùng,
+đọc thêm [Kế hoạch Chat Memory Decision Model 2026-10-07](../plans/2026-10-07-chat-memory-decision-model.md).
+Tài liệu đó tập trung vào cách dùng local Ollama/Nimble như lớp Decision Model cho
+retrieval gate, write gate, consolidation, correction intent, working memory và
+các bước cải tiến chat memory single-user trong Niko.
 
 ## Vị Trí Của Repo Này
 
@@ -13,7 +25,9 @@ Tài liệu này nối trạng thái hiện tại của `Niko_Agent` với hư�
 - Có SQLite memory.
 - Có dashboard quan sát.
 
-Baseline này tạo dữ liệu và vấn đề thực tế để chứng minh vì sao memory cần được cải tiến.
+Baseline này tạo dữ liệu và vấn đề thực tế để chứng minh vì sao chat memory cần
+được cải tiến. Lakehouse/Jira backend không nằm trong runtime chat memory v1; nó
+là nguồn retrieval nghiệp vụ riêng khi Niko cần phân tích issue/tài liệu.
 
 ## Baseline Memory Hiện Tại
 
@@ -91,12 +105,37 @@ Hướng cải tiến:
 
 - Hybrid retrieval: keyword + vector + graph.
 - Rerank theo task/user/conversation/time.
-- Memory gate quyết định có cần retrieve hay không.
+- Decision Model làm memory gate để quyết định có cần retrieve hay không.
 - Context builder có budget và citation rõ ràng.
+
+## Ranh Giới Với Lakehouse/Jira
+
+Lakehouse/Jira memory backend không phải nơi lưu mặc định cho mọi tin Telegram.
+Nó là tầng dữ liệu nghiệp vụ riêng:
+
+```text
+Jira issue/comment/changelog/tài liệu
+  -> Bronze/Silver/Gold
+  -> Semantic/Episodic records nghiệp vụ
+  -> Knowledge Graph / Graph Mining
+  -> context có nguồn cho Niko khi user hỏi về task/issue/project
+```
+
+Chat memory của Niko v1 vẫn ở SQLite local:
+
+```text
+Telegram chat
+  -> chat_log / facts / episodes
+  -> retrieval gate / write gate / consolidation
+  -> memory context cho Deep agent
+```
+
+Sau này hai lane có thể nối với nhau qua retrieval/tool slot, nhưng không nên
+trộn schema ngay từ baseline.
 
 ## Từ Baseline Sang Lakehouse
 
-Luồng mở rộng dự kiến:
+Luồng mở rộng dự kiến nếu xuất dữ liệu Niko sang phân tích dài hạn:
 
 ```text
 Niko runtime data

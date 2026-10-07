@@ -1,0 +1,1357 @@
+﻿<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Niko Ops</title>
+  <!-- Design language adapted from Waku Ops (MIT), trimmed for Niko's local stdlib dashboard. -->
+  <style>
+    :root {
+      color-scheme: light;
+      --surface-bg: #e1e1d9;
+      --surface-paper: #d8d8cf;
+      --surface-raised: #cecec4;
+      --surface-sunk: #c5c5ba;
+      --text-ink: #161614;
+      --text-muted: #34342f;
+      --text-faint: #4f4f47;
+      --rule: rgba(22, 22, 20, .18);
+      --rule-hard: rgba(22, 22, 20, .38);
+      --accent: #e1ae05;
+      --accent-fg: #735903;
+      --ok: #2b7754;
+      --warn: #8c5617;
+      --bad: #aa2e11;
+      --radius: 7px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      --sans: Inter, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      background: var(--surface-bg);
+      color: var(--text-ink);
+      font: 14px/1.5 var(--sans);
+    }
+    button, input, textarea { font: inherit; }
+    button {
+      border: 1px solid var(--rule-hard);
+      border-radius: var(--radius);
+      background: var(--surface-paper);
+      color: var(--text-ink);
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--text-ink);
+      font-weight: 600;
+    }
+    button.danger { color: var(--bad); }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--rule-hard);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+      color: var(--text-ink);
+      padding: 9px 10px;
+      outline: none;
+    }
+    input:focus, textarea:focus, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    textarea { min-height: 92px; resize: vertical; }
+    .rail {
+      width: 204px;
+      flex: 0 0 204px;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--surface-paper);
+      border-right: 1px solid var(--rule);
+      display: flex;
+      flex-direction: column;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-5) var(--space-4);
+      border-bottom: 1px solid var(--rule);
+    }
+    .mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--rule-hard);
+      border-radius: 50%;
+      background: var(--surface-bg);
+      font: 700 13px/1 var(--mono);
+    }
+    .brand strong {
+      display: block;
+      font: 700 13px/1.2 var(--mono);
+      letter-spacing: .08em;
+    }
+    .brand span {
+      color: var(--text-faint);
+      font: 12px/1.2 var(--mono);
+    }
+    .nav-group {
+      padding: var(--space-5) var(--space-4) var(--space-2);
+      color: var(--text-faint);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .rail a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+      margin: 0 var(--space-2);
+      padding: 8px var(--space-3) 8px var(--space-5);
+      border-left: 2px solid transparent;
+      color: var(--text-muted);
+      font: 13px/1.3 var(--mono);
+      text-decoration: none;
+    }
+    .rail a:hover, .rail a.on {
+      color: var(--text-ink);
+      background: var(--surface-raised);
+    }
+    .rail a.on { border-left-color: var(--accent); }
+    .nav-count {
+      min-width: 22px;
+      text-align: right;
+      color: var(--text-faint);
+      font-variant-numeric: tabular-nums;
+    }
+    .rail-foot {
+      margin-top: auto;
+      padding: var(--space-4);
+      border-top: 1px solid var(--rule);
+      color: var(--text-faint);
+      font: 12px/1.4 var(--mono);
+    }
+    main {
+      flex: 1;
+      min-width: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 0 var(--space-6) var(--space-6);
+    }
+    .pagehead {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--surface-bg);
+      border-bottom: 1px solid var(--rule);
+      padding: var(--space-6) 0 var(--space-4);
+      margin-bottom: var(--space-5);
+    }
+    .headrow { display: flex; align-items: flex-end; gap: var(--space-4); }
+    h1 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.1;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    .sub {
+      margin-top: 4px;
+      color: var(--text-faint);
+      font: 12px/1.4 var(--mono);
+    }
+    .actions { margin-left: auto; display: flex; gap: var(--space-2); }
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(132px, 1fr));
+      gap: var(--space-3);
+      margin-bottom: var(--space-5);
+    }
+    .tile, .panel, .record {
+      background: var(--surface-paper);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+    }
+    .tile { padding: var(--space-4); }
+    .tile .k {
+      color: var(--text-faint);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .tile .v {
+      margin-top: var(--space-2);
+      font-size: 29px;
+      line-height: 1;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+      gap: var(--space-4);
+      align-items: start;
+    }
+    .panel { padding: var(--space-4); margin-bottom: var(--space-4); }
+    .panel h2 {
+      margin: 0 0 var(--space-3);
+      color: var(--text-muted);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .form-grid { display: grid; gap: var(--space-3); }
+    .records { display: grid; gap: var(--space-3); }
+    .record { padding: var(--space-4); }
+    .record-head {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-2);
+      margin-bottom: var(--space-2);
+    }
+    .record-title { font-weight: 650; }
+    .record-actions { margin-left: auto; display: flex; gap: var(--space-2); }
+    .meta {
+      color: var(--text-faint);
+      font: 12px/1.4 var(--mono);
+      overflow-wrap: anywhere;
+    }
+    .bodytext { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 3px 8px;
+      border: 1px solid var(--rule-hard);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .badge.ok { color: var(--ok); border-color: currentColor; }
+    .badge.warn { color: var(--warn); border-color: currentColor; }
+    .badge.bad { color: var(--bad); border-color: currentColor; }
+    .map {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: var(--space-2);
+    }
+    .step {
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+      padding: var(--space-3);
+      min-height: 86px;
+    }
+    .step b { display: block; margin-bottom: 6px; }
+    .step span { color: var(--text-faint); font-size: 12px; }
+    .graph-card {
+      overflow-x: auto;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+      padding: var(--space-3);
+    }
+    .run-graph {
+      width: 100%;
+      min-width: 1040px;
+      height: auto;
+      display: block;
+      font-family: var(--sans);
+    }
+    .run-graph .zone {
+      fill: rgba(225, 174, 5, .05);
+      stroke: var(--rule);
+      stroke-width: 1.2;
+      stroke-dasharray: 7 6;
+    }
+    .run-graph .zone.done { stroke: var(--ok); }
+    .run-graph .zone.hot {
+      stroke: var(--accent);
+      stroke-width: 2;
+      filter: drop-shadow(0 0 6px rgba(225, 174, 5, .28));
+    }
+    .run-graph .zone.bad {
+      stroke: var(--bad);
+      stroke-width: 2;
+    }
+    .run-graph .zone-label {
+      fill: var(--text-faint);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .run-graph .node rect,
+    .run-graph .gate-node path {
+      fill: var(--surface-paper);
+      stroke: var(--rule-hard);
+      stroke-width: 1.2;
+    }
+    .run-graph .node text { fill: var(--text-ink); font-size: 13px; font-weight: 650; }
+    .run-graph .node .subt { fill: var(--text-faint); font-size: 11px; font-weight: 400; }
+    .run-graph .node.future rect {
+      fill: var(--surface-bg);
+      stroke-dasharray: 6 5;
+    }
+    .run-graph .node.done rect,
+    .run-graph .gate-node.done path {
+      stroke: var(--ok);
+      stroke-width: 2;
+      fill: var(--surface-raised);
+    }
+    .run-graph .node.hot rect,
+    .run-graph .gate-node.hot path {
+      stroke: var(--accent);
+      stroke-width: 3;
+      fill: #ded2a4;
+      filter: drop-shadow(0 0 7px rgba(225, 174, 5, .42));
+    }
+    .run-graph .node.bad rect,
+    .run-graph .gate-node.bad path {
+      stroke: var(--bad);
+      stroke-width: 2.4;
+    }
+    .run-graph .gate-node text { fill: var(--text-ink); font-size: 13px; font-weight: 650; }
+    .run-graph .gate-node .subt { fill: var(--text-faint); font-size: 11px; font-weight: 400; }
+    .run-flow {
+      fill: none;
+      stroke: var(--text-faint);
+      stroke-width: 1.4;
+      opacity: .58;
+      marker-end: url(#arrow);
+    }
+    .run-flow.done {
+      stroke: var(--ok);
+      opacity: .88;
+      stroke-width: 2;
+    }
+    .run-flow.live {
+      stroke: var(--accent);
+      opacity: 1;
+      stroke-width: 3;
+      stroke-dasharray: 7 6;
+      animation: flowdash .55s linear infinite;
+    }
+    .run-flow.dash {
+      stroke-dasharray: 5 5;
+      marker-end: none;
+    }
+    @keyframes flowdash { to { stroke-dashoffset: -26; } }
+    .graph-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+      margin-bottom: var(--space-3);
+    }
+    .live-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 6px;
+      box-shadow: 0 0 0 2px rgba(225, 174, 5, 0.18);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .run-flow.live, .live-dot { animation: none; }
+    }
+    .trace {
+      font: 12px/1.45 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 280px;
+      overflow: auto;
+      background: var(--surface-bg);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      padding: var(--space-3);
+    }
+    .empty {
+      border: 1px dashed var(--rule-hard);
+      border-radius: var(--radius);
+      padding: var(--space-4);
+      color: var(--text-faint);
+      background: var(--surface-bg);
+    }
+    .splitline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+    .tabs button.on {
+      border-color: var(--accent);
+      background: var(--surface-raised);
+      font-weight: 650;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(260px, 1fr));
+      gap: var(--space-3);
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+      padding: var(--space-3);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+    }
+    .field label {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-2);
+      color: var(--text-muted);
+      font: 700 11px/1.2 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .field-help {
+      margin: 0;
+      color: var(--text-muted);
+      font: 12px/1.45 var(--font);
+    }
+    .field select {
+      width: 100%;
+      border: 1px solid var(--rule-hard);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+      color: var(--text-ink);
+      padding: 9px 10px;
+    }
+    .checkline {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      min-height: 38px;
+    }
+    .checkline input { width: auto; }
+    .source {
+      color: var(--text-faint);
+      font: 11px/1.3 var(--mono);
+    }
+    .bot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
+      gap: var(--space-3);
+      margin-bottom: var(--space-4);
+    }
+    .bot-card {
+      padding: var(--space-4);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-paper);
+      display: grid;
+      gap: var(--space-3);
+    }
+    .bot-card h3 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+    .log-scroll {
+      max-height: 520px;
+      overflow: auto;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+    }
+    .log-table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font: 12px/1.35 var(--mono);
+    }
+    .log-table th, .log-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--rule);
+      text-align: left;
+      vertical-align: top;
+    }
+    .log-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface-raised);
+      color: var(--text-muted);
+    }
+    .log-table td:last-child { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .secret-note {
+      color: var(--text-faint);
+      font: 11px/1.35 var(--mono);
+    }
+    @media (max-width: 1100px) {
+      body { overflow: auto; height: auto; display: block; }
+      .rail { width: 100%; height: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--rule); }
+      .rail a { display: inline-flex; min-width: 132px; }
+      .nav-group, .rail-foot { display: none; }
+      main { height: auto; overflow: visible; padding: 0 var(--space-4) var(--space-5); }
+      .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid, .map, .bot-grid, .field-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .tiles { grid-template-columns: 1fr; }
+      .headrow { align-items: flex-start; flex-direction: column; }
+      .actions { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="rail" aria-label="Niko Ops navigation">
+    <div class="brand">
+      <div class="mark">N</div>
+      <div>
+        <strong>NIKO OPS</strong>
+        <span>local harness</span>
+      </div>
+    </div>
+    <div class="nav-group">System</div>
+    <a href="#overview" data-view="overview">Overview <span class="nav-count" id="n-overview"></span></a>
+    <a href="#bots" data-view="bots">Bots <span class="nav-count" id="n-bots"></span></a>
+    <a href="#memory" data-view="memory">Memory <span class="nav-count" id="n-memory"></span></a>
+    <a href="#chat" data-view="chat">Chat <span class="nav-count" id="n-chat"></span></a>
+    <a href="#traces" data-view="traces">Traces <span class="nav-count" id="n-traces"></span></a>
+    <a href="#config" data-view="config">Config <span class="nav-count" id="n-config"></span></a>
+    <div class="nav-group">Runtime</div>
+    <a href="#ops" data-view="ops">Ops <span class="nav-count" id="n-ops"></span></a>
+    <div class="rail-foot">
+      SQLite memory<br>
+      JSONL traces<br>
+      stdlib dashboard
+    </div>
+  </nav>
+  <main>
+    <header class="pagehead">
+      <div class="headrow">
+        <div>
+          <h1 id="title">Overview</h1>
+          <div class="sub" id="subtitle">Harness health, memory state, and recent execution trace.</div>
+        </div>
+        <div class="actions">
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+      </div>
+    </header>
+    <div id="stats" class="tiles"></div>
+    <div id="view"></div>
+  </main>
+  <script>
+    const viewMeta = {
+      overview: ["Overview", "Harness health, memory state, and recent execution trace."],
+      bots: ["Bots", "Start, stop, warm up, and inspect runtime logs for Niko bots."],
+      memory: ["Memory", "Semantic facts and episodic records used by the deep agent."],
+      chat: ["Chat", "Recent Telegram/user-assistant rows persisted by the harness."],
+      traces: ["Traces", "JSONL event tail: route, memory retrieval, deep jobs, errors."],
+      config: ["Config", "Runtime configuration, decision model, stickers, memory, and replies."],
+      ops: ["Ops", "Local dashboard controls and baseline architecture notes."]
+    };
+    let state = {
+      view: "overview",
+      data: null,
+      factDraft: { subject: "", content: "" },
+      configTab: "runtime",
+      consolidationResult: null
+    };
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const fmt = (s) => s ? esc(String(s).replace("T", " ").replace("Z", " UTC")) : "";
+    const traceKind = (t) => t.kind || t.event || t.type || "event";
+    const traceBadgeClass = (kind) => /error|fail/i.test(kind) ? "bad" : /memory|write|retrieval/i.test(kind) ? "ok" : /route|deep|turn/i.test(kind) ? "warn" : "";
+    function activeView() {
+      const raw = (location.hash || "#overview").replace("#", "");
+      return viewMeta[raw] ? raw : "overview";
+    }
+    function setChrome() {
+      state.view = activeView();
+      const [title, subtitle] = viewMeta[state.view];
+      document.getElementById("title").textContent = title;
+      document.getElementById("subtitle").textContent = subtitle;
+      document.querySelectorAll(".rail a").forEach(a => a.classList.toggle("on", a.dataset.view === state.view));
+    }
+    function statTile(label, value, note) {
+      return `<div class="tile"><div class="k">${esc(label)}</div><div class="v">${esc(value)}</div><div class="meta">${esc(note)}</div></div>`;
+    }
+    function renderStats(data) {
+      const counts = data.memory.counts;
+      document.getElementById("stats").innerHTML = [
+        statTile("Facts", counts.facts, "semantic memory"),
+        statTile("Episodes", counts.episodes, "episodic memory"),
+        statTile("Chat rows", counts.chat_log, "persisted dialog"),
+        statTile("Trace events", data.traces.length, "latest tail")
+      ].join("");
+      document.getElementById("n-memory").textContent = counts.facts + counts.episodes;
+      document.getElementById("n-chat").textContent = counts.chat_log;
+      document.getElementById("n-traces").textContent = data.traces.length;
+      document.getElementById("n-bots").textContent = (data.bots || []).filter(bot => bot.running).length || "";
+      document.getElementById("n-overview").textContent = "";
+      document.getElementById("n-ops").textContent = "";
+      document.getElementById("n-config").textContent = Object.keys(data.config?.overrides || {}).length || "";
+    }
+    function factRecord(f) {
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">${esc(f.subject)}</div>
+          <span class="badge ok">fact:${esc(f.id)}</span>
+          <div class="record-actions"><button class="danger" data-delete-fact="${esc(f.id)}" type="button">Delete</button></div>
+        </div>
+        <div class="bodytext">${esc(f.content)}</div>
+        <div class="meta">${esc(f.source)} | ${fmt(f.created_at)}</div>
+      </div>`;
+    }
+    function episodeRecord(e) {
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">Episode</div>
+          <span class="badge warn">episode:${esc(e.id)}</span>
+        </div>
+        <div class="bodytext">${esc(e.summary)}</div>
+        <div class="meta">${fmt(e.happened_at)} | ${esc(e.source)}</div>
+      </div>`;
+    }
+    function candidateRecord(candidate) {
+      const kind = candidate.kind_hint || "candidate";
+      const title = candidate.subject || kind;
+      const body = candidate.content || candidate.summary || candidate.reason || "";
+      const ids = (candidate.row_ids || []).join(", ");
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">${esc(title)}</div>
+          <span class="badge warn">${esc(kind)}</span>
+        </div>
+        <div class="bodytext">${esc(body)}</div>
+        <div class="meta">rows=${esc(ids || "-")} | ${esc(candidate.reason || "candidate")}</div>
+      </div>`;
+    }
+    function consolidationResultRecord(result) {
+      if (!result) return "";
+      const cls = result.status === "error" ? "bad" : result.status === "stored" ? "ok" : "warn";
+      const decisions = (result.decisions || []).map(decision => `${decision.decision || "-"}${decision.reason ? `: ${decision.reason}` : ""}`).join("\n");
+      const lines = [
+        `rows=${result.batch?.rows_read || 0}`,
+        `marked=${result.marked_count || 0}`,
+        `facts=${(result.facts_written || []).join(", ") || "-"}`,
+        `episodes=${(result.episodes_written || []).join(", ") || "-"}`,
+        result.error ? `error=${result.error}` : "",
+        decisions ? `decisions:\n${decisions}` : ""
+      ].filter(Boolean).join("\n");
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">Last consolidation run</div>
+          <span class="badge ${cls}">${esc(result.status || "unknown")}</span>
+        </div>
+        <div class="bodytext">${esc(lines)}</div>
+      </div>`;
+    }
+    function chatRecord(c) {
+      const cls = c.role === "assistant" ? "ok" : "";
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">${esc(c.role)}</div>
+          <span class="badge ${cls}">${esc(c.source || "chat")}</span>
+        </div>
+        <div class="bodytext">${esc(c.content)}</div>
+        <div class="meta">${esc(c.session_id)} | ${fmt(c.created_at)}</div>
+      </div>`;
+    }
+    function traceRecord(t) {
+      const kind = traceKind(t);
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">${esc(kind)}</div>
+          <span class="badge ${traceBadgeClass(kind)}">${esc(t.trace_id || t.turn_id || "trace")}</span>
+        </div>
+        <pre class="trace">${esc(JSON.stringify(t, null, 2))}</pre>
+      </div>`;
+    }
+    function empty(label) {
+      return `<div class="empty">${esc(label)}</div>`;
+    }
+    function eventTime(event) {
+      const ts = Date.parse(event.timestamp || "");
+      return Number.isFinite(ts) ? ts : 0;
+    }
+    function latestTurnEvents(traces) {
+      const groups = new Map();
+      (traces || []).forEach(event => {
+        const id = event.turn_id || event.trace_id;
+        if (!id) return;
+        if (!groups.has(id)) groups.set(id, []);
+        groups.get(id).push(event);
+      });
+      let selected = [];
+      let selectedTime = -1;
+      groups.forEach(events => {
+        const maxTime = Math.max(...events.map(eventTime));
+        if (maxTime > selectedTime) {
+          selected = events.slice().sort((a, b) => eventTime(a) - eventTime(b));
+          selectedTime = maxTime;
+        }
+      });
+      return selected;
+    }
+    function routeText(event) {
+      return String(event.data?.route || event.data?.target || event.data?.decision || "");
+    }
+    function graphParts(nodes = [], flows = [], label = "", active = true) {
+      return {
+        nodes: new Set(nodes),
+        flows: new Set(flows),
+        label,
+        active
+      };
+    }
+    function replyFlowsForRoute(route, fallback = "router-reply") {
+      const normalized = String(route || "").toLowerCase();
+      if (normalized.includes("fast")) return ["fast-reply", "reply-trace"];
+      if (normalized.includes("deep") || normalized.includes("delayed")) return ["loop-reply", "reply-trace"];
+      if (normalized.includes("local") || normalized.includes("busy")) return ["router-reply", "reply-trace"];
+      return [fallback, "reply-trace"];
+    }
+    function eventGraphParts(event) {
+      const kind = traceKind(event);
+      const route = routeText(event);
+      if (event.type === "turn_start") {
+        return graphParts(["gateway"], ["gateway-router"], "message in");
+      }
+      if (kind === "route_decision") {
+        const flows = ["gateway-router"];
+        if (route.includes("local") || route.includes("busy")) flows.push("router-reply");
+        else if (route.includes("fast")) flows.push("router-fast");
+        else flows.push("router-memory");
+        return graphParts(["router"], flows, `route: ${route || "deep"}`);
+      }
+      if (kind === "fast_triage_started") {
+        return graphParts(["fast"], ["router-fast"], "fast triage");
+      }
+      if (kind === "fast_triage_finished") {
+        const decision = route || "reply_now";
+        const flows = ["router-fast"];
+        if (decision.includes("deep")) flows.push("fast-memory");
+        else flows.push("fast-reply");
+        return graphParts(["fast"], flows, `fast: ${decision}`);
+      }
+      if (kind === "fast_triage_fallback_to_deep") {
+        return graphParts(["fast", "memory_gate"], ["router-fast", "fast-memory"], "fast fallback");
+      }
+      if (kind === "deep_job_queued") {
+        return graphParts(["memory_gate", "loop"], ["router-memory"], "deep queued");
+      }
+      if (kind === "deep_job_started" || kind === "deep_agent_call_started") {
+        return graphParts(["memory_gate", "loop", "deep"], ["router-memory", "memory-loop"], "loop running");
+      }
+      if (kind === "memory_retrieval") {
+        return graphParts(
+          ["memory_gate", "memory_records", "loop", "deep"],
+          ["router-memory", "memory-read", "memory-loop"],
+          "memory context"
+        );
+      }
+      if (kind.includes("tool")) {
+        return graphParts(["loop", "tools"], ["loop-tools"], "tool slot");
+      }
+      if (kind === "deep_agent_call_finished") {
+        return graphParts(["loop", "deep", "reply"], ["memory-loop", "loop-reply"], "deep finished");
+      }
+      if (kind === "wait_reply_delivered") {
+        return graphParts(["reply"], ["router-reply"], "wait reply");
+      }
+      if (kind === "memory_write_chat_log") {
+        return graphParts(["trace"], ["reply-trace"], "chat log write", false);
+      }
+      if (kind === "memory_write_episode") {
+        return graphParts(["memory_records", "trace"], ["reply-trace"], "episode write", false);
+      }
+      if (kind.includes("memory")) {
+        return graphParts(["memory_gate", "memory_records"], ["memory-read"], kind);
+      }
+      if (kind.includes("reply") || event.type === "turn_end") {
+        const flows = replyFlowsForRoute(route);
+        return graphParts(["reply", "trace"], flows, event.type === "turn_end" ? "turn end" : kind);
+      }
+      if (/error|fail/i.test(kind) || event.status === "error") {
+        const fallback = kind.includes("deep") ? "loop-reply" : "router-reply";
+        return graphParts(["reply", "trace"], replyFlowsForRoute(route, fallback), "error");
+      }
+      return graphParts([], [], kind, false);
+    }
+    function analyzeTurn(events) {
+      let deepRunning = false;
+      let memorySeen = false;
+      let toolRunning = false;
+      let active = null;
+      events.forEach(event => {
+        const kind = traceKind(event);
+        const parts = eventGraphParts(event);
+        if (parts.active) active = parts;
+        if (kind === "memory_retrieval") memorySeen = true;
+        if (kind === "deep_agent_call_started" || kind === "deep_job_started") deepRunning = true;
+        if (kind === "deep_agent_call_finished" || event.type === "turn_end" || kind === "deep_agent_error") deepRunning = false;
+        if (kind.includes("tool_start")) toolRunning = true;
+        if (kind.includes("tool_end") || event.type === "turn_end") toolRunning = false;
+      });
+      if (toolRunning) {
+        return graphParts(["loop", "tools"], ["loop-tools"], "tool running");
+      }
+      if (deepRunning) {
+        const nodes = ["memory_gate", "loop", "deep"];
+        const flows = ["router-memory", "memory-loop"];
+        if (memorySeen) {
+          nodes.push("memory_records");
+          flows.push("memory-read");
+        }
+        return graphParts(nodes, flows, memorySeen ? "loop using memory" : "loop running");
+      }
+      return active;
+    }
+    function replayTurnPath(events) {
+      const nodes = new Set();
+      const flows = new Set();
+      events.forEach(event => {
+        const parts = eventGraphParts(event);
+        parts.nodes.forEach(node => nodes.add(node));
+        parts.flows.forEach(flow => flows.add(flow));
+      });
+      const label = flows.has("loop-reply")
+        ? "deep loop path"
+        : flows.has("fast-reply")
+          ? "fast reply path"
+          : flows.has("router-reply")
+            ? "router reply path"
+            : "turn path";
+      return { nodes, flows, label, active: true };
+    }
+    function graphState(data) {
+      const events = latestTurnEvents(data.traces);
+      const doneNodes = new Set();
+      const doneFlows = new Set();
+      events.forEach(event => {
+        const parts = eventGraphParts(event);
+        parts.nodes.forEach(node => doneNodes.add(node));
+        parts.flows.forEach(flow => doneFlows.add(flow));
+      });
+      const latest = events[events.length - 1] || null;
+      const ended = events.some(event => event.type === "turn_end");
+      const ageMs = latest ? Date.now() - eventTime(latest) : Infinity;
+      const recentEnded = ended && ageMs < 45 * 1000;
+      const stale = latest && !ended && ageMs > 15 * 60 * 1000;
+      const failed = events.some(event => /error|fail/i.test(traceKind(event)) || event.status === "error");
+      const active = latest && !stale ? (!ended ? analyzeTurn(events) : recentEnded ? replayTurnPath(events) : null) : null;
+      return {
+        events,
+        latest,
+        doneNodes,
+        doneFlows,
+        hotNodes: active ? active.nodes : new Set(),
+        liveFlows: active ? active.flows : new Set(),
+        activeLabel: active?.label || "",
+        live: Boolean(active),
+        replay: Boolean(recentEnded && active),
+        stale: Boolean(stale),
+        failed
+      };
+    }
+    function nodeClass(graph, id, extra = "") {
+      const classes = ["node"];
+      if (extra) classes.push(extra);
+      if (graph.doneNodes.has(id)) classes.push("done");
+      if (graph.hotNodes.has(id)) classes.push(graph.failed ? "bad" : "hot");
+      return classes.join(" ");
+    }
+    function zoneClass(graph, id) {
+      const classes = ["zone"];
+      if (graph.doneNodes.has(id)) classes.push("done");
+      if (graph.hotNodes.has(id)) classes.push(graph.failed ? "bad" : "hot");
+      return classes.join(" ");
+    }
+    function flowClass(graph, id, extra = "") {
+      const classes = ["run-flow"];
+      if (extra) classes.push(extra);
+      if (graph.doneFlows.has(id)) classes.push("done");
+      if (graph.liveFlows.has(id)) classes.push("live");
+      return classes.join(" ");
+    }
+    function graphNode(graph, id, x, y, title, subtitle, options = {}) {
+      const w = options.w || 132;
+      const h = options.h || 64;
+      return `<g class="${nodeClass(graph, id, options.cls || "")}" transform="translate(${x} ${y})">
+        <rect width="${w}" height="${h}" rx="7"></rect>
+        <text x="14" y="26">${esc(title)}</text>
+        <text class="subt" x="14" y="46">${esc(subtitle)}</text>
+      </g>`;
+    }
+    function graphGateNode(graph, id, cx, cy, title, subtitle) {
+      return `<g class="${nodeClass(graph, id, "gate-node")}">
+        <path d="M${cx} ${cy - 44} L${cx + 76} ${cy} L${cx} ${cy + 44} L${cx - 76} ${cy} Z"></path>
+        <text x="${cx}" y="${cy - 5}" text-anchor="middle">${esc(title)}</text>
+        <text class="subt" x="${cx}" y="${cy + 15}" text-anchor="middle">${esc(subtitle)}</text>
+      </g>`;
+    }
+    function runtimeGraph(data) {
+      const graph = graphState(data);
+      const latest = graph.latest;
+      const latestKind = latest ? traceKind(latest) : "no trace";
+      const status = !latest
+        ? "No runs yet"
+        : graph.live && !graph.replay
+          ? `Running - ${graph.activeLabel || latestKind}`
+          : graph.replay
+            ? `Recent path - ${graph.activeLabel || latestKind}`
+          : graph.stale
+            ? `Stale - ${latestKind}`
+            : graph.failed
+              ? `Error - ${latestKind}`
+              : `Finished - ${latestKind}`;
+      const turn = latest?.turn_id || latest?.trace_id || "";
+      return `<div class="graph-status">
+        <div><span class="${graph.live && !graph.replay ? "live-dot" : ""}"></span><span class="badge ${graph.failed ? "bad" : graph.live && !graph.replay ? "warn" : "ok"}">${esc(status)}</span></div>
+        <div class="meta">${esc(turn)}${graph.events.length ? ` - ${graph.events.length} event(s)` : ""}</div>
+      </div>
+      <div class="graph-card">
+        <svg class="run-graph" viewBox="0 0 1040 470" role="img" aria-label="Niko harness architecture and live runtime state">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <rect class="zone" x="12" y="14" width="1016" height="436" rx="14"></rect>
+          <text class="zone-label" x="28" y="38">NIKO HARNESS - clean turn flow, memory gate, loop, ops observer</text>
+
+          <rect class="${zoneClass(graph, "loop")}" x="604" y="214" width="224" height="180" rx="12"></rect>
+          <text class="zone-label" x="622" y="238">LOOP</text>
+          <rect class="zone" x="272" y="334" width="280" height="112" rx="12"></rect>
+          <text class="zone-label" x="290" y="358">MEMORY</text>
+
+          <path class="${flowClass(graph, "gateway-router")}" d="M176 128 L222 128"></path>
+          <path class="${flowClass(graph, "router-fast")}" d="M354 128 L400 128"></path>
+          <path class="${flowClass(graph, "fast-reply")}" d="M532 128 L840 128"></path>
+          <path class="${flowClass(graph, "router-reply", "dash")}" d="M354 164 L840 164"></path>
+
+          <path class="${flowClass(graph, "router-memory")}" d="M288 160 L288 260 L322 260"></path>
+          <path class="${flowClass(graph, "fast-memory", "dash")}" d="M466 160 L466 214 L454 232"></path>
+          <path class="${flowClass(graph, "memory-read", "dash")}" d="M412 304 L412 374"></path>
+          <path class="${flowClass(graph, "memory-loop")}" d="M490 260 L604 286"></path>
+          <path class="${flowClass(graph, "loop-tools")}" d="M716 300 L716 326"></path>
+          <path class="${flowClass(graph, "loop-reply")}" d="M828 286 L886 160"></path>
+          <path class="${flowClass(graph, "reply-trace", "dash")}" d="M906 160 L906 340"></path>
+
+          ${graphNode(graph, "gateway", 44, 96, "Gateway", "Telegram in/out")}
+          ${graphNode(graph, "router", 222, 96, "Router", "local / fast / deep")}
+          ${graphNode(graph, "fast", 400, 96, "Fast Agent", "triage / quick reply")}
+          ${graphGateNode(graph, "memory_gate", 412, 260, "Memory Gate", "retrieve context")}
+          ${graphNode(graph, "deep", 650, 256, "Deep Agent", "fcc-claude local")}
+          ${graphNode(graph, "tools", 650, 326, "Tool Slot", "next iteration", {cls: "future"})}
+          ${graphNode(graph, "memory_records", 326, 374, "Memory Records", "semantic + episodic", {w: 172})}
+          ${graphNode(graph, "reply", 840, 96, "Reply", "send back")}
+          ${graphNode(graph, "trace", 840, 340, "Trace / Ops", "JSONL + dashboard")}
+        </svg>
+      </div>`;
+    }
+    function renderOverview(data) {
+      const facts = data.memory.facts.slice(0, 3).map(factRecord).join("") || empty("No semantic facts yet.");
+      const episodes = data.memory.episodes.slice(0, 3).map(episodeRecord).join("") || empty("No episodic records yet.");
+      const traces = data.traces.slice(0, 4).map(traceRecord).join("") || empty("No trace events yet.");
+      return `<div class="panel">
+        <h2>Live Harness Graph</h2>
+        ${runtimeGraph(data)}
+      </div>
+      <div class="grid">
+        <section class="panel"><h2>Semantic Preview</h2><div class="records">${facts}</div></section>
+        <section class="panel"><h2>Episodic Preview</h2><div class="records">${episodes}</div></section>
+      </div>
+      <section class="panel"><h2>Trace Tail</h2><div class="records">${traces}</div></section>`;
+    }
+    function renderMemory(data) {
+      const facts = data.memory.facts.map(factRecord).join("") || empty("No semantic facts yet.");
+      const episodes = data.memory.episodes.map(episodeRecord).join("") || empty("No episodic records yet.");
+      const batch = data.consolidation?.batch || { rows: [], row_ids: [], rows_read: 0 };
+      const candidates = (data.consolidation?.candidates || []).map(candidateRecord).join("") || empty("No candidate for the next batch.");
+      const batchRows = (batch.rows || []).map(chatRecord).join("") || empty("No unconsolidated chat rows.");
+      const result = consolidationResultRecord(state.consolidationResult);
+      return `<div class="grid">
+        <section class="panel">
+          <h2>Add Semantic Fact</h2>
+          <form id="fact-form" class="form-grid">
+            <input id="fact-subject" placeholder="Subject" value="${esc(state.factDraft.subject)}">
+            <textarea id="fact-content" placeholder="Fact content">${esc(state.factDraft.content)}</textarea>
+            <button class="primary" type="submit">Add Fact</button>
+          </form>
+        </section>
+        <section class="panel">
+          <h2>Memory Contract</h2>
+          <div class="records">
+            <div class="record"><div class="splitline"><span>Semantic</span><span class="badge ok">facts</span></div><div class="meta">Stable facts, preferences, rules, and project knowledge.</div></div>
+            <div class="record"><div class="splitline"><span>Episodic</span><span class="badge warn">events</span></div><div class="meta">Dated turns, task outcomes, and follow-ups while deep jobs run.</div></div>
+          </div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Consolidation</h2>
+        <div class="records">
+          <div class="record">
+            <div class="splitline"><span>Next batch</span><span class="badge warn">${esc(batch.rows_read || 0)} row(s)</span></div>
+            <div class="meta">Manual run only. Model errors do not mark rows consolidated.</div>
+            <div class="actions" style="margin-left:0;margin-top:12px">
+              <button class="primary" data-consolidation-action="run" type="button"${batch.rows_read ? "" : " disabled"}>Run once</button>
+              <button data-consolidation-action="refresh" type="button">Refresh batch</button>
+            </div>
+          </div>
+          ${result}
+        </div>
+        <div class="grid" style="margin-top:16px">
+          <section><h2>Batch Rows</h2><div class="records">${batchRows}</div></section>
+          <section><h2>Candidates</h2><div class="records">${candidates}</div></section>
+        </div>
+      </section>
+      <div class="grid">
+        <section class="panel"><h2>Semantic Facts</h2><div class="records">${facts}</div></section>
+        <section class="panel"><h2>Episodic Events</h2><div class="records">${episodes}</div></section>
+      </div>`;
+    }
+    function renderChat(data) {
+      const chat = data.memory.chat_log.map(chatRecord).join("") || empty("No chat rows yet.");
+      return `<section class="panel"><h2>Recent Chat</h2><div class="records">${chat}</div></section>`;
+    }
+    function renderTraces(data) {
+      const traces = data.traces.map(traceRecord).join("") || empty("No trace events yet.");
+      return `<section class="panel"><h2>Trace Events</h2><div class="records">${traces}</div></section>`;
+    }
+    function botBadgeClass(bot) {
+      const health = String(bot.health || "").toLowerCase();
+      if (/error|fail|config/.test(health)) return "bad";
+      if (/warm|stopping|external/.test(health)) return "warn";
+      if (bot.running || /ready|running/.test(health)) return "ok";
+      if (/disabled|stopped|unknown|enabled/.test(health)) return "warn";
+      return "";
+    }
+    function botStatusLabel(bot) {
+      if (bot.kind === "process" && bot.health === "stopping") return `stopping pid=${bot.pid}`;
+      if (bot.kind === "process" && bot.external) return `external pid=${bot.pid}`;
+      if (bot.kind === "process" && bot.running) return `running pid=${bot.pid}`;
+      if (bot.kind === "process" && bot.managed) return `stopped code=${bot.returncode}`;
+      return bot.health || (bot.running ? "running" : "stopped");
+    }
+    function botActionButtons(bot) {
+      return (bot.actions || []).map(action => {
+        const health = String(bot.health || "").toLowerCase();
+        const disabled = (action === "start" && (bot.running || bot.health === "config_error" || health === "stopping")) ||
+          (action === "stop" && bot.id !== "decision" && (!bot.running || bot.external || health === "stopping")) ||
+          (action === "restart" && (bot.health === "config_error" || bot.external || health === "stopping")) ||
+          (bot.id === "decision" && action === "warmup" && (bot.enabled === false || health === "warming")) ||
+          (bot.id === "decision" && action === "stop" && health === "stopping");
+        const cls = action === "start" || action === "warmup" ? "primary" : action === "stop" ? "danger" : "";
+        const label = health === "stopping" && action === "stop"
+          ? "Stopping..."
+          : action === "warmup" ? "Warmup" : action[0].toUpperCase() + action.slice(1);
+        return `<button class="${cls}" data-bot-id="${esc(bot.id)}" data-bot-action="${esc(action)}" type="button"${disabled ? " disabled" : ""}>${esc(label)}</button>`;
+      }).join("");
+    }
+    function botCard(bot) {
+      const meta = [
+        bot.enabled === false ? "enabled=0" : bot.enabled === true ? "enabled=1" : "",
+        bot.model ? `model=${bot.model}` : "",
+        bot.base_url ? `base_url=${bot.base_url}` : "",
+        bot.keep_alive ? `keep_alive=${bot.keep_alive}` : "",
+        bot.warmup_timeout ? `warmup_timeout=${bot.warmup_timeout}s` : "",
+        bot.token_set === false ? "token=missing" : bot.token_set ? `token=${bot.token_source || "set"}` : "",
+        bot.external ? "owner=external" : bot.managed ? "owner=dashboard" : "",
+        bot.group_mode ? `group_mode=${bot.group_mode}` : ""
+      ].filter(Boolean).join(" | ");
+      return `<div class="bot-card">
+        <div class="splitline"><h3>${esc(bot.name || bot.id)}</h3><span class="badge ${botBadgeClass(bot)}">${esc(botStatusLabel(bot))}</span></div>
+        <div class="meta">${esc(bot.description || "")}</div>
+        ${bot.message ? `<div class="bodytext">${esc(bot.message)}</div>` : ""}
+        ${meta ? `<div class="meta">${esc(meta)}</div>` : ""}
+        <div class="actions" style="margin-left:0">${botActionButtons(bot)}</div>
+      </div>`;
+    }
+    function runtimeLogRow(log) {
+      const data = log.data && Object.keys(log.data).length ? `\n${JSON.stringify(log.data, null, 2)}` : "";
+      const cls = /error|fail/i.test(log.level || log.event) ? "bad" : /warn/i.test(log.level || log.event) ? "warn" : "ok";
+      return `<tr>
+        <td>${fmt(log.timestamp)}</td>
+        <td><span class="badge ${cls}">${esc(log.level || "info")}</span></td>
+        <td>${esc(log.source || "runtime")}</td>
+        <td>${esc(log.event || "event")}</td>
+        <td>${esc((log.message || "") + data)}</td>
+      </tr>`;
+    }
+    function renderRuntimeLogs(data) {
+      const rows = (data.logs || []).map(runtimeLogRow).join("");
+      if (!rows) return empty("No runtime log events yet.");
+      return `<div class="log-scroll"><table class="log-table">
+        <thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Event</th><th>Message</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+    function renderBots(data) {
+      const bots = (data.bots || []).map(botCard).join("") || empty("No bot runtime data.");
+      return `<section class="panel">
+        <h2>Bots</h2>
+        <div class="bot-grid">${bots}</div>
+      </section>
+      <section class="panel">
+        <h2>Runtime Log</h2>
+        ${renderRuntimeLogs(data)}
+      </section>`;
+    }
+    function configSections(data) {
+      return data.config?.sections || [];
+    }
+    function currentConfigSection(data) {
+      const sections = configSections(data);
+      if (!sections.length) return null;
+      return sections.find(section => section.id === state.configTab) || sections[0];
+    }
+    function boolValue(value) {
+      return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+    }
+    function configFieldInput(field) {
+      const disabled = field.editable ? "" : " disabled";
+      const value = field.value ?? "";
+      if (field.secret) {
+        const placeholder = field.is_set ? "Configured; leave blank to keep" : "";
+        return `<input data-config-key="${esc(field.name)}" data-secret="1" type="password" value="" placeholder="${esc(placeholder)}"${disabled}>
+          <div class="secret-note">${field.is_set ? "Secret is stored locally and masked in dashboard snapshots." : "Enter once, then save."}</div>`;
+      }
+      if (field.type === "bool") {
+        return `<div class="checkline"><input data-config-key="${esc(field.name)}" type="checkbox"${boolValue(value) ? " checked" : ""}${disabled}><span>${boolValue(value) ? "Enabled" : "Disabled"}</span></div>`;
+      }
+      if (field.type === "select") {
+        const options = (field.choices || []).map(choice => `<option value="${esc(choice)}"${String(choice) === String(value) ? " selected" : ""}>${esc(choice)}</option>`).join("");
+        return `<select data-config-key="${esc(field.name)}"${disabled}>${options}</select>`;
+      }
+      if (field.type === "textarea") {
+        return `<textarea data-config-key="${esc(field.name)}"${disabled}>${esc(value)}</textarea>`;
+      }
+      return `<input data-config-key="${esc(field.name)}" type="${field.type === "number" ? "number" : "text"}" value="${esc(value)}"${disabled}>`;
+    }
+    function configField(field) {
+      const locked = field.editable ? "" : " OS env lock";
+      const runtimeValue = field.runtime_value == null ? "" : ` | runtime=${field.runtime_value}`;
+      return `<div class="field">
+        <label><span>${esc(field.label)}</span><span class="source">${esc(field.source)}${esc(locked)}</span></label>
+        ${field.help ? `<p class="field-help">${esc(field.help)}</p>` : ""}
+        ${configFieldInput(field)}
+        <div class="source">${esc(field.name)} | default=${esc(field.default ?? "")}${esc(runtimeValue)}</div>
+      </div>`;
+    }
+    function renderConfig(data) {
+      const sections = configSections(data);
+      const active = currentConfigSection(data);
+      if (!active) return empty("No config schema available.");
+      state.configTab = active.id;
+      const tabs = sections.map(section => `<button data-config-tab="${esc(section.id)}" class="${section.id === active.id ? "on" : ""}" type="button">${esc(section.title)}</button>`).join("");
+      const fields = active.fields.map(configField).join("");
+      return `<section class="panel">
+        <h2>Config</h2>
+        <div class="tabs">${tabs}</div>
+        <form id="config-form" data-section="${esc(active.id)}" class="form-grid">
+          <div class="record">
+            <div class="splitline"><span>${esc(active.title)}</span><span class="badge warn">${esc(data.config?.path || "")}</span></div>
+            <div class="meta">${esc(active.description || "")}</div>
+          </div>
+          <div class="field-grid">${fields}</div>
+          <div class="actions" style="margin-left:0">
+            <button class="primary" type="submit">Save</button>
+            <button data-config-reset="${esc(active.id)}" type="button">Reset tab</button>
+          </div>
+        </form>
+      </section>`;
+    }
+    function renderOps(data) {
+      return `<div class="grid">
+        <section class="panel">
+          <h2>Endpoints</h2>
+          <div class="records">
+            <div class="record"><span class="badge ok">GET</span> /api/snapshot</div>
+            <div class="record"><span class="badge ok">GET</span> /api/bots</div>
+            <div class="record"><span class="badge ok">GET</span> /api/config</div>
+            <div class="record"><span class="badge ok">GET</span> /api/runtime/logs</div>
+            <div class="record"><span class="badge ok">GET</span> /api/runtime/bot</div>
+            <div class="record"><span class="badge ok">GET</span> /api/traces</div>
+            <div class="record"><span class="badge ok">GET</span> /api/memory</div>
+            <div class="record"><span class="badge ok">GET</span> /api/memory/consolidation</div>
+            <div class="record"><span class="badge warn">POST</span> /api/config</div>
+            <div class="record"><span class="badge warn">POST</span> /api/bots/{id}/{action}</div>
+            <div class="record"><span class="badge warn">POST</span> /api/runtime/bot/start|stop</div>
+            <div class="record"><span class="badge warn">POST</span> /api/memory/facts</div>
+            <div class="record"><span class="badge warn">POST</span> /api/memory/consolidation/run</div>
+            <div class="record"><span class="badge bad">DELETE</span> /api/memory/facts/{id}</div>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Baseline Boundary</h2>
+          <div class="records">
+            <div class="record">This dashboard observes the harness. It does not participate in the agent loop.</div>
+            <div class="record">SQLite and JSONL are the baseline store before the lakehouse and graph layer.</div>
+          </div>
+        </section>
+      </div>`;
+    }
+    function render() {
+      if (!state.data) return;
+      setChrome();
+      renderStats(state.data);
+      const view = document.getElementById("view");
+      if (state.view === "memory") view.innerHTML = renderMemory(state.data);
+      else if (state.view === "bots") view.innerHTML = renderBots(state.data);
+      else if (state.view === "chat") view.innerHTML = renderChat(state.data);
+      else if (state.view === "traces") view.innerHTML = renderTraces(state.data);
+      else if (state.view === "config") view.innerHTML = renderConfig(state.data);
+      else if (state.view === "ops") view.innerHTML = renderOps(state.data);
+      else view.innerHTML = renderOverview(state.data);
+      bindFactForm();
+      bindConsolidation();
+      bindConfigForm();
+    }
+    function factFormHasFocus() {
+      const form = document.getElementById("fact-form");
+      return Boolean(form && form.contains(document.activeElement));
+    }
+    function configFormHasFocus() {
+      const form = document.getElementById("config-form");
+      return Boolean(form && form.contains(document.activeElement));
+    }
+    async function loadSnapshot(options = {}) {
+      const res = await fetch("/api/snapshot");
+      state.data = await res.json();
+      if ((!factFormHasFocus() && !configFormHasFocus()) || options.forceRender) {
+        render();
+      }
+    }
+    function bindFactForm() {
+      const form = document.getElementById("fact-form");
+      if (!form || form.dataset.bound) return;
+      form.dataset.bound = "1";
+      const subject = document.getElementById("fact-subject");
+      const content = document.getElementById("fact-content");
+      subject.addEventListener("input", () => { state.factDraft.subject = subject.value; });
+      content.addEventListener("input", () => { state.factDraft.content = content.value; });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await fetch("/api/memory/facts", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            subject: subject.value,
+            content: content.value,
+            source: "ops"
+          })
+        });
+        state.factDraft = { subject: "", content: "" };
+        await loadSnapshot({ forceRender: true });
+      });
+    }
+    function bindConsolidation() {
+      document.querySelectorAll("[data-consolidation-action]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          const action = button.dataset.consolidationAction;
+          if (action === "run") {
+            button.disabled = true;
+            button.textContent = "Running...";
+            const res = await fetch("/api/memory/consolidation/run", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({})
+            });
+            const data = await res.json().catch(() => ({result: {status: "error", error: "Invalid response"}}));
+            state.consolidationResult = data.result || data;
+          }
+          await loadSnapshot({ forceRender: true });
+        });
+      });
+    }
+    function bindConfigForm() {
+      document.querySelectorAll("[data-config-tab]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", () => {
+          state.configTab = button.dataset.configTab;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-bot-action]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          const botId = button.dataset.botId || "telegram";
+          await fetch(`/api/bots/${botId}/${button.dataset.botAction}`, { method: "POST" });
+          await loadSnapshot({ forceRender: true });
+        });
+      });
+      document.querySelectorAll("[data-config-reset]").forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "1";
+        button.addEventListener("click", async () => {
+          await fetch("/api/config/reset", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({section: button.dataset.configReset})
+          });
+          await loadSnapshot({ forceRender: true });
+        });
+      });
+      const form = document.getElementById("config-form");
+      if (!form || form.dataset.bound) return;
+      form.dataset.bound = "1";
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const values = {};
+        form.querySelectorAll("[data-config-key]").forEach(input => {
+          if (input.disabled) return;
+          if (input.dataset.secret === "1" && !input.value) return;
+          values[input.dataset.configKey] = input.type === "checkbox" ? input.checked : input.value;
+        });
+        const res = await fetch("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({values})
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({error: "Config save failed"}));
+          alert(data.error || "Config save failed");
+          return;
+        }
+        await loadSnapshot({ forceRender: true });
+      });
+    }
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-delete-fact]");
+      if (!button) return;
+      await fetch(`/api/memory/facts/${button.dataset.deleteFact}`, { method: "DELETE" });
+      await loadSnapshot({ forceRender: true });
+    });
+    document.getElementById("refresh").addEventListener("click", () => loadSnapshot({ forceRender: true }));
+    window.addEventListener("hashchange", render);
+    setChrome();
+    loadSnapshot();
+    setInterval(loadSnapshot, 5000);
+  </script>
+</body>
+</html>
+"""

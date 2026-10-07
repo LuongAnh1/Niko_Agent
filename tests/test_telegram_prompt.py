@@ -14,6 +14,7 @@ from bots.telegram.bot import (
     format_sticker_decision_log,
     format_reply_for_recipient,
     handle_message,
+    is_getupdates_conflict,
     maybe_send_sticker,
     prepare_long_polling,
     send_chat_action,
@@ -49,13 +50,15 @@ from niko.config import load_env_files
 class TelegramPromptTests(unittest.TestCase):
     def setUp(self):
         self._state_dir = tempfile.TemporaryDirectory()
-        state_path = Path(self._state_dir.name)
-        self.memory_store = MemoryStore(state_path / "memory.sqlite3")
-        self.trace_logger = TraceLogger(state_path / "traces", enabled=True)
+        self.state_path = Path(self._state_dir.name)
+        self.runtime_config_file = self.state_path / "config.json"
+        self.memory_store = MemoryStore(self.state_path / "memory.sqlite3")
+        self.trace_logger = TraceLogger(self.state_path / "traces", enabled=True)
         self._env_patch = patch.dict(
             os.environ,
             {
-                "NIKO_STATE_DIR": str(state_path),
+                "NIKO_STATE_DIR": str(self.state_path),
+                "NIKO_RUNTIME_CONFIG_FILE": str(self.runtime_config_file),
                 "NIKO_MEMORY_WRITE_ENABLED": "0",
             },
             clear=False,
@@ -68,6 +71,15 @@ class TelegramPromptTests(unittest.TestCase):
 
     def make_agent(self) -> ChatReplyGraph:
         return ChatReplyGraph(memory_store=self.memory_store, trace_logger=self.trace_logger)
+
+    def isolated_env(self, values: dict[str, str] | None = None) -> dict[str, str]:
+        env = {
+            "NIKO_STATE_DIR": str(self.state_path),
+            "NIKO_RUNTIME_CONFIG_FILE": str(self.runtime_config_file),
+            "NIKO_MEMORY_WRITE_ENABLED": "0",
+        }
+        env.update(values or {})
+        return env
 
     def test_group_sticker_without_mention_is_ignored(self):
         message = {
@@ -130,6 +142,14 @@ class TelegramPromptTests(unittest.TestCase):
         with patch("bots.telegram.bot.urlopen", side_effect=TimeoutError("slow network")):
             with self.assertRaises(TelegramError):
                 telegram_request("token", "getMe", {}, timeout_seconds=5)
+
+    def test_getupdates_conflict_detection(self):
+        error = RuntimeError(
+            'Telegram HTTP 409: {"description":"Conflict: terminated by other getUpdates request"}'
+        )
+
+        self.assertTrue(is_getupdates_conflict(error))
+        self.assertFalse(is_getupdates_conflict(RuntimeError("Telegram HTTP 500: server error")))
 
     def test_prepare_long_polling_warns_instead_of_crashing_after_timeout(self):
         with patch.dict(
@@ -306,7 +326,7 @@ class TelegramPromptTests(unittest.TestCase):
             "Meow"
         )
 
-        with patch.dict(os.environ, {"NIKO_REPLY_SUFFIX": "Meow"}, clear=True):
+        with patch.dict(os.environ, self.isolated_env({"NIKO_REPLY_SUFFIX": "Meow"}), clear=True):
             decision = parse_fast_agent_decision(raw_answer)
 
         self.assertEqual(decision.route, FAST_DECISION_SEND_TO_DEEP)
@@ -334,13 +354,13 @@ class TelegramPromptTests(unittest.TestCase):
     def test_telegram_startup_log_mentions_ollama_decision_model(self):
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_DECISION_MODEL_ENABLED": "1",
                 "NIKO_DECISION_MODEL_BASE_URL": "http://localhost:11434",
                 "NIKO_DECISION_MODEL_NAME": "nimble",
                 "NIKO_DECISION_MODEL_KEEP_ALIVE": "-1",
-            },
+            }),
             clear=True,
         ):
             line = decision_triage_status_line()
@@ -363,11 +383,11 @@ class TelegramPromptTests(unittest.TestCase):
             hook_file.write_text("HOOK FROM FILE", encoding="utf-8")
             with patch.dict(
                 os.environ,
-                {
+                self.isolated_env({
                     "NIKO_FAST_AGENT_COMMAND": "fast -p",
                     "NIKO_PROMPT_HOOK_FILE": str(hook_file),
                     "CHAT_IDENTITY_ENABLED": "0",
-                },
+                }),
                 clear=True,
             ), patch(
                 "niko.runtime.run_cli",
@@ -392,11 +412,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_FAST_AGENT_COMMAND": "fast -p",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_fast_agent",
@@ -427,12 +447,12 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_DECISION_MODEL_ENABLED": "1",
                 "NIKO_FAST_AGENT_COMMAND": "fast -p",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_decision_model",
@@ -472,11 +492,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_DECISION_MODEL_ENABLED": "1",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_decision_model",
@@ -512,11 +532,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_FAST_AGENT_COMMAND": "fast -p",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_fast_agent",
@@ -545,11 +565,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_FAST_AGENT_COMMAND": "fast -p",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_fast_agent",
@@ -615,11 +635,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_FAST_AGENT_COMMAND": "fast -p",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_fast_agent",
@@ -652,11 +672,11 @@ class TelegramPromptTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_DECISION_MODEL_ENABLED": "1",
                 "NIKO_REPLY_SUFFIX": "Meow",
-            },
+            }),
             clear=True,
         ), patch(
             "niko.graphs.chat_reply.prompts.call_decision_model",
@@ -691,16 +711,16 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertIn("Da anh", text)
 
     def test_deep_agent_command_defaults_to_claude_command(self):
-        with patch.dict(os.environ, {"CLAUDE_CLI_COMMAND": "fcc-claude -p"}, clear=True):
+        with patch.dict(os.environ, self.isolated_env({"CLAUDE_CLI_COMMAND": "fcc-claude -p"}), clear=True):
             self.assertEqual(deep_agent_command(), "fcc-claude -p")
 
     def test_deep_agent_command_can_override_default(self):
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "CLAUDE_CLI_COMMAND": "fcc-claude -p",
                 "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude --model opus[1m] -p",
-            },
+            }),
             clear=True,
         ):
             self.assertEqual(deep_agent_command(), "fcc-claude --model opus[1m] -p")
@@ -734,15 +754,14 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertIn("HOOK FROM FILE", prompt)
         self.assertIn("Tin nhan nguoi dung:\nhello", prompt)
 
-    def test_load_env_files_reads_root_niko_and_telegram_env(self):
+    def test_load_env_files_reads_only_root_bootstrap_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / ".env").write_text(
                 "\n".join(
                     [
-                        "CLAUDE_TIMEOUT_SECONDS=7",
-                        "NIKO_AGENT_MODE=single",
-                        "TELEGRAM_GROUP_MODE=all",
+                        "NIKO_OPS_HOST=127.0.0.1",
+                        "NIKO_RUNTIME_CONFIG_FILE=niko/.runtime/config.json",
                         "PRESERVE_ME=root",
                     ]
                 )
@@ -774,15 +793,14 @@ class TelegramPromptTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {"PRESERVE_ME": "shell"}, clear=True), patch(
+            with patch.dict(os.environ, self.isolated_env({"PRESERVE_ME": "shell"}), clear=True), patch(
                 "niko.config.repo_root", return_value=root
             ):
                 load_env_files("telegram")
-                self.assertEqual(os.environ["CLAUDE_TIMEOUT_SECONDS"], "7")
-                self.assertEqual(os.environ["NIKO_AGENT_MODE"], "two_agent")
-                self.assertEqual(os.environ["NIKO_REPLY_SUFFIX"], "Meow")
-                self.assertEqual(os.environ["TELEGRAM_GROUP_MODE"], "mentions")
-                self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "token")
+                self.assertEqual(os.environ["NIKO_OPS_HOST"], "127.0.0.1")
+                self.assertEqual(os.environ["NIKO_RUNTIME_CONFIG_FILE"], str(self.runtime_config_file))
+                self.assertNotIn("NIKO_REPLY_SUFFIX", os.environ)
+                self.assertNotIn("TELEGRAM_BOT_TOKEN", os.environ)
                 self.assertEqual(os.environ["PRESERVE_ME"], "shell")
 
     def test_run_cli_uses_configured_workdir(self):
@@ -825,7 +843,7 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertEqual(sanitize_tool_like_answer(raw_answer), raw_answer)
 
     def test_reply_suffix_uses_meow_default(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, self.isolated_env(), clear=True):
             answer = ensure_reply_suffix("Da anh")
 
         self.assertEqual(answer, "Da anh\n\nMeow")
@@ -877,11 +895,11 @@ class TelegramPromptTests(unittest.TestCase):
     def test_sticker_startup_log_mentions_ollama_decision_model(self):
         with patch.dict(
             os.environ,
-            {
+            self.isolated_env({
                 "TELEGRAM_STICKERS_ENABLED": "1",
                 "TELEGRAM_STICKER_DECISION_MODEL_ENABLED": "1",
                 "TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS": "5",
-            },
+            }),
             clear=True,
         ):
             line = sticker_decision_status_line()

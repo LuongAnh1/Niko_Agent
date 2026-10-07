@@ -9,6 +9,7 @@ from niko.config import (
     env_value_with_source,
     load_env_file,
     reset_runtime_config,
+    runtime_subprocess_env,
     update_runtime_config,
 )
 
@@ -53,6 +54,22 @@ class RuntimeConfigTests(unittest.TestCase):
 
                 self.assertEqual(value, "4")
                 self.assertEqual(source, "default")
+
+    def test_runtime_subprocess_env_drops_file_env_but_keeps_config_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text(
+                "TELEGRAM_BOT_TOKEN=from-file\n"
+                f"{RUNTIME_CONFIG_ENV}={Path(temp_dir) / 'config.json'}\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                load_env_file(env_path)
+                child_env = runtime_subprocess_env()
+
+            self.assertNotIn("TELEGRAM_BOT_TOKEN", child_env)
+            self.assertIn(RUNTIME_CONFIG_ENV, child_env)
 
 
 if __name__ == "__main__":

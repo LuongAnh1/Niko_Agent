@@ -1,69 +1,24 @@
-"""Memory retrieval context cho Deep agent.
+"""Kiểu dữ liệu, config helper và formatter cho memory context.
 
-Graph chỉ cần một đoạn text phụ trợ để nhét vào prompt Deep. File này quyết
-định lấy facts/episodes nào từ SQLite baseline và format chúng thành context.
-Nó chưa làm embedding, rerank hay graph reasoning; đây là tầng text retrieval
-đủ rõ để demo memory pipeline.
+Quyết định lấy gì nằm ở `MemoryRuntime` và Decision Model. File này giữ
+`RetrievedMemory`, các flag cấu hình, helper log gate và formatter biến
+facts/episodes thành đoạn context phụ trợ cho Deep. Nó chưa làm embedding,
+rerank hay graph reasoning; retrieval v1 vẫn là FTS/LIKE text search.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import os
-import re
-import unicodedata
+from dataclasses import dataclass, field
 from typing import Any
 
 from niko.config import env_flag, env_value
-from niko.memory.store import Episode, Fact, MemoryStore, default_memory_store
+from niko.memory.store import Episode, Fact, MemoryStore
 
 
 DEFAULT_MEMORY_TOP_K = 4
-FACT_INVENTORY_KEYWORDS = (
-    "fact nao",
-    "facts nao",
-    "fact gi",
-    "facts gi",
-    "su that nao",
-    "su that gi",
-    "dang luu fact",
-    "dang luu facts",
-    "dang luu su that",
-    "luu fact",
-    "luu facts",
-    "luu su that",
-    "semantic nao",
-    "semantic memory nao",
-    "bo nho semantic",
-)
-EPISODE_INVENTORY_KEYWORDS = (
-    "episode nao",
-    "episodes nao",
-    "su kien nao",
-    "nhat ky nao",
-    "dang luu episode",
-    "dang luu su kien",
-    "episodic nao",
-    "episodic memory nao",
-    "bo nho episodic",
-)
-FACT_INVENTORY_FILTER_STOPWORDS = {
-    "bo",
-    "co",
-    "dang",
-    "em",
-    "fact",
-    "facts",
-    "gi",
-    "khong",
-    "luu",
-    "memory",
-    "nao",
-    "semantic",
-    "su",
-    "that",
-    "ve",
-}
+DEFAULT_MEMORY_RECENT_TURNS = 6
+DEFAULT_MEMORY_RECENT_CHAR_BUDGET = 2400
+DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET = 3600
 
 
 @dataclass(frozen=True)
@@ -74,15 +29,58 @@ class RetrievedMemory:
     facts: list[Fact]
     episodes: list[Episode]
     enabled: bool
+    gate_enabled: bool = False
+    gate_decision: str = ""
+    gate_query: str = ""
+    gate_reason: str = ""
+    gate_fact_mode: str = ""
+    gate_episode_mode: str = ""
+    gate_confidence: float | None = None
+    gate_label: str = ""
+    gate_probabilities: dict[str, float] | None = None
+    gate_model: str = ""
+    gate_error: str = ""
+    recent_turns: list[dict[str, str]] = field(default_factory=list)
+    recent_char_budget: int = DEFAULT_MEMORY_RECENT_CHAR_BUDGET
+    long_term_char_budget: int = DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET
 
     def to_meta(self) -> dict[str, Any]:
-        return {
+        meta: dict[str, Any] = {
             "enabled": self.enabled,
             "fact_ids": [fact.id for fact in self.facts],
             "episode_ids": [episode.id for episode in self.episodes],
             "fact_count": len(self.facts),
             "episode_count": len(self.episodes),
+            "recent_turn_count": len(self.recent_turns),
         }
+        if self.recent_turns:
+            meta["recent_roles"] = [turn.get("role", "") for turn in self.recent_turns]
+            meta["recent_char_budget"] = self.recent_char_budget
+        if self.facts or self.episodes:
+            meta["long_term_char_budget"] = self.long_term_char_budget
+        if self.gate_enabled:
+            meta["gate_enabled"] = True
+            if self.gate_decision:
+                meta["gate_decision"] = self.gate_decision
+            if self.gate_query:
+                meta["gate_query"] = self.gate_query
+            if self.gate_reason:
+                meta["gate_reason"] = self.gate_reason
+            if self.gate_fact_mode:
+                meta["gate_fact_mode"] = self.gate_fact_mode
+            if self.gate_episode_mode:
+                meta["gate_episode_mode"] = self.gate_episode_mode
+            if self.gate_confidence is not None:
+                meta["gate_confidence"] = self.gate_confidence
+            if self.gate_label:
+                meta["gate_label"] = self.gate_label
+            if self.gate_probabilities:
+                meta["gate_probabilities"] = self.gate_probabilities
+            if self.gate_model:
+                meta["gate_model"] = self.gate_model
+            if self.gate_error:
+                meta["gate_error"] = self.gate_error
+        return meta
 
 
 def memory_enabled() -> bool:
@@ -93,6 +91,21 @@ def memory_retrieval_enabled() -> bool:
     return memory_enabled() and env_flag("NIKO_MEMORY_RETRIEVAL_ENABLED", "1")
 
 
+def memory_gate_enabled() -> bool:
+    """Gate dùng Nimble để quyết định có retrieve memory hay không; default-off."""
+    return memory_retrieval_enabled() and env_flag("NIKO_MEMORY_GATE_ENABLED", "0")
+
+
+def memory_write_gate_enabled() -> bool:
+    """Gate dùng Nimble để quyết định Deep episode nào đáng ghi dài hạn; default-off."""
+    return memory_write_enabled() and env_flag("NIKO_MEMORY_WRITE_GATE_ENABLED", "0")
+
+
+def memory_correction_detection_enabled() -> bool:
+    """Gate dùng Nimble để nhận diện yêu cầu sửa/xóa memory qua chat; default-off."""
+    return memory_write_enabled() and env_flag("NIKO_MEMORY_CORRECTION_DETECTION_ENABLED", "0")
+
+
 def memory_top_k() -> int:
     raw_value = env_value("NIKO_MEMORY_TOP_K", str(DEFAULT_MEMORY_TOP_K)).strip()
     try:
@@ -101,100 +114,160 @@ def memory_top_k() -> int:
         return DEFAULT_MEMORY_TOP_K
 
 
+def memory_recent_turns() -> int:
+    """Số lượt chat gần nhất đưa vào working memory của Deep."""
+    raw_value = env_value("NIKO_MEMORY_RECENT_TURNS", str(DEFAULT_MEMORY_RECENT_TURNS)).strip()
+    try:
+        return max(0, min(20, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_RECENT_TURNS
+
+
+def memory_recent_char_budget() -> int:
+    """Ngân sách ký tự cho recent conversation trong Deep prompt."""
+    raw_value = env_value("NIKO_MEMORY_RECENT_CHAR_BUDGET", str(DEFAULT_MEMORY_RECENT_CHAR_BUDGET)).strip()
+    try:
+        return max(0, min(12000, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_RECENT_CHAR_BUDGET
+
+
+def memory_long_term_char_budget() -> int:
+    """Ngân sách ký tự cho facts/episodes liên quan trong Deep prompt."""
+    raw_value = env_value("NIKO_MEMORY_LONG_TERM_CHAR_BUDGET", str(DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET)).strip()
+    try:
+        return max(0, min(16000, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET
+
+
+def evaluate_memory_gate(prompt: str, gateway_message=None) -> dict[str, Any]:
+    """Chạy retrieval gate nếu bật; lỗi thì fail-open bằng raw prompt."""
+    from niko.memory.runtime import default_memory_runtime
+
+    return default_memory_runtime().evaluate_retrieval_gate(prompt, gateway_message)
+
+
+def log_memory_gate_decision(gate_state: dict[str, Any]) -> None:
+    """Ghi log ngắn cho tab Bots; lỗi log không được ảnh hưởng turn."""
+    try:
+        from niko.harness.runtime_log import default_runtime_logger
+
+        default_runtime_logger().event(
+            "memory",
+            "memory_gate_decision",
+            (
+                "Memory gate: "
+                f"decision={gate_state.get('decision') or 'disabled'} "
+                f"query={gate_state.get('query') or '-'} "
+                f"fact_mode={gate_state.get('fact_mode') or '-'} "
+                f"episode_mode={gate_state.get('episode_mode') or '-'}"
+            ),
+            data={key: value for key, value in gate_state.items() if value not in ("", None, {})},
+        )
+    except Exception:
+        pass
+
+
+def log_memory_gate_error(gate_state: dict[str, Any]) -> None:
+    """Gate lỗi thì chỉ log, còn retrieval fail-open ở caller."""
+    try:
+        from niko.harness.runtime_log import default_runtime_logger
+
+        default_runtime_logger().event(
+            "memory",
+            "memory_gate_error",
+            f"Memory gate loi, fail-open retrieval: {gate_state.get('error')}",
+            level="warning",
+            data={key: value for key, value in gate_state.items() if value not in ("", None, {})},
+        )
+    except Exception:
+        pass
+
+
 def retrieve_memory_context(
     prompt: str,
     gateway_message=None,
     store: MemoryStore | None = None,
 ) -> RetrievedMemory:
     """Truy xuất facts/episodes liên quan cho một prompt."""
-    if not memory_retrieval_enabled():
-        return RetrievedMemory(text="", facts=[], episodes=[], enabled=False)
+    from niko.memory.runtime import MemoryRuntime, default_memory_runtime
 
-    store = store or default_memory_store()
-    top_k = memory_top_k()
-    fact_inventory = asks_for_fact_inventory(prompt)
-    episode_inventory = asks_for_episode_inventory(prompt)
-    # Câu hỏi "đang lưu fact nào" cần list inventory, không search theo chữ "fact".
-    if fact_inventory and not fact_inventory_filter_words(prompt):
-        facts = store.list_facts(top_k)
-    else:
-        facts = store.search_facts(prompt, top_k=top_k)
-    if episode_inventory:
-        episodes = store.recent_episodes(top_k)
-    elif fact_inventory:
-        episodes = []
-    else:
-        episodes = store.search_episodes(prompt, top_k=top_k)
-    text = format_memory_context(facts, episodes, gateway_message=gateway_message)
-    return RetrievedMemory(text=text, facts=facts, episodes=episodes, enabled=True)
+    runtime = MemoryRuntime(store=store) if store is not None else default_memory_runtime()
+    return runtime.retrieve_for_deep(prompt, gateway_message=gateway_message)
 
 
 def build_memory_context(prompt: str, gateway_message=None, store: MemoryStore | None = None) -> str:
     return retrieve_memory_context(prompt, gateway_message=gateway_message, store=store).text
 
 
-def asks_for_fact_inventory(prompt: str) -> bool:
-    normalized = normalize_text(prompt)
-    return any(contains_keyword(normalized, keyword) for keyword in FACT_INVENTORY_KEYWORDS)
-
-
-def asks_for_episode_inventory(prompt: str) -> bool:
-    normalized = normalize_text(prompt)
-    return any(contains_keyword(normalized, keyword) for keyword in EPISODE_INVENTORY_KEYWORDS)
-
-
-def fact_inventory_filter_words(prompt: str) -> list[str]:
-    normalized = normalize_text(prompt)
-    words = re.findall(r"[\w]+", normalized, flags=re.UNICODE)
-    return [word for word in words if len(word) >= 2 and word not in FACT_INVENTORY_FILTER_STOPWORDS]
-
-
-def contains_keyword(normalized_text: str, keyword: str) -> bool:
-    normalized_keyword = normalize_text(keyword)
-    if not normalized_keyword:
-        return False
-    if len(normalized_keyword) <= 3 and normalized_keyword.isalnum():
-        return normalized_keyword in normalized_text.split()
-    return normalized_keyword in normalized_text
-
-
-def normalize_text(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    normalized = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return normalized.replace("đ", "d")
-
-
 def format_memory_context(
     facts: list[Fact],
     episodes: list[Episode],
     gateway_message=None,
+    recent_turns: list[dict[str, str]] | None = None,
+    long_term_char_budget: int | None = None,
 ) -> str:
-    """Format memory thành đoạn prompt phụ, luôn nhắc Deep ưu tiên message mới."""
-    if not facts and not episodes:
+    """Format working/long-term memory thành các section rõ cho Deep."""
+    recent_turns = recent_turns or []
+    if not facts and not episodes and not recent_turns:
         return ""
 
     lines = [
-        "Ngu canh bo nho lien quan cua Niko:",
-        "- Day la context phu tro, khong thay the tin nhan moi nhat cua nguoi dung.",
-        "- Neu bo nho mau thuan voi tin nhan moi, uu tien tin nhan moi va hoi lai khi can.",
+        "Working memory context:",
+        "- Current user message is authoritative.",
+        "- Recent conversation is short-term context only.",
+        "- Relevant facts/events are long-term memory and may be outdated; ask if they conflict.",
     ]
     if gateway_message is not None:
         lines.append(f"- conversation_id: {gateway_message.chat_id or gateway_message.user.key}")
         lines.append(f"- user_key: {gateway_message.user.key}")
 
+    if recent_turns:
+        lines.append("")
+        lines.append("Recent conversation:")
+        for turn in recent_turns:
+            role = str(turn.get("role", "")).strip() or "unknown"
+            content = str(turn.get("content", "")).strip()
+            if not content:
+                continue
+            route = str(turn.get("route", "")).strip()
+            route_text = f" ({route})" if route else ""
+            lines.append(f"- {role}{route_text}: {content}")
+
+    remaining = memory_long_term_char_budget() if long_term_char_budget is None else max(0, int(long_term_char_budget))
     if facts:
         lines.append("")
-        lines.append("Semantic memory / facts:")
+        lines.append("Relevant semantic facts:")
         for fact in facts:
-            lines.append(f"- [fact:{fact.id}] {fact.subject}: {fact.content}")
+            line = f"- [fact:{fact.id}] {fact.subject}: {fact.content}"
+            if remaining <= 0:
+                break
+            line = _take_budget(line, remaining)
+            lines.append(line)
+            remaining -= len(line)
 
     if episodes:
         lines.append("")
-        lines.append("Episodic memory / events:")
+        lines.append("Relevant episodic events:")
         for episode in episodes:
-            lines.append(f"- [episode:{episode.id} @ {episode.happened_at}] {episode.summary}")
+            line = f"- [episode:{episode.id} @ {episode.happened_at}] {episode.summary}"
+            if remaining <= 0:
+                break
+            line = _take_budget(line, remaining)
+            lines.append(line)
+            remaining -= len(line)
 
     return "\n".join(lines)
+
+
+def _take_budget(text: str, budget: int) -> str:
+    """Cắt từng dòng long-term memory để prompt không phình vô hạn."""
+    if len(text) <= budget:
+        return text
+    if budget <= 20:
+        return text[:budget]
+    return text[: budget - 20].rstrip() + "\n...[truncated]"
 
 
 def compact_episode_summary(prompt: str, answer: str, followups: list[str] | None = None, limit: int = 900) -> str:
@@ -213,9 +286,4 @@ def compact_episode_summary(prompt: str, answer: str, followups: list[str] | Non
 
 def memory_write_enabled() -> bool:
     """Memory write có thể tắt độc lập retrieval để test/demo sạch dữ liệu."""
-    return memory_enabled() and os.getenv("NIKO_MEMORY_WRITE_ENABLED", "1").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return memory_enabled() and env_flag("NIKO_MEMORY_WRITE_ENABLED", "1")

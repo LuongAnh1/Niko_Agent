@@ -4,12 +4,22 @@ Thư mục này mô tả Niko Agent theo góc nhìn kỹ thuật và demo đồ 
 
 ## Nên Đọc Theo Thứ Tự
 
-1. [Kiến trúc](architecture.md): module chính, ranh giới trách nhiệm, runtime, memory, ops.
-2. [Luồng chat Telegram](telegram-chat-flow.md): từ Telegram message đến local/fast/deep reply.
-3. [Harness Memory & Ops](niko-harness-memory-ops.md): SQLite memory, trace JSONL, dashboard và API.
-4. [Nghiệp vụ harness](business-domains/README.md): Telegram gateway hiện tại, Jira gateway dự kiến và hướng nâng cấp memory.
-5. [Demo Guide](demo-guide.md): cách chạy bot/dashboard và các kịch bản demo.
-6. [Memory Roadmap](memory-roadmap.md): baseline hiện tại và hướng nâng cấp Semantic/Episodic Memory.
+1. [Kiến trúc](harness/architecture.md): module chính, ranh giới trách nhiệm, runtime, memory, ops.
+2. [Luồng chat Telegram](harness/telegram-chat-flow.md): từ Telegram message đến local/fast/deep reply.
+3. [Harness Memory & Ops](harness/memory-ops.md): SQLite memory, trace/runtime log, dashboard, runtime config và API.
+4. [Nghiệp vụ harness](business-domains/README.md): Telegram gateway hiện tại, Jira gateway dự kiến và hướng nâng cấp memory backend.
+5. [Demo Guide](demo/demo-guide.md): cách chạy bot/dashboard và các kịch bản demo.
+6. [Kế hoạch Chat Memory Decision Model 2026-10-07](plans/2026-10-07-chat-memory-decision-model.md): kế hoạch ngắn hạn cho chat memory single-user và Decision Model.
+7. [Sơ đồ Chat Memory](memory/chat-memory-architecture-flow.md): kiến trúc và luồng xử lý memory hiện tại/đích đến.
+8. [Memory Roadmap](memory/roadmap.md): baseline hiện tại, chat memory, và ranh giới với lakehouse/Jira memory backend.
+
+## Bố Cục Folder
+
+- `harness/`: kiến trúc runtime, luồng Telegram, dashboard, trace và SQLite baseline.
+- `business-domains/`: gateway/nghiệp vụ như Telegram, Jira và memory backend.
+- `memory/`: roadmap dài hạn cho memory trong repo Niko.
+- `plans/`: kế hoạch ngắn hạn/liên quan triển khai; tên file bắt đầu bằng ngày `YYYY-MM-DD`.
+- `demo/`: kịch bản demo và hướng dẫn trình bày.
 
 ## Tài Liệu Liên Quan
 
@@ -19,4 +29,7 @@ Thư mục này mô tả Niko Agent theo góc nhìn kỹ thuật và demo đồ 
 
 ## Ranh Giới Tài Liệu
 
-Các tài liệu này mô tả trạng thái hiện tại của repo `Niko_Agent`, không phải toàn bộ đồ án Lakehouse/Knowledge Graph. Lakehouse và Knowledge Graph sẽ được phát triển ở lớp cải tiến memory sau, còn repo này đóng vai trò harness baseline để chứng minh hệ thống chạy thật và có dữ liệu trace/memory ban đầu.
+Các tài liệu này mô tả trạng thái hiện tại của repo `Niko_Agent`. Lakehouse/Jira
+memory backend là lane riêng trong repo `Ai-Memory-Lakehouse-Graph-Mining`; Niko
+chỉ giữ baseline chat memory local và điểm nối retrieval/tool khi cần dữ liệu
+nghiệp vụ.

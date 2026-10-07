@@ -24,15 +24,24 @@ and introduce Jira as a future task/business-data gateway. The important story i
 that Niko should eventually analyze real task/issue data rather than only the
 scattered text a user pastes into chat.
 
+Keep chat memory and business/lakehouse memory separate in docs and design:
+Telegram chat memory is local interaction memory; Jira/lakehouse memory is a
+separate business backend lane that Niko can retrieve from later.
+
 ## Architecture Map
 
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
   auth/allowlist, mention filtering, `/id`, `/whoami`, replies, and stickers.
   Keep this layer thin. It should not own memory, routing, or LLM policy.
 - `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
-  `/v1/systemone` client, route-label mapping, and warmup script for keeping the
-  model loaded. This layer decides labels only; it should not generate free-form
-  user replies.
+  `/v1/systemone` client, route-label mapping, sticker mood, memory retrieval/write
+  decisions, memory candidate classification, and warmup script for keeping the
+  model loaded. This layer decides labels/modes only; it should not generate
+  free-form user replies.
+- `bots/decision_model/memory/`: Memory-specific Decision Model package. Keep
+  retrieval, write, candidate, and correction prompts/normalizers in separate
+  files here so each decision surface can be debugged independently. Public
+  imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
@@ -43,13 +52,26 @@ scattered text a user pastes into chat.
   `fcc-claude`.
 - `niko/harness/trace.py`: JSONL trace logger. Default trace path is
   `niko/.runtime/traces/YYYY-MM-DD.jsonl`.
-- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, and
-  `episodes`. Uses FTS5 when available, with LIKE fallback.
-- `niko/memory/context.py`: Retrieves semantic/episodic memory and formats the
-  memory context injected into the Deep agent.
-- `niko/ops/dashboard.py`: Mini Niko Ops dashboard. Runs locally with stdlib
-  Python and exposes trace/memory/chat/config views plus simple memory/config
-  APIs.
+- `niko/harness/runtime_log.py`: JSONL runtime log logger for Bots dashboard
+  table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
+- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
+  and consolidation state. Uses FTS5 when available, with LIKE fallback.
+- `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
+  retrieval modes (`search/list/recent/none`), recent working-memory context,
+  write gate, memory correction workflow facade, store search/list, chat log
+  writes, episode writes, consolidation scaffold, and context formatting before
+  Deep.
+- `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
+  compatibility wrappers such as `retrieve_memory_context(...)`.
+- `niko/memory/working_memory.py`: Ephemeral recent conversation window builder
+  from `chat_log`, shared by Deep prompt context and correction decision context.
+- `niko/memory/correction_workflow.py`: Phase 5 V1 chat memory correction
+  workflow. Owns pending fact choices, fact match/apply guardrails, and
+  correction trace/runtime logs while `MemoryRuntime` keeps the public facade.
+- `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
+- `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
+- `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
+- `niko/ops/templates/dashboard.html`: Dashboard HTML/CSS/JS frontend template.
 - `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
   prompts, except for Fast JSON triage.
 - `niko/.runtime/`: Local runtime state. Do not commit it.
@@ -99,17 +121,33 @@ new triage work should prefer `bots/decision_model/`.
 SQLite currently stores three groups of data:
 
 - `chat_log`: operational conversation log for user/assistant messages.
-- `facts`: Semantic Memory baseline, mostly manually added facts/rules/context.
+- `facts`: Semantic Memory baseline, added manually through Ops/API or through
+  conservative consolidation of explicit chat facts.
 - `episodes`: Episodic Memory baseline, mostly completed Deep jobs and followups.
 
 Important boundaries:
 
 - `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
   operational log that can later feed analysis.
-- Semantic extraction is not mature yet. Facts are mainly added through Ops/API.
+- Working memory is ephemeral: Deep can receive a short recent conversation
+  window rebuilt from `chat_log` for the current turn, but that window is not
+  Semantic/Episodic long-term memory.
+- Semantic extraction is not mature yet. Facts are mainly added through Ops/API
+  and explicit/manual consolidation; free-form summarizer extraction is not built
+  yet.
 - Episodic records are basic summaries of deep work, not rich event models yet.
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
-  reasoning.
+  reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
+  episodes and retrieval modes, but it does not write SQLite data itself.
+- Memory correction sends `current_prompt` plus `recent_turns` as the primary
+  short-term conversation context. `active_workflow` and `pending_choices` are
+  auxiliary guardrail metadata for short follow-ups like `fact #8 nhé`; when a
+  reply only selects a pending fact ID, Python validates it against the pending
+  choices and uses the pending action even if the model mislabels the action.
+  Python still performs all update/delete operations. This correction flow is a
+  Phase 5 V1 temporary chat baseline; when the Loop/tool slot matures, memory
+  correction should become an explicit workflow/tool with durable state instead
+  of accumulating more ad-hoc chat pending logic.
 - Tool/Loop is represented in the dashboard as an intended harness slot, but it
   is not a complete tool router yet.
 
@@ -140,11 +178,17 @@ demo.
 ## Trace And Ops Dashboard
 
 Trace events are JSONL and should make a turn observable. Typical events include
-`turn_start`, `route_decision`, `memory_retrieval`, `memory_write_chat_log`,
+`turn_start`, `route_decision`, `memory_retrieval`, `memory_gate_decision`,
+`memory_correction_decision`, `memory_correction_clarify`,
+`memory_correction_applied`, `memory_write_chat_log`, `memory_write_decision`,
 `memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
 `deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
 
-Run the dashboard locally:
+Memory gate trace/runtime logs should include decision/label/query plus
+`fact_mode` and `episode_mode`, so inventory turns can be debugged without
+guessing from raw prompt text.
+
+Run the dashboard locally before starting bots:
 
 ```bash
 rtk python -m niko.ops.dashboard
@@ -164,37 +208,55 @@ Dashboard graph semantics:
 - `Memory Gate -> Memory Records`: retrieval from facts/episodes.
 - `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
 
+The dashboard `Bots` tab is the preferred place to start/stop Telegram Bot,
+warm up or stop/unload Decision Model, and inspect runtime logs. Terminal output
+should stay bootstrap-only; operational logs belong in `niko/harness/runtime_log.py`.
+Telegram Bot uses `niko/.runtime/telegram_bot.lock` as a single-instance guard;
+dashboard should show `external` instead of starting a duplicate when a terminal
+bot process already owns that lock.
+
 ## Important Docs
 
 - `README.md`: high-level setup and baseline explanation.
-- `docs/architecture.md`: repo layout, module boundaries, and runtime state.
-- `docs/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
-- `docs/niko-harness-memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
+- `docs/harness/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
+- `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
+- `docs/harness/memory-eval-scenarios.md`: deterministic chat memory eval
+  scenarios for retrieval/write/correction regression checks.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
-- `docs/demo-guide.md`: demo script for showing the harness to a supervisor.
-- `docs/memory-roadmap.md`: path from baseline memory to lakehouse/KG work.
+- `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
+- `docs/plans/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
+  implementation plan using the local Decision Model.
+- `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
+  checklist and live verification status for chat memory work.
+- `docs/memory/chat-memory-architecture-flow.md`: current/target memory
+  architecture and retrieval/write/consolidation/correction flow diagrams.
+- `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
 
 ## Environment And State
 
-Env file loading order:
+Dashboard-first config precedence:
 
 ```text
-root .env -> niko/.env -> bots/telegram/.env -> real OS environment wins
-```
-
-Effective config precedence:
-
-```text
-real OS environment -> niko/.runtime/config.json -> env files -> code defaults
+real OS environment -> niko/.runtime/config.json -> root .env bootstrap -> code defaults
 ```
 
 The dashboard Config tab writes `niko/.runtime/config.json`. Keep secrets and
-machine-specific commands in `.env` or OS env, not in dashboard runtime config.
+machine-specific commands in dashboard runtime config for local demo, unless an
+OS env override is intentionally needed. Dashboard snapshots must mask secrets.
+Root `.env` is only for dashboard bootstrap keys such as `NIKO_OPS_HOST`,
+`NIKO_OPS_PORT`, and `NIKO_RUNTIME_CONFIG_FILE`. Do not recreate `niko/.env` or
+`bots/telegram/.env`; put Telegram, agent, decision model, sticker, memory, and
+reply settings in the dashboard Config tab. Dashboard-spawned bot subprocesses
+must use `runtime_subprocess_env()` so file-env keys are not inherited as OS
+overrides.
 
-Core variables:
+Core runtime config keys:
 
 ```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_CHAT_IDS=
 CLAUDE_CLI_COMMAND=fcc-claude -p
 CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
 CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
@@ -207,16 +269,24 @@ NIKO_DECISION_MODEL_KEEP_ALIVE=-1
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_STATE_DIR=niko/.runtime
 NIKO_TRACE_ENABLED=1
+NIKO_RUNTIME_LOG_ENABLED=1
 NIKO_MEMORY_ENABLED=1
 NIKO_MEMORY_RETRIEVAL_ENABLED=1
+NIKO_MEMORY_GATE_ENABLED=0
 NIKO_MEMORY_WRITE_ENABLED=1
+NIKO_MEMORY_WRITE_GATE_ENABLED=0
+NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
 NIKO_MEMORY_TOP_K=4
+NIKO_MEMORY_RECENT_TURNS=6
+NIKO_MEMORY_RECENT_CHAR_BUDGET=2400
+NIKO_MEMORY_LONG_TERM_CHAR_BUDGET=3600
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
 ```
 
 Do not reveal or commit secrets from `.env` files, Telegram tokens, runtime
-SQLite data, or trace contents that may contain private conversation data.
+config, runtime SQLite data, trace contents, or runtime logs that may contain
+private conversation data.
 
 ## Development Commands
 
@@ -228,6 +298,10 @@ rtk python -m bots.decision_model.warmup
 rtk python -m bots.telegram.bot
 rtk python -m niko.ops.dashboard
 ```
+
+Preferred manual run order is dashboard first, then use tab `Bots` to warm up
+Decision Model and start Telegram Bot. Direct bot/warmup commands remain useful
+for debugging.
 
 If calling PowerShell cmdlets through `rtk`, invoke PowerShell explicitly:
 

@@ -54,25 +54,37 @@ bots/
     client.py          # Ollama /v1/systemone client cho Nimble decision model
     triage.py          # Mapping prompt Telegram sang reply_now/send_to_deep
     sticker.py         # Mapping prompt/reply sang mood sticker Telegram
-    warmup.py          # Giu Nimble loaded voi keep_alive=-1
+    memory/            # Retrieval/write/candidate/correction decisions cho chat memory
+    warmup.py          # Giữ Nimble loaded với keep_alive=-1
   telegram/
     bot.py             # Telegram gateway: polling, auth, mention filter, /id, reply, sticker
-    sticker_picker.py  # Chon file_id theo mood sticker da quyet dinh
+    instance_guard.py  # Single-instance lock/PID guard cho Telegram long polling
+    sticker_picker.py  # Chọn file_id theo mood sticker đã quyết định
     stickers/
       ducks.json       # Mapping mood sang sticker Telegram
 
 niko/
   runtime.py           # Gọi Claude CLI, đọc hook, build prompt, inject memory context
-  config.py            # Load env và resolve project path
+  config.py            # Load bootstrap env, runtime config và resolve project path
   chat_gateway.py      # ChatGatewayMessage, identity, alias, allowed user parsing
   HOOK.md              # Persona/hook nạp vào Niko
   harness/
     trace.py           # JSONL turn/event tracing
+    runtime_log.py     # JSONL runtime log cho tab Bots
   memory/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
-    context.py         # Retrieve memory context cho Deep agent
+    runtime.py         # MemoryRuntime điều phối retrieval/write/correction, consolidation và format context
+    context.py         # Dataclass, formatter và wrapper tương thích
+    working_memory.py  # Recent conversation window tạm thời cho Deep/correction
+    correction_workflow.py # Workflow sửa/xóa fact qua chat
+    consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
   ops/
-    dashboard.py       # Mini Niko Ops dashboard
+    dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
+    bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
+    config_schema.py   # Schema, validate, snapshot cho dashboard Config
+    frontend.py        # Load HTML template
+    templates/
+      dashboard.html   # HTML/CSS/JS của dashboard
   graphs/
     chat_reply/
       graph.py         # ChatReplyGraph điều phối flow chat
@@ -88,9 +100,14 @@ niko/
 
 `niko.graphs.chat_reply` là graph nghiệp vụ chat. Nó quyết định route local/fast/deep/busy, quản lý deep job background, ghi trace, ghi chat log và episode sau deep job.
 
-`niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, retrieve memory context rồi gọi `fcc-claude`.
+`niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, gọi `MemoryRuntime` để lấy memory context rồi gọi `fcc-claude`.
 
-`niko.memory` là memory baseline. Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback search nếu không có FTS5.
+`niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval
+gate, retrieval modes (`search/list/recent/none`), recent working memory, write
+gate, correction facade, manual consolidation và format context cho Deep.
+`MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
+Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
+search nếu không có FTS5.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
@@ -106,67 +123,32 @@ Telegram gateway đang tạo một instance global:
 CHAT_REPLY_GRAPH = ChatReplyGraph()
 ```
 
-## Env Chính
+## Config Chính
 
-Root `.env` giữ cấu hình chung:
+Luồng vận hành chính là dashboard-first:
 
-- `CLAUDE_CLI_COMMAND`
-- `CLAUDE_DEEP_AGENT_COMMAND`
-- `CLAUDE_WORKDIR`
-- `CLAUDE_TIMEOUT_SECONDS`
-- `CHAT_IDENTITY_ENABLED`
-- `CHAT_ALLOWED_USER_KEYS`
-- `CHAT_USER_ALIASES`
+1. Chạy `python -m niko.ops.dashboard`.
+2. Chỉnh cấu hình trong tab Config.
+3. Start Telegram bot và warmup/stop Decision Model trong tab Bots.
 
-`niko/.env` giữ cấu hình agent/harness:
+Các nhóm config chính trong dashboard:
 
-- `NIKO_AGENT_MODE`
-- `NIKO_DECISION_MODEL_ENABLED`
-- `NIKO_DECISION_MODEL_BASE_URL`
-- `NIKO_DECISION_MODEL_NAME`
-- `NIKO_DECISION_MODEL_TIMEOUT_SECONDS`
-- `NIKO_DECISION_MODEL_KEEP_ALIVE`
-- `NIKO_FAST_AGENT_COMMAND`
-- `NIKO_FAST_AGENT_TIMEOUT_SECONDS`
-- `NIKO_UNCERTAIN_DELAY_SECONDS`
-- `NIKO_DEEP_WAIT_REPLY`
-- `NIKO_DEEP_BUSY_REPLY`
-- `NIKO_PROMPT_HOOK_FILE`
-- `NIKO_REPLY_SUFFIX`
-- `NIKO_TOOL_UNAVAILABLE_REPLY`
-- `NIKO_STATE_DIR`
-- `NIKO_TRACE_ENABLED`
-- `NIKO_MEMORY_ENABLED`
-- `NIKO_MEMORY_RETRIEVAL_ENABLED`
-- `NIKO_MEMORY_WRITE_ENABLED`
-- `NIKO_MEMORY_TOP_K`
-- `NIKO_OPS_HOST`
-- `NIKO_OPS_PORT`
+- `Telegram Gateway`: token, allowlist, group mode, timeout/retry.
+- `Agent Commands`: Claude/Fast command, workdir, timeout, hook file, identity.
+- `Decision Model`: Ollama/Nimble base URL, model, triage/warmup/stop timeout, keep alive.
+- `Sticker`: bật/tắt sticker, sticker set/config/mode, timeout.
+- `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, trace, runtime log.
+- `Replies`: suffix, wait/busy/error text.
 
-`bots/telegram/.env` giữ cấu hình Telegram:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ALLOWED_CHAT_IDS`
-- `TELEGRAM_DROP_PENDING_UPDATES`
-- `TELEGRAM_REQUEST_TIMEOUT_SECONDS`
-- `TELEGRAM_CHAT_ACTION_TIMEOUT_SECONDS`
-- `TELEGRAM_STARTUP_RETRIES`
-- `TELEGRAM_STARTUP_RETRY_DELAY_SECONDS`
-- `TELEGRAM_GROUP_MODE`
-- `TELEGRAM_MENTION_REPLIES`
-- `TELEGRAM_STICKERS_ENABLED`
-- `TELEGRAM_STICKER_DECISION_MODEL_ENABLED`
-- `TELEGRAM_STICKER_DECISION_MODEL_TIMEOUT_SECONDS`
-- `TELEGRAM_STICKER_CONFIG_FILE`
-- `TELEGRAM_STICKER_SET_NAME`
-- `TELEGRAM_STICKER_MODE`
-- `TELEGRAM_STICKER_TIMEOUT_SECONDS`
-
-Thứ tự load env file hiện tại: root `.env` -> `niko/.env` -> `bots/telegram/.env`.
 Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
-Thứ tự cấu hình hiệu lực là: OS env thật -> runtime config -> env file ->
-default trong code. Secret/token vẫn nằm ở `.env` hoặc OS env, không chỉnh trên
-dashboard.
+Khi cần thao tác nhanh, có thể sửa trực tiếp file JSON này rồi refresh dashboard;
+với key được đọc lúc process start như token, allowlist hoặc agent command thì
+restart Telegram Bot trong tab Bots.
+Niko không còn dùng `niko/.env` hoặc `bots/telegram/.env`; chỉ root `.env` còn
+vai trò bootstrap dashboard (`NIKO_OPS_HOST`, `NIKO_OPS_PORT`,
+`NIKO_RUNTIME_CONFIG_FILE`). Thứ tự cấu hình hiệu lực là: OS env thật -> runtime
+config -> root `.env` bootstrap -> default trong code. Secret/token có thể lưu
+trong runtime config local; dashboard mask secret trong snapshot/API.
 
 ## Dữ Liệu Runtime
 
@@ -175,6 +157,7 @@ niko/.runtime/
   config.json                      # Runtime config do dashboard Config ghi
   niko_memory.sqlite3              # SQLite memory
   traces/YYYY-MM-DD.jsonl          # JSONL trace
+  logs/YYYY-MM-DD.jsonl            # Runtime log cho tab Bots
   claude_sandbox/                  # CLAUDE_WORKDIR
 ```
 
@@ -187,8 +170,13 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 - Gateway Telegram chạy thật.
 - Fast/Deep agent flow.
 - Memory retrieval cho Deep agent.
+- Recent working-memory window cho Deep prompt theo `conversation_id`.
+- Retrieval/write gate bằng local Decision Model, gồm mode inventory qua
+  `fact_mode`/`episode_mode`.
+- Memory correction V1 qua chat: nhận diện sửa/xóa fact, hỏi lại khi mơ hồ và
+  update/delete SQLite có trace. Đây là lớp tạm trước khi có Loop/tool workflow.
 - Manual semantic facts qua dashboard.
-- Episodic record sau deep job.
+- Episodic record sau deep job và manual consolidation batch từ `chat_log`.
 - JSONL trace và Mini Ops dashboard.
 
 Chưa có:
@@ -197,11 +185,12 @@ Chưa có:
 - Long-running loop nhiều bước có tool execution.
 - Automatic semantic extraction đáng tin cậy từ mọi đoạn chat.
 - Embedding/rerank/graph reasoning.
-- Lakehouse/Knowledge Graph production layer.
+- Lakehouse/Knowledge Graph production layer cho Jira/business data.
 
 ## Hướng Mở Rộng
 
 - Thêm gateway mới: tạo folder trong `bots/`, parse message về `ChatGatewayMessage`, rồi gọi `ChatReplyGraph`.
 - Thêm nghiệp vụ mới: tạo graph mới trong `niko/graphs/`.
 - Thêm tool/loop: dùng `Tool Slot` hiện có như điểm mở rộng, nhưng giữ Telegram gateway mỏng.
-- Cải tiến memory: đọc dữ liệu từ SQLite/JSONL baseline, chuẩn hóa thành lakehouse, dựng graph schema, rồi dùng graph/semantic retrieval để thay thế baseline search.
+- Cải tiến chat memory: làm chắc retrieval/write gate, consolidation và correction trên SQLite local trước.
+- Cải tiến memory nghiệp vụ: nối sang lane lakehouse/Jira qua retrieval/tool slot khi cần dữ liệu issue/tài liệu, không trộn vào chat memory v1.
