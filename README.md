@@ -15,7 +15,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 - Harness tracing: ghi JSONL event theo từng turn.
 - SQLite memory baseline:
   - `chat_log`: lịch sử hội thoại đã xử lý.
-  - `facts`: Semantic Memory thủ công/baseline.
+  - `facts`: Semantic Memory thủ công hoặc tạo từ consolidation bảo thủ.
   - `episodes`: Episodic Memory sinh ra sau deep job.
   - retrieval/write gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
@@ -32,7 +32,7 @@ niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
-niko/memory/runtime.py           # Khung điều phối retrieval/gate/format memory
+niko/memory/runtime.py           # Khung điều phối retrieval modes/write gate/format memory
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
 niko/ops/                       # Mini Niko Ops dashboard
@@ -157,7 +157,8 @@ Các kịch bản demo nhanh:
 - Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> Router -> Reply` hoặc `Gateway -> Router -> Fast Agent -> Reply`.
 - Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
-- Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`, `turn_end`.
+- Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`,
+  `memory_gate_decision`, `memory_write_decision`, `turn_end`.
 - Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
 Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
@@ -176,7 +177,7 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 
 Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại cố ý đơn giản để phục vụ demo và đo điểm yếu:
 
-- Semantic facts chủ yếu thêm thủ công qua dashboard.
+- Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit/manual consolidation.
 - Retrieval là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

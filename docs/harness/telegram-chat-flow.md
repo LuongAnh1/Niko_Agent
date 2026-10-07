@@ -234,7 +234,7 @@ Deep background:
 
 - Tool router chưa hoàn chỉnh.
 - Loop mới là khung/slot trên dashboard, chưa phải multi-step planner thực thụ.
-- Semantic facts chủ yếu thêm thủ công.
+- Semantic facts chủ yếu thêm thủ công hoặc từ explicit/manual consolidation.
 - Episodic memory mới tóm tắt deep job.
 - Retrieval còn dựa trên text search, chưa có embedding/rerank/Knowledge Graph.
 

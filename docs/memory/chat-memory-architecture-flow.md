@@ -95,17 +95,17 @@ sequenceDiagram
 
     alt retrieval disabled
         Mem-->>Deep: empty RetrievedMemory
-    else inventory question
-        Mem->>Store: list_facts / recent_episodes
-        Mem->>Trace: memory_retrieval
-        Mem-->>Deep: formatted memory context
     else retrieval gate enabled
         Mem->>DM: decide_memory_retrieval
         alt skip
             Mem->>Trace: memory_gate_decision skip
             Mem-->>Deep: no memory context
-        else retrieve
+        else retrieve + search mode
             Mem->>Store: search_facts/search_episodes(query)
+            Mem->>Trace: memory_retrieval + gate metadata
+            Mem-->>Deep: formatted memory context
+        else retrieve + inventory mode
+            Mem->>Store: list_facts / recent_episodes
             Mem->>Trace: memory_retrieval + gate metadata
             Mem-->>Deep: formatted memory context
         else gate error
@@ -124,6 +124,10 @@ sequenceDiagram
 
 Nguyên tắc: retrieval gate lỗi thì fail-open, vì bỏ lỡ memory cần thiết thường tệ
 hơn việc retrieve hơi dư. Fast triage không nhận memory context để giữ route JSON sạch.
+
+Inventory không còn bypass gate bằng keyword Python. Câu kiểu "đang lưu fact nào"
+vẫn đi qua Decision Model; model chọn `list_facts`, `recent_episodes`, hoặc trả
+`fact_mode=list` / `episode_mode=recent` để MemoryRuntime thực thi bằng store.
 
 ## 4. Write Flow Hiện Tại
 
@@ -255,19 +259,19 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 0 | Ranh giới chat memory vs lakehouse/Jira | done |
 | 0.5 | `MemoryRuntime` làm cổng pipeline trung tâm | done |
 | 1 | Decision model memory tasks | retrieval/write/classifier done, correction planned |
-| 2 | Retrieval gate cho Deep | done, default-off |
+| 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
-| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier done, auto threshold planned |
+| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
 | 5 | Correction/forget qua chat/dashboard | planned |
 | 6 | Working memory rõ: recent/current/long-term | planned |
-| 7 | Eval riêng cho memory | partial tests done, eval scenarios planned |
+| 7 | Eval riêng cho memory | unit tests and live verification done, eval scenarios planned |
 
 ## 9. Nguyên Tắc Kiểm Soát
 
 1. Telegram gateway không chứa logic memory.
 2. `ChatReplyGraph` điều phối flow chat, nhưng không ôm policy retrieval/write.
 3. `MemoryRuntime` là cổng chính cho memory pipeline.
-4. Decision model chỉ trả label/query/reason, không tự ghi database.
+4. Decision model chỉ trả label/mode/query/reason, không tự ghi database.
 5. SQLite là source of truth cho v1.
 6. `chat_log` luôn là operational log; write gate chỉ chặn long-term `episodes`.
 7. Retrieval gate lỗi thì fail-open để không bỏ lỡ memory cần dùng.

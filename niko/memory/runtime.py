@@ -1,7 +1,7 @@
 """Khung điều phối chat memory của Niko.
 
 `MemoryRuntime` là cổng chính giữa Deep runtime và memory store. Lớp này gom
-policy retrieval, gate bằng decision model, inventory question, search store và
+policy retrieval, gate bằng decision model, retrieval modes, search/list store và
 format context vào một pipeline rõ ràng để các bước sau như write gate hay
 consolidation có chỗ cắm ổn định hơn.
 """
@@ -46,7 +46,7 @@ MemoryWriteDecider = Callable[[str, str, list[str] | None, object | None, str], 
 
 
 class MemoryRuntime:
-    """Pipeline memory cho một Niko instance, tách khỏi Claude CLI runtime."""
+    """Cổng memory trung tâm cho retrieval modes, write gate, chat log và consolidation."""
 
     def __init__(
         self,

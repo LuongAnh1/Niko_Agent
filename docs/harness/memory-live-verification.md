@@ -44,7 +44,8 @@ hiện trong log.
 
 Trong tab `Bots` hoặc bảng runtime log, tìm các event:
 
-- `memory_gate_decision`: có `decision`, `query`, `reason`, `confidence`, `model`.
+- `memory_gate_decision`: có `decision`, `query`, `reason`, `fact_mode`,
+  `episode_mode`, `confidence`, `model`.
 - `memory_gate_error`: Ollama/Nimble lỗi; retrieval phải fail-open bằng raw prompt.
 - `memory_retrieval`: có facts/episodes được retrieve và metadata gate.
 - `memory_write_decision`: có `remember` hoặc `discard`.

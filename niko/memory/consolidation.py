@@ -4,6 +4,9 @@ Luồng hiện tại cố ý bảo thủ: rule nội bộ chỉ tạo candidate 
 quyết định local chỉ phân loại candidate, rồi module này mới ghi vào `facts`
 hoặc `episodes`. Nếu classifier lỗi thì batch không bị mark done để anh có thể
 chạy lại sau, tránh mất dữ liệu hội thoại.
+
+V1 chưa có scheduler/threshold tự động hoặc summarizer tự do; dashboard/manual
+trigger gọi `run_once` khi cần kiểm thử.
 """
 
 from __future__ import annotations

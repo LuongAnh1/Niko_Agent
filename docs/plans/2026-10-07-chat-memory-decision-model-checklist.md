@@ -75,9 +75,10 @@ nhưng vẫn fail-open để không bỏ lỡ memory thật sự cần.
 - [x] Thêm runtime log `memory_gate_decision`.
 - [x] Thêm runtime log `memory_gate_error`.
 - [x] Tránh circular import bằng import runtime logger cục bộ trong hàm log.
-- [ ] Test thực tế trên Telegram với `NIKO_MEMORY_GATE_ENABLED=1`.
-- [ ] Quan sát tab Bots xem log gate có đủ dễ đọc không.
-- [ ] Quan sát tab Traces xem `gate_decision`, `gate_query`, `gate_reason` có đủ debug không.
+- [x] Test thực tế trên Telegram với `NIKO_MEMORY_GATE_ENABLED=1`.
+- [x] Quan sát tab Bots xem log gate có đủ dễ đọc không.
+- [x] Quan sát tab Traces xem `gate_decision`, `gate_query`, `gate_reason`,
+  `gate_fact_mode`, `gate_episode_mode` có đủ debug không.
 - [x] Ghi prompt mẫu cho gate `skip`, `retrieve`, fail-open.
 - [ ] Nếu Nimble hay thiếu `query`, chỉnh instructions của gate.
 - [ ] Nếu gate làm chậm Deep rõ rệt, cân nhắc timeout riêng.
@@ -183,6 +184,8 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Model lỗi hoặc output không parse được thì không mark consolidated.
 - [x] No facts hợp lệ vẫn có thể mark done nếu batch chỉ là small talk.
 - [x] Thêm dashboard/manual trigger nếu cần debug consolidation.
+- [ ] Tinh chỉnh write gate để các lượt chỉ inspect/list memory thường `discard`,
+  tránh ghi episode nhiễu khi người dùng chỉ hỏi Niko đang nhớ gì.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
 
@@ -242,11 +245,11 @@ khi coi là xong.
 - [x] `rtk python -m pytest` pass sau refactor `MemoryRuntime`.
 - [x] `rtk python -m pytest` pass sau write gate v1.
 - [x] Link docs nội bộ pass.
-- [ ] Bật gate trên dashboard không làm Telegram bot crash.
+- [x] Bật gate trên dashboard không làm Telegram bot crash.
 - [x] Config dashboard hiển thị mô tả dễ hiểu cho từng key memory/decision mới.
-- [ ] Khi gate skip, Deep prompt không chứa `Semantic memory / facts`.
-- [ ] Khi gate retrieve, Deep prompt có memory context phù hợp.
-- [ ] Khi Ollama/Nimble lỗi, Deep vẫn chạy với retrieval fallback.
+- [x] Khi gate skip, Deep prompt không chứa `Semantic memory / facts`.
+- [x] Khi gate retrieve, Deep prompt có memory context phù hợp.
+- [x] Khi Ollama/Nimble lỗi, Deep vẫn chạy với retrieval fallback.
 
 ## Chưa Làm Cố Ý Ở V1
 

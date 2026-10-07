@@ -35,8 +35,9 @@ separate business backend lane that Niko can retrieve from later.
   Keep this layer thin. It should not own memory, routing, or LLM policy.
 - `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
   `/v1/systemone` client, route-label mapping, sticker mood, memory retrieval/write
-  decisions, and warmup script for keeping the model loaded. This layer decides
-  labels only; it should not generate free-form user replies.
+  decisions, memory candidate classification, and warmup script for keeping the
+  model loaded. This layer decides labels/modes only; it should not generate
+  free-form user replies.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
@@ -51,9 +52,10 @@ separate business backend lane that Niko can retrieve from later.
   table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
 - `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
   and consolidation state. Uses FTS5 when available, with LIKE fallback.
-- `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate, write
-  gate, inventory questions, store search, chat log writes, episode writes,
-  consolidation scaffold, and context formatting before Deep.
+- `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
+  retrieval modes (`search/list/recent/none`), write gate, store search/list,
+  chat log writes, episode writes, consolidation scaffold, and context
+  formatting before Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
@@ -109,17 +111,21 @@ new triage work should prefer `bots/decision_model/`.
 SQLite currently stores three groups of data:
 
 - `chat_log`: operational conversation log for user/assistant messages.
-- `facts`: Semantic Memory baseline, mostly manually added facts/rules/context.
+- `facts`: Semantic Memory baseline, added manually through Ops/API or through
+  conservative consolidation of explicit chat facts.
 - `episodes`: Episodic Memory baseline, mostly completed Deep jobs and followups.
 
 Important boundaries:
 
 - `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
   operational log that can later feed analysis.
-- Semantic extraction is not mature yet. Facts are mainly added through Ops/API.
+- Semantic extraction is not mature yet. Facts are mainly added through Ops/API
+  and explicit/manual consolidation; free-form summarizer extraction is not built
+  yet.
 - Episodic records are basic summaries of deep work, not rich event models yet.
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
-  reasoning.
+  reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
+  episodes and retrieval modes, but it does not write SQLite data itself.
 - Tool/Loop is represented in the dashboard as an intended harness slot, but it
   is not a complete tool router yet.
 
@@ -150,9 +156,14 @@ demo.
 ## Trace And Ops Dashboard
 
 Trace events are JSONL and should make a turn observable. Typical events include
-`turn_start`, `route_decision`, `memory_retrieval`, `memory_write_chat_log`,
-`memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
-`deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
+`turn_start`, `route_decision`, `memory_retrieval`, `memory_gate_decision`,
+`memory_write_chat_log`, `memory_write_decision`, `memory_write_episode`,
+`deep_job_started`, `deep_agent_call_started`, `deep_agent_call_finished`,
+`reply_delivered`, errors, and `turn_end`.
+
+Memory gate trace/runtime logs should include decision/label/query plus
+`fact_mode` and `episode_mode`, so inventory turns can be debugged without
+guessing from raw prompt text.
 
 Run the dashboard locally before starting bots:
 
@@ -192,6 +203,10 @@ bot process already owns that lock.
 - `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
 - `docs/plans/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
   implementation plan using the local Decision Model.
+- `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
+  checklist and live verification status for chat memory work.
+- `docs/memory/chat-memory-architecture-flow.md`: current/target memory
+  architecture and retrieval/write/consolidation flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
 
 ## Environment And State

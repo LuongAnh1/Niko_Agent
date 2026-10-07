@@ -9,7 +9,7 @@ Checklist kiểm tra live qua Telegram nằm ở [Memory Live Verification](memo
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
 - `niko/harness/runtime_log.py`: ghi runtime log JSONL cho tab Bots.
 - `niko/memory/store.py`: SQLite memory store.
-- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, write gate, inventory, search store, consolidation scaffold và format context.
+- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, retrieval modes (`search/list/recent/none`), write gate, search/list store, consolidation scaffold và format context.
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
 - `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated và mark-done có kiểm soát.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
@@ -74,6 +74,11 @@ user prompt
 
 `retrieve_memory_context(...)` vẫn tồn tại như wrapper tương thích, nhưng cổng chính của pipeline là `MemoryRuntime`. Cách tách này giống tinh thần Waku hơn: runtime/graph chỉ gọi một memory pipeline, còn policy gate/search/format nằm trong memory layer.
 
+Khi `NIKO_MEMORY_GATE_ENABLED=1`, câu hỏi inventory như "đang lưu fact nào" cũng
+đi qua Decision Model. Nimble có thể trả `list_facts`, `recent_episodes`, hoặc
+mode `fact_mode=list` / `episode_mode=recent`; Python chỉ thực thi mode đó bằng
+SQLite store, không bypass bằng keyword riêng.
+
 Fast triage không nhận memory context để giữ JSON sạch.
 
 ## Memory Write
@@ -105,11 +110,17 @@ Guardrail hiện tại:
 Các event trace liên quan:
 
 - `memory_retrieval`
+- `memory_gate_decision`
+- `memory_gate_error`
 - `memory_write_chat_log`
 - `memory_write_decision`
 - `memory_write_gate_error`
 - `memory_write_episode`
 - `memory_write_error`
+
+Với retrieval gate, trace/runtime log cần đọc cùng lúc `gate_decision`,
+`gate_label`, `gate_query`, `gate_fact_mode` và `gate_episode_mode`. Inventory
+chung có thể để `query` rỗng nhưng vẫn đúng nếu mode là `list` hoặc `recent`.
 
 ## Mini Niko Ops Dashboard
 

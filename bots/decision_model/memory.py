@@ -1,7 +1,8 @@
 """Decision Model tasks cho chat memory của Niko.
 
-Module này giữ các câu hỏi hẹp gửi tới Ollama/Nimble. Nó chỉ trả label và
-metadata; việc search SQLite hay ghi memory vẫn thuộc `niko.memory`.
+Module này giữ các câu hỏi hẹp gửi tới Ollama/Nimble cho retrieval, write và
+candidate classification. Nó chỉ trả label/mode/query/reason cùng metadata; việc
+search/list SQLite hay ghi memory vẫn thuộc `niko.memory`.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ MAX_MEMORY_GATE_PROMPT_LENGTH = 1600
 
 @dataclass(frozen=True)
 class MemoryRetrievalDecision:
-    """Quyết định đã chuẩn hóa cho bước retrieval long-term memory."""
+    """Quyết định retrieval đã chuẩn hóa, gồm nhãn retrieve/skip và mode facts/episodes."""
 
     decision: str
     query: str = ""

@@ -1,9 +1,9 @@
-"""Memory retrieval context cho Deep agent.
+"""Kiểu dữ liệu, config helper và formatter cho memory context.
 
-Graph chỉ cần một đoạn text phụ trợ để nhét vào prompt Deep. File này quyết
-định lấy facts/episodes nào từ SQLite baseline và format chúng thành context.
-Nó chưa làm embedding, rerank hay graph reasoning; đây là tầng text retrieval
-đủ rõ để demo memory pipeline.
+Quyết định lấy gì nằm ở `MemoryRuntime` và Decision Model. File này giữ
+`RetrievedMemory`, các flag cấu hình, helper log gate và formatter biến
+facts/episodes thành đoạn context phụ trợ cho Deep. Nó chưa làm embedding,
+rerank hay graph reasoning; retrieval v1 vẫn là FTS/LIKE text search.
 """
 
 from __future__ import annotations
