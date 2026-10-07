@@ -14,3 +14,4 @@ Roadmap dài hạn không đặt ở đây; dùng `docs/memory/` hoặc folder d
 
 - [Kế hoạch Chat Memory Decision Model](2026-10-07-chat-memory-decision-model.md)
 - [Checklist Chat Memory Decision Model](2026-10-07-chat-memory-decision-model-checklist.md)
+- [Checklist Live Test Chat Memory Phase 6/7](2026-10-07-chat-memory-live-test-checklist.md)

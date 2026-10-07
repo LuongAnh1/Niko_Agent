@@ -139,15 +139,16 @@ Important boundaries:
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
   reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
   episodes and retrieval modes, but it does not write SQLite data itself.
-- Memory correction sends `current_prompt` plus `recent_turns` as the primary
-  short-term conversation context. `active_workflow` and `pending_choices` are
-  auxiliary guardrail metadata for short follow-ups like `fact #8 nhé`; when a
-  reply only selects a pending fact ID, Python validates it against the pending
-  choices and uses the pending action even if the model mislabels the action.
-  Python still performs all update/delete operations. This correction flow is a
-  Phase 5 V1 temporary chat baseline; when the Loop/tool slot matures, memory
-  correction should become an explicit workflow/tool with durable state instead
-  of accumulating more ad-hoc chat pending logic.
+- Memory correction treats `current_prompt` as the primary evidence. Recent
+  turns are only attached when the current prompt has an explicit sửa/xóa/quên
+  signal or is a pending fact-ID follow-up. Neutral prompts must not inherit old
+  correction context. When a reply only selects a pending fact ID, Python
+  validates it against the pending choices and uses the pending action without
+  calling the model again. Python still performs all update/delete operations.
+  This correction flow is a Phase 5 V1 temporary chat baseline; when the
+  Loop/tool slot matures, memory correction should become an explicit
+  workflow/tool with durable state instead of accumulating more ad-hoc chat
+  pending logic.
 - Tool/Loop is represented in the dashboard as an intended harness slot, but it
   is not a complete tool router yet.
 
@@ -230,6 +231,8 @@ bot process already owns that lock.
   implementation plan using the local Decision Model.
 - `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
   checklist and live verification status for chat memory work.
+- `docs/plans/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
+  checklist for current Phase 6/7 memory flow verification.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.

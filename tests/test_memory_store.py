@@ -1115,12 +1115,12 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertEqual(state["pending_action"], MEMORY_FORGET_MEMORY)
         self.assertEqual(state["pending_choices"], [{"type": MEMORY_TARGET_FACT, "id": 8}])
         self.assertEqual(state["recent_turns"][0]["route"], "memory_correction")
-        self.assertIn("primary conversation context", state["decision_context"])
-        self.assertIn("auxiliary metadata", state["decision_context"])
+        self.assertIn("primary evidence", state["decision_context"])
+        self.assertIn("active correction flow", state["decision_context"])
         self.assertIn(MEMORY_CORRECT_MEMORY, criteria)
         self.assertIn(MEMORY_FORGET_MEMORY, criteria)
         self.assertIn("replacement", instructions)
-        self.assertIn("primary context", instructions)
+        self.assertIn("primary evidence", instructions)
         self.assertIn("auxiliary state", instructions)
         self.assertEqual(normalize_memory_correction_choice("delete-memory"), MEMORY_FORGET_MEMORY)
         self.assertEqual(normalize_memory_correction_choice("fix memory"), MEMORY_CORRECT_MEMORY)
@@ -1242,23 +1242,11 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
             first = store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
             second = store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
-            seen_contexts: list[dict] = []
+            calls = 0
 
-            def context_aware_decider(prompt, _gateway, decision_context=None):
-                seen_contexts.append(decision_context or {})
-                if "fact #" in prompt:
-                    recent_turns = decision_context.get("recent_turns", []) if decision_context else []
-                    has_clarifying_context = any(
-                        turn.get("role") == "assistant" and "fact #" in turn.get("content", "")
-                        for turn in recent_turns
-                    )
-                    if not has_clarifying_context:
-                        return MemoryCorrectionDecision(decision=MEMORY_CORRECTION_NONE)
-                    return MemoryCorrectionDecision(
-                        decision=MEMORY_FORGET_MEMORY,
-                        target_type=MEMORY_TARGET_FACT,
-                        reason="followup_choice",
-                    )
+            def context_aware_decider(_prompt, _gateway, _decision_context=None):
+                nonlocal calls
+                calls += 1
                 return MemoryCorrectionDecision(
                     decision=MEMORY_FORGET_MEMORY,
                     query="checklist",
@@ -1316,12 +1304,11 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertTrue(applied.handled)
         self.assertIn(f"fact #{first}", applied.reply)
         self.assertEqual([fact.id for fact in facts], [second])
-        self.assertEqual(seen_contexts[1]["active_workflow"], "memory_correction")
-        self.assertEqual(seen_contexts[1]["pending_action"], MEMORY_FORGET_MEMORY)
-        self.assertEqual(seen_contexts[1]["recent_turns"][-1]["role"], "assistant")
-        self.assertEqual({choice["id"] for choice in seen_contexts[1]["pending_choices"]}, {first, second})
+        self.assertEqual(calls, 1)
+        self.assertEqual(applied.decision["decision"], MEMORY_FORGET_MEMORY)
+        self.assertEqual(applied.decision["label"], "pending_followup")
 
-    def test_memory_correction_pending_choice_uses_pending_action_when_model_mislabels(self):
+    def test_memory_correction_pending_choice_bypasses_model_after_first_decision(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
             first = store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
@@ -1331,18 +1318,12 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
             def mislabeling_decider(_prompt, _gateway, decision_context=None):
                 nonlocal calls
                 calls += 1
-                if calls == 1:
-                    return MemoryCorrectionDecision(
-                        decision=MEMORY_FORGET_MEMORY,
-                        query="checklist",
-                        target_type=MEMORY_TARGET_FACT,
-                        reason="explicit forget",
-                    )
-                self.assertEqual(decision_context["pending_action"], MEMORY_FORGET_MEMORY)
+                self.assertEqual(calls, 1)
                 return MemoryCorrectionDecision(
-                    decision=MEMORY_CORRECT_MEMORY,
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist",
                     target_type=MEMORY_TARGET_FACT,
-                    reason="model misread selection as correction",
+                    reason="explicit forget",
                 )
 
             runtime = MemoryRuntime(store=store, correction_decider=mislabeling_decider)
@@ -1383,8 +1364,9 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertTrue(applied.handled)
         self.assertIn(f"fact #{first}", applied.reply)
         self.assertEqual([fact.id for fact in facts], [second])
+        self.assertEqual(calls, 1)
         self.assertEqual(applied.decision["decision"], MEMORY_FORGET_MEMORY)
-        self.assertEqual(applied.decision["model_decision"], MEMORY_CORRECT_MEMORY)
+        self.assertEqual(applied.decision["label"], "pending_followup")
 
     def test_memory_correction_decision_context_excludes_current_incoming_prompt(self):
         captured_contexts: list[dict] = []
@@ -1395,6 +1377,7 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            current_prompt = "sửa fact checklist màu xanh thành checklist có mục đích rõ ràng"
             store.log_chat("456", "user", "quên fact checklist màu xanh", source="test", meta={"route": "incoming"})
             store.log_chat(
                 "456",
@@ -1403,7 +1386,7 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
                 source="test",
                 meta={"route": "memory_correction"},
             )
-            store.log_chat("456", "user", "fact #8 nhé", source="test", meta={"route": "incoming"})
+            store.log_chat("456", "user", current_prompt, source="test", meta={"route": "incoming"})
             runtime = MemoryRuntime(store=store, correction_decider=capturing_decider)
 
             with patch.dict(
@@ -1417,7 +1400,7 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
             ):
                 result = runtime.handle_memory_correction(
                     "456",
-                    "fact #8 nhé",
+                    current_prompt,
                     self._message(),
                     "trace-1",
                     self._trace(temp_dir),
@@ -1426,7 +1409,63 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertFalse(result.handled)
         recent_turns = captured_contexts[0]["recent_turns"]
         self.assertEqual(recent_turns[-1]["role"], "assistant")
-        self.assertNotIn("fact #8 nhé", [turn["content"] for turn in recent_turns])
+        self.assertNotIn(current_prompt, [turn["content"] for turn in recent_turns])
+
+    def test_memory_correction_skips_neutral_prompt_after_recent_correction_context(self):
+        def failing_decider(_prompt, _gateway, _decision_context=None):
+            raise AssertionError("neutral prompt should not call correction model")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
+            store.log_chat("456", "user", "quên fact checklist giúp anh", source="test", meta={"route": "incoming"})
+            store.log_chat(
+                "456",
+                "assistant",
+                "Anh chọn một trong các fact này giúp em: fact #8, fact #6.",
+                source="test",
+                meta={"route": "memory_correction"},
+            )
+            store.log_chat("456", "user", "fact #8 nhé", source="test", meta={"route": "incoming"})
+            store.log_chat(
+                "456",
+                "assistant",
+                "Dạ em đã xóa fact #8.",
+                source="test",
+                meta={"route": "memory_correction"},
+            )
+            runtime = MemoryRuntime(store=store, correction_decider=failing_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "Trong bài test phase 6 này, từ khóa tạm thời là quả mận xanh.",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+                wait_result = runtime.handle_memory_correction(
+                    "456",
+                    "anh đợi em chút nhé",
+                    self._message(),
+                    "trace-2",
+                    self._trace(temp_dir),
+                )
+
+        self.assertFalse(result.handled)
+        self.assertEqual(result.decision["decision"], MEMORY_CORRECTION_NONE)
+        self.assertEqual(result.decision["reason"], "no_explicit_correction_signal")
+        self.assertEqual(result.decision["recent_turn_count"], 0)
+        self.assertFalse(wait_result.handled)
+        self.assertEqual(wait_result.decision["reason"], "no_explicit_correction_signal")
 
     def test_memory_correction_updates_unique_fact(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -26,6 +26,12 @@ from bots.decision_model.memory import (
     MemoryCorrectionDecision,
     decide_memory_correction_intent,
 )
+from bots.decision_model.memory.correction import (
+    has_correct_memory_marker,
+    has_delete_memory_marker,
+    is_memory_readonly_prompt,
+    normalize_correction_prompt_text,
+)
 from niko.memory.context import memory_correction_detection_enabled
 from niko.memory.store import MemoryStore, default_memory_store
 from niko.memory.working_memory import recent_chat_window
@@ -84,6 +90,17 @@ class MemoryCorrectionWorkflow:
     ) -> MemoryCorrectionResult:
         """Xử lý yêu cầu sửa/xóa fact qua chat nếu correction gate nhận diện rõ."""
         decision_context = self.build_decision_context(conversation_id, prompt)
+        pending_result = self._handle_pending_choice_without_model(conversation_id, prompt, trace_id, trace_logger)
+        if pending_result is not None:
+            return pending_result
+
+        if not self._should_run_decision_gate(prompt, decision_context):
+            gate = self._build_skipped_gate(decision_context, reason="no_explicit_correction_signal")
+            if gate["enabled"]:
+                trace_logger.event(trace_id, "memory_correction_skipped", gate_event_data(gate))
+                log_memory_correction_decision(gate)
+            return MemoryCorrectionResult(handled=False, decision=gate)
+
         gate = self.evaluate_intent(prompt, gateway_message, decision_context)
         if not gate["enabled"]:
             return MemoryCorrectionResult(handled=False, decision=gate)
@@ -233,15 +250,17 @@ class MemoryCorrectionWorkflow:
         return gate_state
 
     def build_decision_context(self, conversation_id: str, prompt: str) -> dict[str, object]:
-        """Gửi vài turn chat gần nhất là ngữ cảnh chính; pending chỉ là metadata phụ."""
+        """Dựng context hẹp cho correction gate, chỉ mở recent turns khi thật sự cần."""
         pending = self._get_pending(conversation_id)
         context: dict[str, object] = {
-            "recent_turns": self._recent_turns_for_decision(conversation_id, prompt, limit=6),
+            "recent_turns": [],
             "active_workflow": "",
             "pending_action": "",
             "pending_choices": [],
             "pending_replacement": "",
         }
+        if self._should_include_recent_turns(prompt, pending):
+            context["recent_turns"] = self._recent_turns_for_decision(conversation_id, prompt, limit=6)
         if pending is not None:
             context.update(
                 {
@@ -252,6 +271,74 @@ class MemoryCorrectionWorkflow:
                 }
             )
         return context
+
+    def _handle_pending_choice_without_model(
+        self,
+        conversation_id: str,
+        prompt: str,
+        trace_id: str,
+        trace_logger,
+    ) -> MemoryCorrectionResult | None:
+        """Áp dụng reply chọn fact ID bằng pending state, không hỏi model lần nữa."""
+        if not self._is_pending_fact_choice_prompt(conversation_id, prompt):
+            return None
+        gate = self._build_skipped_gate(
+            self.build_decision_context(conversation_id, prompt),
+            reason="pending_fact_choice_bypass",
+            label="pending_followup",
+        )
+        return self._handle_pending(conversation_id, prompt, trace_id, trace_logger, gate)
+
+    def _should_run_decision_gate(self, prompt: str, decision_context: dict[str, object]) -> bool:
+        """Chỉ chạy model khi current prompt tự nó có ý định sửa/xóa rõ ràng."""
+        if not memory_correction_detection_enabled():
+            return True
+        if is_memory_readonly_prompt(prompt):
+            return False
+        if self._has_explicit_correction_signal(prompt):
+            return True
+        return bool(decision_context.get("active_workflow")) and extract_fact_id(prompt) is not None
+
+    def _should_include_recent_turns(self, prompt: str, pending: PendingMemoryCorrection | None) -> bool:
+        """Recent turns chỉ là ngữ cảnh cho workflow sửa/xóa đang hoạt động."""
+        if is_memory_readonly_prompt(prompt):
+            return False
+        if self._has_explicit_correction_signal(prompt):
+            return True
+        return pending is not None and extract_fact_id(prompt) is not None
+
+    @staticmethod
+    def _has_explicit_correction_signal(prompt: str) -> bool:
+        normalized = normalize_correction_prompt_text(prompt)
+        return has_delete_memory_marker(normalized) or has_correct_memory_marker(normalized)
+
+    @staticmethod
+    def _build_skipped_gate(
+        decision_context: dict[str, object],
+        *,
+        reason: str,
+        label: str = "precheck_skip",
+    ) -> dict[str, object]:
+        recent_turns = decision_context.get("recent_turns", [])
+        return {
+            "enabled": memory_correction_detection_enabled(),
+            "decision": MEMORY_CORRECTION_NONE,
+            "query": "",
+            "target_type": MEMORY_TARGET_UNKNOWN,
+            "replacement": "",
+            "reason": reason,
+            "confidence": None,
+            "label": label,
+            "probabilities": {},
+            "model": "python_precheck",
+            "error": "",
+            "recent_turn_count": len(recent_turns) if isinstance(recent_turns, list) else 0,
+            "active_workflow": str(decision_context.get("active_workflow", "") or ""),
+            "pending_action": str(decision_context.get("pending_action", "") or ""),
+            "pending_choices": decision_context.get("pending_choices", [])
+            if isinstance(decision_context.get("pending_choices"), list)
+            else [],
+        }
 
     def _decide(
         self,
