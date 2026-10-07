@@ -28,6 +28,7 @@ from bots.decision_model.memory import (
 )
 from niko.memory.context import memory_correction_detection_enabled
 from niko.memory.store import MemoryStore, default_memory_store
+from niko.memory.working_memory import recent_chat_window
 
 
 MemoryCorrectionDecider = Callable[..., MemoryCorrectionDecision]
@@ -274,38 +275,14 @@ class MemoryCorrectionWorkflow:
 
     def _recent_turns_for_decision(self, conversation_id: str, current_prompt: str, limit: int = 6) -> list[dict[str, str]]:
         """Lấy vài chat_log gần nhất, bỏ chính incoming prompt hiện tại nếu đã được ghi."""
-        try:
-            rows = self.store.chat_history(conversation_id, limit=limit + 2)
-        except Exception:
-            return []
-        clean_rows = list(rows)
-        if clean_rows:
-            last = clean_rows[-1]
-            if (
-                str(last.get("role", "")).lower() == "user"
-                and str(last.get("content", "")).strip() == current_prompt.strip()
-            ):
-                clean_rows = clean_rows[:-1]
-
-        turns: list[dict[str, str]] = []
-        for row in clean_rows[-limit:]:
-            role = str(row.get("role", "")).strip()
-            content = truncate_decision_text(str(row.get("content", "")))
-            if not role or not content:
-                continue
-            turn = {
-                "role": role,
-                "content": content,
-            }
-            created_at = str(row.get("created_at", "")).strip()
-            if created_at:
-                turn["created_at"] = created_at
-            meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
-            route = str(meta.get("route", "")).strip()
-            if route:
-                turn["route"] = route
-            turns.append(turn)
-        return turns
+        return recent_chat_window(
+            self.store,
+            conversation_id,
+            current_prompt,
+            limit=limit,
+            char_budget=4200,
+            per_turn_limit=700,
+        )
 
     def _find_facts(self, prompt: str, query: str):
         """Tìm fact bằng ID rõ ràng trước, sau đó mới dùng search text."""

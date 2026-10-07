@@ -56,7 +56,9 @@ flowchart TB
     RetrievalGate -->|error fail-open| Retriever
 
     Retriever --> Store[(MemoryStore SQLite)]
+    ChatLog --> WorkingWindow[Recent conversation window<br/>working memory]
     Store --> Formatter[format_memory_context]
+    WorkingWindow --> Formatter
     Formatter --> DeepPrompt[Deep prompt<br/>identity + memory + current message]
 
     ChatGraph --> WritePath[MemoryRuntime write path]
@@ -86,7 +88,7 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WriteGate,Episode,CorrectionPath,CorrectionGate,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,NoMemory,NoEpisode done;
+    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionGate,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,NoMemory,NoEpisode done;
 ```
 
 Điểm kiểm soát chính là `MemoryRuntime`. Graph và runtime không nên tự biết chi
@@ -250,7 +252,7 @@ runtime.
 ```mermaid
 flowchart LR
     Current[Current user message] --> Working[Working memory mỗi turn<br/>identity + retrieved memory + current message]
-    Recent[Recent conversation window<br/>planned] --> Working
+    Recent[Recent conversation window<br/>done v1] --> Working
     Facts[(facts<br/>semantic memory)] --> Working
     Episodes[(episodes<br/>episodic memory)] --> Working
 
@@ -263,8 +265,7 @@ flowchart LR
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class Current,Working,Facts,Episodes,ChatLog,Manual,Consolidation done;
-    class Recent planned;
+    class Current,Working,Facts,Episodes,ChatLog,Manual,Consolidation,Recent done;
 ```
 
 `chat_log` không phải semantic/episodic memory. Nó là log vận hành và nguyên liệu
@@ -281,7 +282,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 3 | Unicode/query search hardening | done |
 | 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
 | 5 | Correction/forget qua chat/dashboard | V1 temporary, delete flow live-verified |
-| 6 | Working memory rõ: recent/current/long-term | planned |
+| 6 | Working memory rõ: recent/current/long-term | done v1 |
 | 7 | Eval riêng cho memory | unit tests and live verification done, eval scenarios planned |
 
 ## 9. Nguyên Tắc Kiểm Soát

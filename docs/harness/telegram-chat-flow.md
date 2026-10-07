@@ -149,21 +149,25 @@ Deep agent nhận memory context khi:
 - `NIKO_MEMORY_ENABLED=1`
 - `NIKO_MEMORY_RETRIEVAL_ENABLED=1`
 - Nếu `NIKO_MEMORY_GATE_ENABLED=1`, Nimble local quyết định turn Deep này có cần
-  search memory không. Gate `skip` thì Deep không nhận memory context; gate lỗi
-  thì fail-open và retrieval chạy như cũ.
+  search long-term memory không. Gate `skip` thì Deep không nhận facts/episodes;
+  gate lỗi thì fail-open và retrieval chạy như cũ.
 
 Retrieval hiện tại:
 
+- Recent conversation được dựng từ `chat_log` theo `conversation_id` và inject
+  như working memory ngắn hạn để Deep hiểu follow-up.
 - Nếu hỏi kiểu “có fact nào”, store có thể list/search facts.
 - Các câu thường dùng `search_facts` và `search_episodes`.
-- Context được format thành block `Semantic memory / facts` và `Episodic memory / events`.
+- Context được format thành các section `Recent conversation`, `Relevant semantic facts`
+  và `Relevant episodic events`; current user message nằm ở section riêng cuối prompt.
 
 `memory_retrieval_gate` đang default-off để không đổi hành vi demo hiện tại. Khi
 bật trong dashboard Config, gate dùng Decision Model trước khi search store. Nếu
 gate chọn `skip`, Deep không nhận memory context. Nếu gate chọn `retrieve`,
 pipeline dùng query do gate đề xuất, hoặc raw prompt nếu model không trả query.
 Nếu gate lỗi, retrieval fail-open bằng raw prompt để tránh bỏ lỡ memory thật sự
-cần.
+cần. Nếu gate chọn `skip`, recent conversation vẫn có thể được inject vì đó là
+working memory ngắn hạn, không phải long-term retrieval.
 
 Memory correction chạy trước local/fast/deep route thông thường khi
 `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`. Đây là Phase 5 V1 tạm thời: Nimble

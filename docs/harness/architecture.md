@@ -75,6 +75,8 @@ niko/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
     runtime.py         # MemoryRuntime điều phối retrieval/write/correction, consolidation và format context
     context.py         # Dataclass, formatter và wrapper tương thích
+    working_memory.py  # Recent conversation window tạm thời cho Deep/correction
+    correction_workflow.py # Workflow sửa/xóa fact qua chat
     consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
@@ -101,10 +103,11 @@ niko/
 `niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, gọi `MemoryRuntime` để lấy memory context rồi gọi `fcc-claude`.
 
 `niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval
-gate, retrieval modes (`search/list/recent/none`), write gate, correction gate
-V1 tạm thời, manual consolidation và format context cho Deep; store hiện dùng
-SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback search nếu không
-có FTS5.
+gate, retrieval modes (`search/list/recent/none`), recent working memory, write
+gate, correction facade, manual consolidation và format context cho Deep.
+`MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
+Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
+search nếu không có FTS5.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
@@ -134,7 +137,7 @@ Các nhóm config chính trong dashboard:
 - `Agent Commands`: Claude/Fast command, workdir, timeout, hook file, identity.
 - `Decision Model`: Ollama/Nimble base URL, model, triage/warmup/stop timeout, keep alive.
 - `Sticker`: bật/tắt sticker, sticker set/config/mode, timeout.
-- `Memory & Trace`: memory, retrieval/write/correction gate, trace, runtime log.
+- `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, trace, runtime log.
 - `Replies`: suffix, wait/busy/error text.
 
 Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
@@ -167,6 +170,7 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 - Gateway Telegram chạy thật.
 - Fast/Deep agent flow.
 - Memory retrieval cho Deep agent.
+- Recent working-memory window cho Deep prompt theo `conversation_id`.
 - Retrieval/write gate bằng local Decision Model, gồm mode inventory qua
   `fact_mode`/`episode_mode`.
 - Memory correction V1 qua chat: nhận diện sửa/xóa fact, hỏi lại khi mơ hồ và

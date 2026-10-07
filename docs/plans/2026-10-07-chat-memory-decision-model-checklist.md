@@ -213,13 +213,13 @@ thay vì để fact sai nằm mãi trong SQLite.
 Mục đích: tách ba lớp context trong prompt Deep để tránh lẫn prompt hiện tại,
 recent conversation và long-term memory.
 
-- [ ] Thiết kế recent chat window theo `conversation_id`.
-- [ ] Thêm budget cho recent conversation.
-- [ ] Thêm budget cho long-term memory context.
-- [ ] Format prompt Deep thành các section rõ: `Identity`, `Recent conversation`, `Relevant semantic facts`, `Relevant episodic events`, `Current user message`.
-- [ ] Đảm bảo current user message luôn được ưu tiên nếu mâu thuẫn với memory.
-- [ ] Đảm bảo long-term facts/episodes vẫn là memory chung của instance trong v1.
-- [ ] Thêm trace metadata cho số recent turns được inject.
+- [x] Thiết kế recent chat window theo `conversation_id`.
+- [x] Thêm budget cho recent conversation.
+- [x] Thêm budget cho long-term memory context.
+- [x] Format prompt Deep thành các section rõ: `Identity`, `Recent conversation`, `Relevant semantic facts`, `Relevant episodic events`, `Current user message`.
+- [x] Đảm bảo current user message luôn được ưu tiên nếu mâu thuẫn với memory.
+- [x] Đảm bảo long-term facts/episodes vẫn là memory chung của instance trong v1.
+- [x] Thêm trace metadata cho số recent turns được inject.
 
 ## 7. Phase 7: Eval Cho Chat Memory
 
@@ -255,7 +255,7 @@ khi coi là xong.
 - [x] Link docs nội bộ pass.
 - [x] Bật gate trên dashboard không làm Telegram bot crash.
 - [x] Config dashboard hiển thị mô tả dễ hiểu cho từng key memory/decision mới.
-- [x] Khi gate skip, Deep prompt không chứa `Semantic memory / facts`.
+- [x] Khi gate skip, Deep prompt không chứa long-term facts/episodes; recent conversation vẫn có thể inject như working memory ngắn hạn.
 - [x] Khi gate retrieve, Deep prompt có memory context phù hợp.
 - [x] Khi Ollama/Nimble lỗi, Deep vẫn chạy với retrieval fallback.
 

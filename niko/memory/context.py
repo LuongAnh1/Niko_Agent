@@ -8,7 +8,7 @@ rerank hay graph reasoning; retrieval v1 vẫn là FTS/LIKE text search.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from niko.config import env_flag, env_value
@@ -16,6 +16,9 @@ from niko.memory.store import Episode, Fact, MemoryStore
 
 
 DEFAULT_MEMORY_TOP_K = 4
+DEFAULT_MEMORY_RECENT_TURNS = 6
+DEFAULT_MEMORY_RECENT_CHAR_BUDGET = 2400
+DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET = 3600
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,9 @@ class RetrievedMemory:
     gate_probabilities: dict[str, float] | None = None
     gate_model: str = ""
     gate_error: str = ""
+    recent_turns: list[dict[str, str]] = field(default_factory=list)
+    recent_char_budget: int = DEFAULT_MEMORY_RECENT_CHAR_BUDGET
+    long_term_char_budget: int = DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET
 
     def to_meta(self) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -45,7 +51,13 @@ class RetrievedMemory:
             "episode_ids": [episode.id for episode in self.episodes],
             "fact_count": len(self.facts),
             "episode_count": len(self.episodes),
+            "recent_turn_count": len(self.recent_turns),
         }
+        if self.recent_turns:
+            meta["recent_roles"] = [turn.get("role", "") for turn in self.recent_turns]
+            meta["recent_char_budget"] = self.recent_char_budget
+        if self.facts or self.episodes:
+            meta["long_term_char_budget"] = self.long_term_char_budget
         if self.gate_enabled:
             meta["gate_enabled"] = True
             if self.gate_decision:
@@ -100,6 +112,33 @@ def memory_top_k() -> int:
         return max(1, min(20, int(raw_value)))
     except ValueError:
         return DEFAULT_MEMORY_TOP_K
+
+
+def memory_recent_turns() -> int:
+    """Số lượt chat gần nhất đưa vào working memory của Deep."""
+    raw_value = env_value("NIKO_MEMORY_RECENT_TURNS", str(DEFAULT_MEMORY_RECENT_TURNS)).strip()
+    try:
+        return max(0, min(20, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_RECENT_TURNS
+
+
+def memory_recent_char_budget() -> int:
+    """Ngân sách ký tự cho recent conversation trong Deep prompt."""
+    raw_value = env_value("NIKO_MEMORY_RECENT_CHAR_BUDGET", str(DEFAULT_MEMORY_RECENT_CHAR_BUDGET)).strip()
+    try:
+        return max(0, min(12000, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_RECENT_CHAR_BUDGET
+
+
+def memory_long_term_char_budget() -> int:
+    """Ngân sách ký tự cho facts/episodes liên quan trong Deep prompt."""
+    raw_value = env_value("NIKO_MEMORY_LONG_TERM_CHAR_BUDGET", str(DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET)).strip()
+    try:
+        return max(0, min(16000, int(raw_value)))
+    except ValueError:
+        return DEFAULT_MEMORY_LONG_TERM_CHAR_BUDGET
 
 
 def evaluate_memory_gate(prompt: str, gateway_message=None) -> dict[str, Any]:
@@ -166,33 +205,69 @@ def format_memory_context(
     facts: list[Fact],
     episodes: list[Episode],
     gateway_message=None,
+    recent_turns: list[dict[str, str]] | None = None,
+    long_term_char_budget: int | None = None,
 ) -> str:
-    """Format memory thành đoạn prompt phụ, luôn nhắc Deep ưu tiên message mới."""
-    if not facts and not episodes:
+    """Format working/long-term memory thành các section rõ cho Deep."""
+    recent_turns = recent_turns or []
+    if not facts and not episodes and not recent_turns:
         return ""
 
     lines = [
-        "Ngu canh bo nho lien quan cua Niko:",
-        "- Day la context phu tro, khong thay the tin nhan moi nhat cua nguoi dung.",
-        "- Neu bo nho mau thuan voi tin nhan moi, uu tien tin nhan moi va hoi lai khi can.",
+        "Working memory context:",
+        "- Current user message is authoritative.",
+        "- Recent conversation is short-term context only.",
+        "- Relevant facts/events are long-term memory and may be outdated; ask if they conflict.",
     ]
     if gateway_message is not None:
         lines.append(f"- conversation_id: {gateway_message.chat_id or gateway_message.user.key}")
         lines.append(f"- user_key: {gateway_message.user.key}")
 
+    if recent_turns:
+        lines.append("")
+        lines.append("Recent conversation:")
+        for turn in recent_turns:
+            role = str(turn.get("role", "")).strip() or "unknown"
+            content = str(turn.get("content", "")).strip()
+            if not content:
+                continue
+            route = str(turn.get("route", "")).strip()
+            route_text = f" ({route})" if route else ""
+            lines.append(f"- {role}{route_text}: {content}")
+
+    remaining = memory_long_term_char_budget() if long_term_char_budget is None else max(0, int(long_term_char_budget))
     if facts:
         lines.append("")
-        lines.append("Semantic memory / facts:")
+        lines.append("Relevant semantic facts:")
         for fact in facts:
-            lines.append(f"- [fact:{fact.id}] {fact.subject}: {fact.content}")
+            line = f"- [fact:{fact.id}] {fact.subject}: {fact.content}"
+            if remaining <= 0:
+                break
+            line = _take_budget(line, remaining)
+            lines.append(line)
+            remaining -= len(line)
 
     if episodes:
         lines.append("")
-        lines.append("Episodic memory / events:")
+        lines.append("Relevant episodic events:")
         for episode in episodes:
-            lines.append(f"- [episode:{episode.id} @ {episode.happened_at}] {episode.summary}")
+            line = f"- [episode:{episode.id} @ {episode.happened_at}] {episode.summary}"
+            if remaining <= 0:
+                break
+            line = _take_budget(line, remaining)
+            lines.append(line)
+            remaining -= len(line)
 
     return "\n".join(lines)
+
+
+def _take_budget(text: str, budget: int) -> str:
+    """Cắt từng dòng long-term memory để prompt không phình vô hạn."""
+    if len(text) <= budget:
+        return text
+    if budget <= 20:
+        return text[:budget]
+    return text[: budget - 20].rstrip() + "\n...[truncated]"
 
 
 def compact_episode_summary(prompt: str, answer: str, followups: list[str] | None = None, limit: int = 900) -> str:

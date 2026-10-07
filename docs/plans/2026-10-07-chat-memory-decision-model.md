@@ -485,19 +485,21 @@ Mục tiêu: Niko phân biệt ba thứ:
 - recent conversation window,
 - retrieved long-term memory.
 
-Niko hiện chủ yếu inject identity + memory context vào Deep. Có thể thêm:
+Trạng thái: đã triển khai v1. Deep prompt có recent conversation window lấy từ
+`chat_log`, budget riêng cho recent/long-term context, section long-term rõ và
+label `Current user message` cho prompt hiện tại.
 
-- recent chat window theo `conversation_id`,
-- budget cho memory context,
-- section rõ trong prompt:
-  - `Identity`
-  - `Recent conversation`
-  - `Relevant semantic facts`
-  - `Relevant episodic events`
-  - `Current user message`
+Các section hiện dùng:
 
-Đây là bước nên làm sau gate/consolidation để tránh prompt phình khi chưa có
-budget rõ.
+- identity context từ `niko.chat_gateway`,
+- `Recent conversation`,
+- `Relevant semantic facts`,
+- `Relevant episodic events`,
+- `Current user message`.
+
+Trace `memory_retrieval` có `recent_turn_count` để debug Deep có nhận working
+memory hay không. Retrieval gate chỉ quyết định long-term memory; gate `skip`
+không chặn recent conversation.
 
 Trong v1, `conversation_id` chỉ dùng cho recent chat window và Deep job lock.
 Long-term facts/episodes vẫn là memory chung của instance.
@@ -522,18 +524,18 @@ Sau đó mới thêm judge/eval mềm cho chất lượng trả lời.
 ## Khuyến Nghị Bước Tiếp Theo Cho Niko
 
 Các bước đầu đã hoàn thành: `bots/decision_model/memory/` đã tách package,
-retrieval/write/candidate/correction gates đã có test và trace, search tiếng Việt
-đã được harden, manual consolidation đã chạy được qua dashboard/API.
+correction workflow đã tách khỏi `MemoryRuntime`, retrieval/write/candidate/correction
+gates đã có test và trace, search tiếng Việt đã được harden, manual consolidation
+đã chạy được qua dashboard/API, và Deep prompt đã có recent working-memory window.
 
-Em đề xuất bước tiếp theo nên là ba việc nhỏ, ít rủi ro:
+Em đề xuất bước tiếp theo nên là hai việc nhỏ, ít rủi ro:
 
-1. Tách Loop/tool workflow cho memory correction để thay pending state trong RAM.
-2. Làm recent working-memory window rõ hơn trước khi Deep chạy.
-3. Thêm eval prompt mẫu cho retrieval/write/correction thay vì chỉ live test thủ công.
+1. Thêm eval prompt mẫu cho retrieval/write/correction thay vì chỉ live test thủ công.
+2. Sau eval, cân nhắc threshold/scheduler consolidation tự động nếu demo cần.
 
-Lý do: Phase 5 V1 đã đủ an toàn cho baseline, nhưng nếu tiếp tục nhồi thêm sửa/xóa
-memory vào chat runtime thì luồng sẽ khó debug hơn. Loop/tool workflow sẽ hợp hơn
-cho xác nhận target, mutate DB và audit trail.
+Lý do: correction và working memory đã có baseline quan sát được; trước khi mở
+thêm scheduler hoặc Loop/tool bền, mình cần eval để tránh cảm giác "có vẻ chạy"
+nhưng thiếu regression.
 
 Không triển khai trong bước đầu:
 

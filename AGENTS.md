@@ -57,11 +57,17 @@ separate business backend lane that Niko can retrieve from later.
 - `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
   and consolidation state. Uses FTS5 when available, with LIKE fallback.
 - `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
-  retrieval modes (`search/list/recent/none`), write gate, memory correction
-  decision context, store search/list, chat log writes, episode writes,
-  consolidation scaffold, and context formatting before Deep.
+  retrieval modes (`search/list/recent/none`), recent working-memory context,
+  write gate, memory correction workflow facade, store search/list, chat log
+  writes, episode writes, consolidation scaffold, and context formatting before
+  Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
+- `niko/memory/working_memory.py`: Ephemeral recent conversation window builder
+  from `chat_log`, shared by Deep prompt context and correction decision context.
+- `niko/memory/correction_workflow.py`: Phase 5 V1 chat memory correction
+  workflow. Owns pending fact choices, fact match/apply guardrails, and
+  correction trace/runtime logs while `MemoryRuntime` keeps the public facade.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
 - `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
 - `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
@@ -123,6 +129,9 @@ Important boundaries:
 
 - `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
   operational log that can later feed analysis.
+- Working memory is ephemeral: Deep can receive a short recent conversation
+  window rebuilt from `chat_log` for the current turn, but that window is not
+  Semantic/Episodic long-term memory.
 - Semantic extraction is not mature yet. Facts are mainly added through Ops/API
   and explicit/manual consolidation; free-form summarizer extraction is not built
   yet.
@@ -266,6 +275,9 @@ NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_WRITE_GATE_ENABLED=0
 NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
 NIKO_MEMORY_TOP_K=4
+NIKO_MEMORY_RECENT_TURNS=6
+NIKO_MEMORY_RECENT_CHAR_BUDGET=2400
+NIKO_MEMORY_LONG_TERM_CHAR_BUDGET=3600
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
 ```

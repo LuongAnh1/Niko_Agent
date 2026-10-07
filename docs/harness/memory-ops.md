@@ -9,8 +9,10 @@ Checklist kiểm tra live qua Telegram nằm ở [Memory Live Verification](memo
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
 - `niko/harness/runtime_log.py`: ghi runtime log JSONL cho tab Bots.
 - `niko/memory/store.py`: SQLite memory store.
-- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, retrieval modes (`search/list/recent/none`), write gate, search/list store, consolidation scaffold và format context.
+- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, retrieval modes (`search/list/recent/none`), recent working-memory context, write gate, correction facade, search/list store, consolidation scaffold và format context.
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
+- `niko/memory/working_memory.py`: dựng recent conversation window tạm thời từ `chat_log` cho Deep prompt và correction context.
+- `niko/memory/correction_workflow.py`: workflow sửa/xóa fact qua chat, gồm pending choices, validate ID, update/delete và correction trace/log.
 - `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated và mark-done có kiểm soát.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
 - `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
@@ -66,9 +68,10 @@ Flow retrieval:
 user prompt
   -> optional memory_retrieval_gate
   -> MemoryRuntime.retrieve_for_deep
+  -> recent chat window from chat_log
   -> search/list facts
   -> search/list episodes
-  -> format memory context
+  -> format working/long-term memory sections
   -> inject vào prompt Deep agent
 ```
 
@@ -83,6 +86,19 @@ ràng, retrieval layer ép mode thực thi về `fact_mode=list` hoặc
 `episode_mode=recent` để tránh search rỗng kiểu `search_facts("fact")`.
 
 Fast triage không nhận memory context để giữ JSON sạch.
+
+Recent conversation là working memory ngắn hạn, không phải long-term facts/episodes.
+Nó được dựng lại từ `chat_log` theo `conversation_id`, bỏ chính incoming prompt
+nếu prompt đó vừa được log, và nằm trong section `Recent conversation` trước khi
+Deep chạy. Retrieval gate chỉ quyết định long-term facts/episodes; nếu gate chọn
+`skip`, Deep vẫn có thể nhận recent conversation để hiểu follow-up trong cùng
+cuộc trò chuyện.
+
+Các key liên quan trong dashboard Config:
+
+- `NIKO_MEMORY_RECENT_TURNS`: số lượt recent chat tối đa inject.
+- `NIKO_MEMORY_RECENT_CHAR_BUDGET`: ngân sách ký tự cho section `Recent conversation`.
+- `NIKO_MEMORY_LONG_TERM_CHAR_BUDGET`: ngân sách ký tự cho facts/episodes trong prompt.
 
 ## Memory Write
 
@@ -126,6 +142,8 @@ Các event trace liên quan:
 Với retrieval gate, trace/runtime log cần đọc cùng lúc `gate_decision`,
 `gate_label`, `gate_query`, `gate_fact_mode` và `gate_episode_mode`. Inventory
 chung có thể để `query` rỗng nhưng vẫn đúng nếu mode là `list` hoặc `recent`.
+Trace `memory_retrieval` cũng có `recent_turn_count` để biết Deep có nhận
+working memory gần đây không.
 
 ## Mini Niko Ops Dashboard
 
@@ -250,6 +268,10 @@ Code Decision Model cho chat memory đã được tách vào `bots/decision_mode
 - `candidate.py`: phân loại candidate do consolidation tạo ra.
 - `correction.py`: nhận diện intent sửa/xóa memory; đây là file chính cần soi khi correction gate bắt nhầm câu inventory.
 - `__init__.py`: giữ API cũ `bots.decision_model.memory` để các import hiện tại không phải đổi.
+
+Workflow thực thi nằm ở `niko/memory/correction_workflow.py`; `MemoryRuntime`
+chỉ còn facade để `ChatReplyGraph` không phải biết pending state hay thao tác
+mutate SQLite.
 
 - `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0` mặc định tắt để tránh sửa/xóa bất ngờ trong demo.
 - Khi bật, Decision Model chỉ trả về `none`, `correct_memory` hoặc `forget_memory`, kèm `query`, `target_type`, `replacement` nếu có.

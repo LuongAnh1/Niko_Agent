@@ -17,7 +17,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `chat_log`: lịch sử hội thoại đã xử lý.
   - `facts`: Semantic Memory thủ công hoặc tạo từ consolidation bảo thủ.
   - `episodes`: Episodic Memory sinh ra sau deep job.
-  - retrieval/write/correction gate và consolidation scaffold cho các bước memory tiếp theo.
+  - recent working memory, retrieval/write/correction gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
 - Manual memory consolidation: Memory tab có thể preview/run một batch `chat_log` để tạo facts/episodes có provenance `consolidation`.
 
@@ -34,6 +34,8 @@ niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
 niko/memory/runtime.py           # Khung điều phối retrieval/write/correction/consolidation
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
+niko/memory/working_memory.py    # Recent conversation window cho Deep/correction
+niko/memory/correction_workflow.py # Workflow sửa/xóa fact qua chat
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
 niko/ops/                       # Mini Niko Ops dashboard
   dashboard.py                   # HTTP server/entrypoint mỏng
@@ -106,7 +108,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
-- `Memory & Trace`: memory, retrieval/write/correction gate, trace và runtime log.
+- `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, trace và runtime log.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -180,7 +182,7 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit/manual consolidation.
 - Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
-- Retrieval là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
+- Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.
 - Lakehouse/Knowledge Graph là lane memory backend nghiệp vụ riêng cho Jira/tài liệu; nó không phải nơi lưu mặc định chat Telegram, và Niko chỉ nên nối vào khi cần context business.

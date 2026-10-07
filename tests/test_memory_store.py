@@ -334,10 +334,44 @@ class MemoryStoreTests(unittest.TestCase):
                 memory = retrieve_memory_context("harness memory", message, store=store)
 
         self.assertTrue(memory.enabled)
-        self.assertIn("Semantic memory", memory.text)
-        self.assertIn("Episodic memory", memory.text)
+        self.assertIn("Relevant semantic facts", memory.text)
+        self.assertIn("Relevant episodic events", memory.text)
         self.assertEqual(memory.to_meta()["fact_count"], 1)
         self.assertEqual(memory.to_meta()["episode_count"], 1)
+        self.assertEqual(memory.to_meta()["recent_turn_count"], 0)
+
+    def test_retrieve_memory_context_includes_recent_conversation_window(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "current prompt",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("456", "user", "old question", source="telegram", meta={"route": "deep_agent"})
+            store.log_chat("456", "assistant", "old answer", source="telegram", meta={"route": "deep_agent"})
+            store.log_chat("456", "user", "current prompt", source="telegram", meta={"route": "incoming"})
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_STATE_DIR": temp_dir,
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_RECENT_TURNS": "4",
+                },
+                clear=False,
+            ):
+                memory = retrieve_memory_context("current prompt", message, store=store)
+
+        self.assertIn("Recent conversation:", memory.text)
+        self.assertIn("old question", memory.text)
+        self.assertIn("old answer", memory.text)
+        self.assertNotIn("current prompt", [turn["content"] for turn in memory.recent_turns])
+        self.assertEqual(memory.to_meta()["recent_turn_count"], 2)
 
     def test_memory_runtime_retrieve_for_deep_matches_context_wrapper(self):
         message = telegram_message_to_gateway(
@@ -994,8 +1028,9 @@ class MemoryStoreTests(unittest.TestCase):
             prompt = run_cli.call_args.args[1]
             events = trace_logger.read_events()
 
-        self.assertIn("Semantic memory / facts", prompt)
+        self.assertIn("Relevant semantic facts", prompt)
         self.assertIn("Niko stores semantic facts in SQLite", prompt)
+        self.assertIn("Current user message", prompt)
         self.assertTrue(any(event.get("kind") == "memory_retrieval" for event in events))
 
     def test_deep_agent_trace_includes_memory_gate_metadata(self):
@@ -1034,9 +1069,10 @@ class MemoryStoreTests(unittest.TestCase):
             prompt = run_cli.call_args.args[1]
             events = trace_logger.read_events()
 
-        self.assertNotIn("Semantic memory / facts", prompt)
+        self.assertNotIn("Relevant semantic facts", prompt)
         memory_events = [event for event in events if event.get("kind") == "memory_retrieval"]
         self.assertEqual(memory_events[0]["data"]["gate_decision"], MEMORY_SKIP)
+        self.assertEqual(memory_events[0]["data"]["recent_turn_count"], 0)
 
 
 class MemoryCorrectionRuntimeTests(unittest.TestCase):

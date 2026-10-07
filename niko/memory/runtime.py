@@ -36,12 +36,16 @@ from niko.memory.context import (
     log_memory_gate_decision,
     log_memory_gate_error,
     memory_gate_enabled,
+    memory_long_term_char_budget,
+    memory_recent_char_budget,
+    memory_recent_turns,
     memory_retrieval_enabled,
     memory_top_k,
     memory_write_enabled,
     memory_write_gate_enabled,
 )
 from niko.memory.store import MemoryStore, default_memory_store, utc_now
+from niko.memory.working_memory import recent_chat_window
 
 
 MemoryRetrievalDecider = Callable[[str, object | None], MemoryRetrievalDecision]
@@ -86,15 +90,47 @@ class MemoryRuntime:
 
         top_k = memory_top_k()
         gate = self.evaluate_retrieval_gate(prompt, gateway_message)
+        recent_turns = self._recent_turns_for_deep(prompt, gateway_message)
+        long_term_budget = memory_long_term_char_budget()
+        recent_budget = memory_recent_char_budget()
 
         if gate["decision"] == MEMORY_SKIP:
-            return self._build_result("", [], [], gate)
+            text = format_memory_context(
+                [],
+                [],
+                gateway_message=gateway_message,
+                recent_turns=recent_turns,
+                long_term_char_budget=long_term_budget,
+            )
+            return self._build_result(
+                text,
+                [],
+                [],
+                gate,
+                recent_turns=recent_turns,
+                recent_char_budget=recent_budget,
+                long_term_char_budget=long_term_budget,
+            )
 
         search_query = gate["query"] or prompt
         facts = self._retrieve_facts(search_query, top_k, str(gate["fact_mode"]))
         episodes = self._retrieve_episodes(search_query, top_k, str(gate["episode_mode"]))
-        text = format_memory_context(facts, episodes, gateway_message=gateway_message)
-        return self._build_result(text, facts, episodes, gate)
+        text = format_memory_context(
+            facts,
+            episodes,
+            gateway_message=gateway_message,
+            recent_turns=recent_turns,
+            long_term_char_budget=long_term_budget,
+        )
+        return self._build_result(
+            text,
+            facts,
+            episodes,
+            gate,
+            recent_turns=recent_turns,
+            recent_char_budget=recent_budget,
+            long_term_char_budget=long_term_budget,
+        )
 
     def build_context_for_deep(self, prompt: str, gateway_message=None) -> str:
         """Wrapper tiện dụng cho caller chỉ cần text prompt context."""
@@ -362,12 +398,37 @@ class MemoryRuntime:
             trace_logger.event(trace_id, "memory_write_gate_error", self._gate_event_data(gate))
         trace_logger.event(trace_id, "memory_write_decision", self._gate_event_data(gate))
 
+    def _recent_turns_for_deep(self, prompt: str, gateway_message=None) -> list[dict[str, str]]:
+        """Lấy recent conversation cho Deep, không phụ thuộc long-term retrieval gate."""
+        if gateway_message is None:
+            return []
+        conversation_id = str(getattr(gateway_message, "chat_id", "") or getattr(gateway_message.user, "key", ""))
+        if not conversation_id:
+            return []
+        return recent_chat_window(
+            self.store,
+            conversation_id,
+            prompt,
+            limit=memory_recent_turns(),
+            char_budget=memory_recent_char_budget(),
+            per_turn_limit=700,
+        )
+
     @staticmethod
     def _gate_event_data(gate: dict[str, object]) -> dict[str, object]:
         return {key: value for key, value in gate.items() if value not in ("", None, {})}
 
     @staticmethod
-    def _build_result(text: str, facts, episodes, gate: dict[str, object]) -> RetrievedMemory:
+    def _build_result(
+        text: str,
+        facts,
+        episodes,
+        gate: dict[str, object],
+        *,
+        recent_turns: list[dict[str, str]] | None = None,
+        recent_char_budget: int = 0,
+        long_term_char_budget: int = 0,
+    ) -> RetrievedMemory:
         return RetrievedMemory(
             text=text,
             facts=facts,
@@ -384,6 +445,9 @@ class MemoryRuntime:
             gate_probabilities=gate["probabilities"] if isinstance(gate["probabilities"], dict) else {},
             gate_model=str(gate["model"]),
             gate_error=str(gate["error"]),
+            recent_turns=recent_turns or [],
+            recent_char_budget=recent_char_budget,
+            long_term_char_budget=long_term_char_budget,
         )
 
 

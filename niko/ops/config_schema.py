@@ -248,6 +248,27 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "default": "4",
                 "help": "Số facts/episodes tối đa đưa vào Deep prompt mỗi lượt retrieval.",
             },
+            {
+                "name": "NIKO_MEMORY_RECENT_TURNS",
+                "label": "Recent turns",
+                "type": "number",
+                "default": "6",
+                "help": "Số lượt chat gần nhất trong cùng conversation được đưa vào working memory trước khi gọi Deep.",
+            },
+            {
+                "name": "NIKO_MEMORY_RECENT_CHAR_BUDGET",
+                "label": "Recent char budget",
+                "type": "number",
+                "default": "2400",
+                "help": "Ngân sách ký tự cho section Recent conversation trong Deep prompt.",
+            },
+            {
+                "name": "NIKO_MEMORY_LONG_TERM_CHAR_BUDGET",
+                "label": "Long-term char budget",
+                "type": "number",
+                "default": "3600",
+                "help": "Ngân sách ký tự cho section Relevant semantic facts và Relevant episodic events trong Deep prompt.",
+            },
         ],
     },
     {

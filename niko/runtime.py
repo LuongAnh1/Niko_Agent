@@ -175,6 +175,7 @@ def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, t
         prompt,
         gateway_message,
         include_prompt_hook=True,
+        prompt_label="Current user message",
         memory_context=memory_context,
     )
     return call_claude(deep_prompt, deep_agent_command())
