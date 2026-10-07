@@ -89,6 +89,8 @@ Khi một turn được xử lý:
 - Nếu Deep job hoàn tất, `MemoryRuntime` có thể tạo một episode cơ bản gồm prompt, answer và followups.
 - `NIKO_MEMORY_WRITE_GATE_ENABLED=1` bật Nimble write gate để quyết định Deep episode nào đáng lưu dài hạn.
 - Write gate chỉ chặn `episodes`; `chat_log` vẫn là operational log để debug/dashboard.
+- Lượt chỉ inspect/list memory, ví dụ hỏi Niko đang lưu fact nào, nên được write gate
+  chọn `discard` để không ghi thêm episodic memory nhiễu cho chính thao tác xem memory.
 - Nếu write gate lỗi, Niko fail-open và vẫn ghi episode baseline.
 - Semantic facts hiện chủ yếu được thêm thủ công qua dashboard hoặc API.
 

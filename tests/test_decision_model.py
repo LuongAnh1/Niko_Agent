@@ -32,6 +32,8 @@ from bots.decision_model.memory import (
     build_memory_candidate_criteria,
     build_memory_retrieval_criteria,
     build_memory_write_criteria,
+    build_memory_write_instructions,
+    build_memory_write_state,
     decide_memory_retrieval,
     normalize_episode_retrieval_mode,
     normalize_fact_retrieval_mode,
@@ -195,6 +197,7 @@ class DecisionModelTests(unittest.TestCase):
 
         self.assertIn(MEMORY_REMEMBER, criteria)
         self.assertIn(MEMORY_DISCARD, criteria)
+        self.assertIn("inspection", criteria[MEMORY_DISCARD])
         self.assertEqual(normalize_memory_write_choice("save"), MEMORY_REMEMBER)
         self.assertEqual(normalize_memory_write_choice("write memory"), MEMORY_REMEMBER)
         self.assertEqual(normalize_memory_write_choice("no memory"), MEMORY_DISCARD)
@@ -202,6 +205,19 @@ class DecisionModelTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             normalize_memory_write_choice("maybe")
+
+    def test_memory_write_instructions_discard_memory_inventory_turns(self):
+        instructions = build_memory_write_instructions()
+        state = build_memory_write_state(
+            "Hien tai em dang luu nhung fact nao ve anh?",
+            "Em dang luu 2 fact ve anh.",
+            route="deep_agent",
+        )
+
+        self.assertIn("memory inspection", instructions)
+        self.assertIn("inventory", instructions)
+        self.assertIn("listing memory is not itself a durable event", instructions)
+        self.assertIn("inspects, lists, or confirms existing memory", state["decision_context"])
 
     def test_memory_candidate_choice_aliases_and_criteria(self):
         criteria = build_memory_candidate_criteria()

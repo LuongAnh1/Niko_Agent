@@ -184,8 +184,10 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Model lỗi hoặc output không parse được thì không mark consolidated.
 - [x] No facts hợp lệ vẫn có thể mark done nếu batch chỉ là small talk.
 - [x] Thêm dashboard/manual trigger nếu cần debug consolidation.
-- [ ] Tinh chỉnh write gate để các lượt chỉ inspect/list memory thường `discard`,
+- [x] Tinh chỉnh write gate để các lượt chỉ inspect/list memory thường `discard`,
   tránh ghi episode nhiễu khi người dùng chỉ hỏi Niko đang nhớ gì.
+- [ ] Live verify trên Telegram: hỏi Niko đang lưu fact nào, kiểm tra
+  `memory_write_decision=discard` và không có `memory_write_episode` mới cho lượt inspect.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
 

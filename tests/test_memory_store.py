@@ -535,6 +535,56 @@ class MemoryStoreTests(unittest.TestCase):
         decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
         self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_DISCARD)
 
+    def test_memory_runtime_write_gate_discard_skips_memory_inventory_episode(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            decider = Mock(
+                return_value=MemoryWriteDecision(
+                    decision=MEMORY_DISCARD,
+                    reason="memory inventory only",
+                )
+            )
+            runtime = MemoryRuntime(store=store, write_decider=decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                runtime.record_deep_episode(
+                    "456",
+                    "Hien tai em dang luu nhung fact nao ve anh?",
+                    "Em dang luu 2 fact ve anh trong semantic memory.",
+                    message,
+                    [],
+                    "turn-1",
+                    trace_logger,
+                )
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        decider.assert_called_once()
+        self.assertIn("dang luu nhung fact", decider.call_args.args[0])
+        self.assertEqual(snapshot["counts"]["episodes"], 0)
+        decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
+        self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_DISCARD)
+        self.assertEqual(decision_events[0]["data"]["reason"], "memory inventory only")
+        self.assertFalse(any(event.get("kind") == "memory_write_episode" for event in events))
+
     def test_memory_runtime_write_gate_error_fail_open_records_episode(self):
         message = telegram_message_to_gateway(
             {

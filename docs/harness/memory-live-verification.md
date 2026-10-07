@@ -36,6 +36,7 @@ hiện trong log.
 | Retrieval `retrieve` | `Anh đã bảo em nhớ sở thích làm docs của anh là gì nhỉ?` | `memory_gate_decision` có `decision=retrieve`; trace `memory_retrieval` có `gate_query`. |
 | Inventory qua Decision Model | `Hiện tại em đang lưu những fact nào về anh?` | `memory_gate_decision` có `decision=retrieve`, label `list_facts` hoặc `fact_mode=list`, `episode_mode=none`; facts được list thay vì search bằng chữ `fact`. |
 | Write `discard` | `oke cảm ơn em` | `memory_write_decision` có `decision=discard`; không tạo episode mới. |
+| Write inventory discard | `Hiện tại em đang lưu những fact nào về anh?` | Sau khi Niko list memory, `memory_write_decision` nên là `discard`; không có `memory_write_episode` mới cho chính lượt inspect/list memory. |
 | Write `remember` | `Lên kế hoạch sửa memory runtime để tuần sau anh demo với thầy.` | `memory_write_decision` có `decision=remember`; có `memory_write_episode`. |
 | Consolidation fact | `Ghi nhớ rằng anh thích checklist có mục đích rõ ràng.` | Memory tab `Refresh batch` có candidate `semantic_fact`; `Run once` ghi fact source `consolidation`. |
 | Consolidation discard | `haha oke` | Candidate `discard`; run once mark rows nhưng không ghi fact/episode. |
@@ -97,10 +98,12 @@ hay nội dung riêng tư dài vào tài liệu này.
   `decision=retrieve`, `fact_mode=list`, `episode_mode=none`; trace
   `memory_retrieval` ghi `fact_count=2`, `episode_count=0`, nghĩa là runtime đã
   list facts thay vì search theo chữ `fact`.
-- Write gate sau inventory chung: cần tinh chỉnh sau. Lượt inventory pass nhưng
+- Write gate sau inventory chung: đã tinh chỉnh instructions/state và thêm unit
+  regression sau lần live đầu bị nhiễu. Lượt inventory pass nhưng
   write gate chọn `remember` và ghi một episode mới cho chính câu inspect memory;
   đây không làm hỏng retrieval, nhưng về lâu dài nên hướng model `discard` các
-  lượt chỉ liệt kê/kiểm tra memory để tránh nhiễu episodic memory.
+  lượt chỉ liệt kê/kiểm tra memory để tránh nhiễu episodic memory. Cần chạy lại
+  live prompt này để xác nhận Nimble đã chọn `discard`.
 - Write gate `discard`: pass. Prompt test tạm thời đi `deep_agent`, write gate
   chọn `discard`, không có `memory_write_episode`.
 - Write gate `remember`: pass. Prompt lập kế hoạch demo memory đi `deep_agent`,
@@ -138,6 +141,10 @@ hay nội dung riêng tư dài vào tài liệu này.
   phải đi qua retrieval decision rồi list facts, không quay lại stopword heuristic.
 - Đã restart Telegram bot sau khi bỏ stale lock, chạy lại inventory prompt và xác
   nhận live log/trace đã theo mode `list_facts`.
+- Đã bổ sung regression cho write gate inventory discard: instructions/state nhắc
+  rõ lượt chỉ inspect/list memory nên `discard`, và runtime không ghi episode khi
+  write gate trả `discard`. Cần live verify lại trên Telegram để xác nhận Nimble
+  chọn đúng label trong điều kiện thật.
 - Sau mỗi test live cần ghi lại kết quả vào tài liệu này ngay, gồm pass/fail,
   trace/log đáng chú ý và chỉnh sửa phát sinh.
 

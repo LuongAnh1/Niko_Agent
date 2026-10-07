@@ -187,6 +187,10 @@ def build_memory_write_state(
         "answer": truncate_memory_gate_text(answer),
         "followups": [truncate_memory_gate_text(item, limit=500) for item in (followups or []) if item.strip()][:5],
         "route": route,
+        "decision_context": (
+            "Only decide whether to save this turn as long-term episodic memory. "
+            "If the turn only inspects, lists, or confirms existing memory, prefer discard."
+        ),
     }
     if gateway_message is None:
         return state
@@ -255,7 +259,10 @@ def build_memory_write_instructions() -> str:
         "or information likely useful in a future conversation. Choose discard for "
         "small talk, transient acknowledgements, wait/busy/error replies, duplicate "
         "or low-signal content, and anything that should remain only in operational "
-        "chat logs. If possible, include a short `reason`."
+        "chat logs. Also choose discard for memory inspection or inventory turns "
+        "where the user asks what Niko currently stores/remembers and the answer "
+        "only reports existing memory; listing memory is not itself a durable event. "
+        "If possible, include a short `reason`."
     )
 
 
@@ -287,7 +294,7 @@ def build_memory_write_criteria() -> dict[str, str]:
     """Hai lựa chọn duy nhất cho episodic write gate v1."""
     return {
         MEMORY_REMEMBER: "Save this completed Deep interaction as long-term episodic memory.",
-        MEMORY_DISCARD: "Do not save this interaction as long-term episodic memory.",
+        MEMORY_DISCARD: "Do not save this interaction as long-term episodic memory, including memory inspection/listing turns.",
     }
 
 
