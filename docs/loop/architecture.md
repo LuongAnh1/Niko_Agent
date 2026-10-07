@@ -1,0 +1,195 @@
+# Kiến Trúc Niko Loop
+
+Ngày cập nhật: 2026-10-08
+Phạm vi: kiến trúc Loop tổng quát cho Niko Agent, chưa phải code runtime đã hoàn chỉnh
+
+Tài liệu này mô tả Loop như một slot xử lý tool có thể dùng chung cho chat
+memory, Jira/business data và các workflow cần nhiều bước về sau. Hiện tại Niko
+vẫn chạy bằng `ChatReplyGraph` viết tay; Loop trong tài liệu này là target
+architecture để triển khai dần, không phải một module production đã tồn tại.
+
+## 1. Vai Trò Của Loop
+
+Loop là vòng lặp:
+
+```text
+observe -> reason -> act -> observe -> ... -> final reply
+```
+
+Trong Niko:
+
+- `observe`: nhận current prompt, recent working memory, long-term memory, tool
+  result và gateway metadata.
+- `reason`: một controller quyết định cần dùng tool nào, dùng tham số gì, hay đã
+  đủ thông tin để trả lời.
+- `act`: Python runtime gọi tool thật, validate guardrail và ghi trace.
+- `final reply`: agent trả lời user từ context đã thu thập, không để tool tự gửi
+  Telegram message.
+
+Tham chiếu Waku: graph có thể bọc quanh loop, nhưng không thay thế loop. Graph
+quyết định đường đi lớn; loop xử lý những tác vụ cần model/controller gọi tool
+lặp lại.
+
+## 2. Ranh Giới Với Kiến Trúc Hiện Tại
+
+```mermaid
+flowchart LR
+    Gateway[Telegram Gateway] --> Graph[ChatReplyGraph]
+    Graph -->|reply nhanh| Reply[Reply]
+    Graph -->|cần tool/memory/Jira| Loop[Loop Runtime]
+    Loop --> Controller[Controller / Decision Step]
+    Controller --> Registry[ToolRegistry]
+    Registry --> MemoryTools[Memory tools]
+    Registry --> JiraTools[Jira tools future]
+    Registry --> OpsTools[Ops tools future]
+    Loop --> Deep[Deep Agent final answer]
+    Deep --> Reply
+
+    Loop --> Trace[Trace JSONL]
+    Loop --> RuntimeLog[Runtime Log]
+
+    classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
+    classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
+
+    class Gateway,Graph,Reply,Deep,Trace,RuntimeLog done;
+    class Loop,Controller,Registry,MemoryTools,JiraTools,OpsTools planned;
+```
+
+Ranh giới cần giữ:
+
+- `bots/telegram/` chỉ làm IO/auth/parsing/reply/sticker.
+- `ChatReplyGraph` chọn route và gọi Loop khi tác vụ cần tool workflow.
+- `niko/loop/` sẽ là nơi đặt loop core, tool registry, loop result và observer.
+- `niko/memory/` vẫn sở hữu SQLite memory và guardrail mutate memory.
+- Tool chỉ trả về kết quả cho loop; tool không tự reply Telegram.
+- Trace/runtime log nằm ở harness/ops, không tham gia reasoning.
+
+## 3. Interface Mục Tiêu
+
+Đây là interface mục tiêu để triển khai, không phải public API đã có sẵn.
+
+```python
+@dataclass(frozen=True)
+class Tool:
+    name: str
+    description: str
+    input_schema: dict[str, object]
+    handler: Callable[[dict[str, object], ToolContext], ToolResult]
+    mutates_state: bool = False
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    ok: bool
+    text: str
+    data: dict[str, object]
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class LoopResult:
+    reply: str
+    tool_calls: list[dict[str, object]]
+    iterations: int
+    limit_reached: bool
+    error: str = ""
+```
+
+`ToolRegistry` cần hỗ trợ:
+
+- đăng ký tool theo tên duy nhất;
+- xuất schema cho controller/model;
+- execute tool theo `{name, args}`;
+- bắt lỗi tool thành `ToolResult(ok=False, ...)` để loop không crash;
+- ghi rõ tool nào mutate state để observer/trace có thể đánh dấu.
+
+`LoopObserver` cần ghi event tới trace/runtime log:
+
+- `loop_started`
+- `loop_step_started`
+- `loop_decision`
+- `loop_tool_call_started`
+- `loop_tool_call_finished`
+- `loop_final_answer`
+- `loop_limit_reached`
+- `loop_error`
+
+## 4. Controller V0 Và Future Tool Use
+
+Niko hiện gọi Claude qua `fcc-claude` CLI, không gọi trực tiếp Messages API
+tool-use trong application code. Vì vậy Loop cần có hai chế độ được tài liệu hóa
+rõ:
+
+- V0: Python-controlled loop. Controller có thể là Decision Model/Ollama hoặc
+  một prompt JSON qua Fast/Deep command. Python parse label/tool/action, validate
+  schema, gọi tool và tiếp tục vòng lặp.
+- Future: native LLM tool-use. Nếu runtime sau này có structured tool calls ổn
+  định, Loop có thể thay controller bằng native tool-use mà vẫn giữ ToolRegistry,
+  ToolResult, observer và trace event.
+
+Mặc định triển khai gần nhất nên chọn V0 để hợp với runtime hiện tại và để debug
+được trên dashboard.
+
+## 5. Use Case Đầu Tiên: Memory Correction
+
+Memory correction hiện là Phase 5 V1 tạm thời trong
+`niko/memory/correction_workflow.py`: gate nhận diện intent, Python search fact,
+hỏi lại khi mơ hồ, pending ID nằm trong RAM, rồi update/delete SQLite.
+
+Khi có Loop, correction nên chuyển dần thành workflow tool:
+
+```text
+user prompt
+  -> ChatReplyGraph detects/asks Loop for memory correction workflow
+  -> Loop controller chooses search_facts/list_facts
+  -> tool result returns candidate fact IDs
+  -> controller chooses clarify/update_fact/delete_fact/final reply
+  -> Python guardrail validates ID and mutates SQLite
+  -> trace/runtime log captures each step
+```
+
+Tool V0 nên gồm:
+
+- `search_facts`: tìm fact theo query, trả về ID/subject/content/source.
+- `list_facts`: liệt kê fact gần đây hoặc theo user/session scope.
+- `update_fact`: chỉ mutate khi ID hợp lệ và replacement không rỗng.
+- `delete_fact`: chỉ mutate khi ID hợp lệ và action đã rõ.
+
+Episode nên tiếp tục read-only trong V0 để tránh mất ngữ cảnh lịch sử.
+
+## 6. Mở Rộng Jira Và Business Tools
+
+Jira/lakehouse là lane business memory riêng, không trộn vào chat memory SQLite
+mặc định. Khi Loop ổn định, có thể thêm tool:
+
+- `parse_issue_key`: xác định issue key từ prompt.
+- `fetch_jira_issue`: lấy issue summary/description/status/assignee.
+- `fetch_jira_comments`: lấy comment liên quan.
+- `fetch_jira_changelog`: lấy lịch sử thay đổi nếu cần phân tích tiến độ.
+
+Luôn để Deep agent phân tích dựa trên context đã normalize và có evidence. Tool
+chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối cùng.
+
+## 7. Guardrails
+
+- Max iteration default cho V0 nên nhỏ, vì local demo cần quan sát được và tránh
+  kẹt loop. Giá trị đề xuất: `3` cho memory correction, `5` cho Jira fetch flow.
+- Khi đạt max iteration, Loop phải gọi final answer/fallback không gọi thêm tool.
+- Tool mutate state phải ghi trace trước và sau khi mutate.
+- Tool lỗi phải trả về result lỗi cho Loop; không làm mất chat log.
+- Nếu controller trả tool/action không hợp lệ, Loop fail-closed với mutate tool
+  và có thể fail-open với read-only retrieval tool.
+- Dashboard/trace phải nhìn được từng tool call để debug quyết định của model.
+
+## 8. Trạng Thái Triển Khai
+
+| Thành phần | Trạng thái |
+| --- | --- |
+| ChatReplyGraph route/Fast/Deep | đã có |
+| MemoryRuntime retrieval/write/correction facade | đã có |
+| Memory correction V1 tạm thời | đã có |
+| Tool slot trên dashboard | đã có về mặt hiển thị |
+| Loop core `niko/loop/` | planned |
+| ToolRegistry tổng quát | planned |
+| Memory tools qua Loop | planned |
+| Jira tools qua Loop | planned |

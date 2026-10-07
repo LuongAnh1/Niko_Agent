@@ -45,6 +45,8 @@ Reply/turn events -> Trace/Ops
 ```
 
 Trong đó `Tool Slot` mới là vị trí dự kiến cho vòng sau, chưa phải tool router hoàn chỉnh.
+Thiết kế Loop tổng quát nằm ở `docs/loop/architecture.md`; baseline hiện tại
+chưa có package `niko/loop/` production.
 
 ## Bố Cục Repo
 
@@ -114,6 +116,12 @@ Consolidation có đường manual qua dashboard/API (`Refresh batch`, `Run once
 `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1`.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
+
+Loop mục tiêu sẽ là lớp tool workflow độc lập với Telegram. `ChatReplyGraph` chỉ
+gọi Loop khi cần workflow nhiều bước như memory correction hoặc Jira retrieval;
+tool không tự gửi reply Telegram và mọi mutate phải đi qua guardrail Python có
+trace. Phase đầu nên dùng Python-controlled loop vì runtime hiện gọi Claude qua
+`fcc-claude` CLI, chưa có native tool-use API ổn định trong application code.
 
 ## Import Chính
 
@@ -196,5 +204,7 @@ Chưa có:
 - Thêm gateway mới: tạo folder trong `bots/`, parse message về `ChatGatewayMessage`, rồi gọi `ChatReplyGraph`.
 - Thêm nghiệp vụ mới: tạo graph mới trong `niko/graphs/`.
 - Thêm tool/loop: dùng `Tool Slot` hiện có như điểm mở rộng, nhưng giữ Telegram gateway mỏng.
+- Khi triển khai Loop, đặt core trong `niko/loop/`, giữ tool adapters gần domain
+  sở hữu dữ liệu như `niko/memory/` hoặc Jira lane.
 - Cải tiến chat memory: làm chắc retrieval/write gate, consolidation và correction trên SQLite local trước.
 - Cải tiến memory nghiệp vụ: nối sang lane lakehouse/Jira qua retrieval/tool slot khi cần dữ liệu issue/tài liệu, không trộn vào chat memory v1.

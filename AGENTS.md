@@ -44,6 +44,9 @@ separate business backend lane that Niko can retrieve from later.
   imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
+- `niko/loop/` (planned): Future generic tool-loop runtime. It should own
+  Tool/ToolRegistry/LoopResult/observer mechanics once implemented. Keep it
+  independent from Telegram and from any single domain tool.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
   replies, Fast/Deep handoff, background deep jobs, busy replies, followups,
   final reply composition, memory writes, and trace events.
@@ -230,6 +233,8 @@ bot process already owns that lock.
 - `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
 - `docs/harness/memory-eval-scenarios.md`: deterministic chat memory eval
   scenarios for retrieval/write/correction regression checks.
+- `docs/loop/architecture.md`: target architecture for the generic Niko Loop,
+  ToolRegistry, observer events, and first memory/Jira tool workflows.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
 - `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
@@ -239,6 +244,10 @@ bot process already owns that lock.
   checklist and live verification status for chat memory work.
 - `docs/plans/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
   checklist for current Phase 6/7 memory flow verification.
+- `docs/plans/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
+  for the generic Loop runtime.
+- `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
+  for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
@@ -339,6 +348,9 @@ not relevant.
   Telegram gateway. Nimble is for route/label decisions, not free-form reply
   generation.
 - Put routing/agent-loop behavior in `niko/graphs/chat_reply/`.
+- When the generic Loop is implemented, put reusable loop mechanics in
+  `niko/loop/`; keep domain tools near their owners such as `niko/memory/` or the
+  future Jira lane.
 - Put CLI/LLM invocation details in `niko/runtime.py`.
 - Put memory persistence/retrieval in `niko/memory/`.
 - Put observability-only behavior in `niko/harness/` or `niko/ops/`.

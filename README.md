@@ -172,9 +172,11 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 - [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
 - [Harness Memory & Ops](docs/harness/memory-ops.md)
 - [Chat Memory Eval Scenarios](docs/harness/memory-eval-scenarios.md)
+- [Niko Loop Architecture](docs/loop/architecture.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo/demo-guide.md)
 - [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)
+- [Kế hoạch Niko Loop 2026-10-08](docs/plans/2026-10-08-niko-loop-implementation-plan.md)
 - [Memory Roadmap](docs/memory/roadmap.md)
 
 ## Ranh Giới Baseline
@@ -184,6 +186,7 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit consolidation, gồm manual `Run once` và auto default-off.
 - Auto consolidation default-off; khi bật, nó chỉ chạy sau complete exchange và vẫn dùng guardrail lỗi classifier thì không mark rows.
 - Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
+- Loop tổng quát hiện mới ở mức tài liệu triển khai; code runtime `niko/loop/` chưa được tạo trong baseline này.
 - Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

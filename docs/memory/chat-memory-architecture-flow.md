@@ -283,6 +283,39 @@ baseline tạm cho chat memory local; khi Loop/tool slot trưởng thành, phầ
 target và mutate memory nên chuyển thành workflow/tool có state bền thay vì pending
 RAM trong runtime.
 
+## 6.5 Target Flow: Generic Loop / Tool Workflow
+
+```mermaid
+flowchart TB
+    Graph[ChatReplyGraph] --> NeedTool{Cần workflow nhiều bước?}
+    NeedTool -->|no| Normal[Fast/Deep/local flow hien tai]
+    NeedTool -->|yes| Loop[Loop Runtime planned]
+    Loop --> Controller[Controller<br/>Decision Model / JSON prompt / future tool-use]
+    Controller --> Registry[ToolRegistry planned]
+    Registry --> MemoryTools[Memory tools<br/>search/list/update/delete facts]
+    Registry --> JiraTools[Jira/business tools future]
+    MemoryTools --> Store[(SQLite memory)]
+    JiraTools --> External[Jira/mock/public dataset]
+    Loop --> Final[Final reply qua Graph]
+    Loop --> Trace[Trace/runtime log]
+
+    classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
+    classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
+    classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
+
+    class Graph,Normal,Store,Final,Trace done;
+    class Loop,Controller,Registry,MemoryTools,JiraTools planned;
+    class External boundary;
+```
+
+Loop tổng quát chưa có trong code hiện tại. Tài liệu triển khai nằm ở
+`docs/loop/architecture.md` và checklist ở
+`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
+thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow:
+controller chọn search/list/update/delete, Python validate target rồi mới mutate
+SQLite. Cùng runtime Loop đó sẽ mở sang Jira/business tools nhưng không trộn dữ
+liệu Jira vào chat memory SQLite mặc định.
+
 ## 7. Các Lớp Dữ Liệu
 
 ```mermaid
