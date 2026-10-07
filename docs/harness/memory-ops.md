@@ -7,8 +7,9 @@ Tài liệu này mô tả baseline harness của Niko: trace JSONL, SQLite memor
 - `niko/harness/trace.py`: ghi trace JSONL theo turn và event.
 - `niko/harness/runtime_log.py`: ghi runtime log JSONL cho tab Bots.
 - `niko/memory/store.py`: SQLite memory store.
-- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, inventory, search store và format context.
+- `niko/memory/runtime.py`: `MemoryRuntime` điều phối retrieval gate, write gate, inventory, search store, consolidation scaffold và format context.
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
+- `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated và mark-done có kiểm soát.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
 - `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
 - `niko/ops/config_schema.py`: schema, validate, mask secret và snapshot cho tab Config.
@@ -40,6 +41,8 @@ SQLite hiện có ba nhóm dữ liệu:
 | `episodes` | Episodic Memory | Sự kiện/tác vụ theo thời gian, nhất là deep job hoàn tất |
 
 `chat_log` không phải Semantic/Episodic Memory theo nghĩa dùng để suy luận. Nó là log vận hành để xem lại hội thoại. Semantic/Episodic hiện nằm ở `facts` và `episodes`.
+`chat_log` hiện có cờ `consolidated` để scaffold consolidation biết batch nào đã
+được xử lý xong; việc tự sinh facts/episodes từ batch vẫn là phase sau.
 
 Nếu SQLite hỗ trợ FTS5, store dùng full-text search. Nếu không có FTS5, store fallback về LIKE search có giới hạn.
 

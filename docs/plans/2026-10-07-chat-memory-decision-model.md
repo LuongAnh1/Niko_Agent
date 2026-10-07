@@ -194,23 +194,23 @@ Niko hiện đã có:
 - `episodes`: episodic memory sau deep job.
 - FTS5 nếu có, fallback LIKE.
 - Deep agent được inject memory context.
-- Ollama/Nimble decision model đã dùng cho fast triage và sticker mood.
+- Ollama/Nimble decision model đã dùng cho fast triage, sticker mood, retrieval gate và write gate.
 - Fast triage không nhận memory context để giữ route decision sạch.
 - Dashboard Memory tab để thêm/xóa fact và xem episodes.
 - V1 đang hợp với giả định single-user: một Niko instance phục vụ một chủ sở hữu
   chính.
 
-Những phần còn thiếu so với Waku:
+Những phần còn thiếu hoặc mới ở mức scaffold so với Waku:
 
-- Chưa có retrieval gate; cứ bật retrieval là Deep search memory.
-- Chưa có write gate để biết turn nào đáng đưa vào memory dài hạn.
+- Đã có retrieval gate v1, default-off, dùng Nimble để chọn `skip/retrieve` khi bật.
+- Đã có write gate v1, default-off, hiện chỉ quyết định ghi/bỏ `episodes`.
 - Đã có `consolidated` flag trên `chat_log` và scaffold đọc/mark batch.
 - Chưa có batch consolidation tự sinh facts/episodes từ chat log.
 - Chưa có classifier rõ cho semantic fact, episodic event, hoặc discard.
 - Chưa có memory management qua chat.
 - Chưa có working-memory model rõ: recent history window, session switch/reload.
 - Chưa có readable `MEMORY.md` mirror.
-- Chưa có eval riêng cho memory gate, consolidation, Unicode search.
+- Chưa có eval scenario riêng cho consolidation/correction; unit tests cho gate/search đã có.
 - Episode hiện là summary của deep job, chưa phải event taxonomy giàu nghĩa.
 
 Những phần cố ý chưa làm ở v1:

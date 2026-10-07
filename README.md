@@ -17,13 +17,14 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `chat_log`: lịch sử hội thoại đã xử lý.
   - `facts`: Semantic Memory thủ công/baseline.
   - `episodes`: Episodic Memory sinh ra sau deep job.
+  - retrieval/write gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
 
 ## Cấu Trúc Chính
 
 ```text
 bots/telegram/                  # Telegram gateway
-bots/decision_model/            # Ollama/Nimble decision scripts cho fast triage
+bots/decision_model/            # Ollama/Nimble decision scripts cho triage, sticker, memory gates
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
@@ -32,6 +33,7 @@ niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/memory/store.py             # SQLite memory store
 niko/memory/runtime.py           # Khung điều phối retrieval/gate/format memory
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
+niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
 niko/ops/                       # Mini Niko Ops dashboard
   dashboard.py                   # HTTP server/entrypoint mỏng
   bots.py                        # Start/stop Telegram Bot, warmup/stop Decision Model

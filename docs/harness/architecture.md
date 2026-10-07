@@ -54,11 +54,12 @@ bots/
     client.py          # Ollama /v1/systemone client cho Nimble decision model
     triage.py          # Mapping prompt Telegram sang reply_now/send_to_deep
     sticker.py         # Mapping prompt/reply sang mood sticker Telegram
+    memory.py          # Retrieval/write decisions cho chat memory
     warmup.py          # Giữ Nimble loaded với keep_alive=-1
   telegram/
     bot.py             # Telegram gateway: polling, auth, mention filter, /id, reply, sticker
     instance_guard.py  # Single-instance lock/PID guard cho Telegram long polling
-    sticker_picker.py  # Chon file_id theo mood sticker da quyet dinh
+    sticker_picker.py  # Chọn file_id theo mood sticker đã quyết định
     stickers/
       ducks.json       # Mapping mood sang sticker Telegram
 
@@ -74,6 +75,7 @@ niko/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
     runtime.py         # MemoryRuntime điều phối retrieval/write gate và format context
     context.py         # Dataclass, formatter và wrapper tương thích
+    consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
     bots.py            # Start/stop Telegram bot, warmup/stop Decision Model

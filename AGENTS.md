@@ -34,9 +34,9 @@ separate business backend lane that Niko can retrieve from later.
   auth/allowlist, mention filtering, `/id`, `/whoami`, replies, and stickers.
   Keep this layer thin. It should not own memory, routing, or LLM policy.
 - `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
-  `/v1/systemone` client, route-label mapping, and warmup script for keeping the
-  model loaded. This layer decides labels only; it should not generate free-form
-  user replies.
+  `/v1/systemone` client, route-label mapping, sticker mood, memory retrieval/write
+  decisions, and warmup script for keeping the model loaded. This layer decides
+  labels only; it should not generate free-form user replies.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
@@ -49,11 +49,11 @@ separate business backend lane that Niko can retrieve from later.
   `niko/.runtime/traces/YYYY-MM-DD.jsonl`.
 - `niko/harness/runtime_log.py`: JSONL runtime log logger for Bots dashboard
   table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
-- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, and
-  `episodes`. Uses FTS5 when available, with LIKE fallback.
+- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
+  and consolidation state. Uses FTS5 when available, with LIKE fallback.
 - `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate, write
-  gate, inventory questions, store search, chat log writes, episode writes, and
-  context formatting before Deep.
+  gate, inventory questions, store search, chat log writes, episode writes,
+  consolidation scaffold, and context formatting before Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
