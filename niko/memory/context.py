@@ -9,8 +9,6 @@ Nó chưa làm embedding, rerank hay graph reasoning; đây là tầng text retr
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
-import unicodedata
 from typing import Any
 
 from niko.config import env_flag, env_value
@@ -18,51 +16,6 @@ from niko.memory.store import Episode, Fact, MemoryStore
 
 
 DEFAULT_MEMORY_TOP_K = 4
-FACT_INVENTORY_KEYWORDS = (
-    "fact nao",
-    "facts nao",
-    "fact gi",
-    "facts gi",
-    "su that nao",
-    "su that gi",
-    "dang luu fact",
-    "dang luu facts",
-    "dang luu su that",
-    "luu fact",
-    "luu facts",
-    "luu su that",
-    "semantic nao",
-    "semantic memory nao",
-    "bo nho semantic",
-)
-EPISODE_INVENTORY_KEYWORDS = (
-    "episode nao",
-    "episodes nao",
-    "su kien nao",
-    "nhat ky nao",
-    "dang luu episode",
-    "dang luu su kien",
-    "episodic nao",
-    "episodic memory nao",
-    "bo nho episodic",
-)
-FACT_INVENTORY_FILTER_STOPWORDS = {
-    "bo",
-    "co",
-    "dang",
-    "em",
-    "fact",
-    "facts",
-    "gi",
-    "khong",
-    "luu",
-    "memory",
-    "nao",
-    "semantic",
-    "su",
-    "that",
-    "ve",
-}
 
 
 @dataclass(frozen=True)
@@ -77,6 +30,8 @@ class RetrievedMemory:
     gate_decision: str = ""
     gate_query: str = ""
     gate_reason: str = ""
+    gate_fact_mode: str = ""
+    gate_episode_mode: str = ""
     gate_confidence: float | None = None
     gate_label: str = ""
     gate_probabilities: dict[str, float] | None = None
@@ -99,6 +54,10 @@ class RetrievedMemory:
                 meta["gate_query"] = self.gate_query
             if self.gate_reason:
                 meta["gate_reason"] = self.gate_reason
+            if self.gate_fact_mode:
+                meta["gate_fact_mode"] = self.gate_fact_mode
+            if self.gate_episode_mode:
+                meta["gate_episode_mode"] = self.gate_episode_mode
             if self.gate_confidence is not None:
                 meta["gate_confidence"] = self.gate_confidence
             if self.gate_label:
@@ -138,11 +97,11 @@ def memory_top_k() -> int:
         return DEFAULT_MEMORY_TOP_K
 
 
-def evaluate_memory_gate(prompt: str, gateway_message=None, *, bypass: bool = False) -> dict[str, Any]:
+def evaluate_memory_gate(prompt: str, gateway_message=None) -> dict[str, Any]:
     """Chạy retrieval gate nếu bật; lỗi thì fail-open bằng raw prompt."""
     from niko.memory.runtime import default_memory_runtime
 
-    return default_memory_runtime().evaluate_retrieval_gate(prompt, gateway_message, bypass=bypass)
+    return default_memory_runtime().evaluate_retrieval_gate(prompt, gateway_message)
 
 
 def log_memory_gate_decision(gate_state: dict[str, Any]) -> None:
@@ -156,7 +115,9 @@ def log_memory_gate_decision(gate_state: dict[str, Any]) -> None:
             (
                 "Memory gate: "
                 f"decision={gate_state.get('decision') or 'disabled'} "
-                f"query={gate_state.get('query') or '-'}"
+                f"query={gate_state.get('query') or '-'} "
+                f"fact_mode={gate_state.get('fact_mode') or '-'} "
+                f"episode_mode={gate_state.get('episode_mode') or '-'}"
             ),
             data={key: value for key, value in gate_state.items() if value not in ("", None, {})},
         )
@@ -194,37 +155,6 @@ def retrieve_memory_context(
 
 def build_memory_context(prompt: str, gateway_message=None, store: MemoryStore | None = None) -> str:
     return retrieve_memory_context(prompt, gateway_message=gateway_message, store=store).text
-
-
-def asks_for_fact_inventory(prompt: str) -> bool:
-    normalized = normalize_text(prompt)
-    return any(contains_keyword(normalized, keyword) for keyword in FACT_INVENTORY_KEYWORDS)
-
-
-def asks_for_episode_inventory(prompt: str) -> bool:
-    normalized = normalize_text(prompt)
-    return any(contains_keyword(normalized, keyword) for keyword in EPISODE_INVENTORY_KEYWORDS)
-
-
-def fact_inventory_filter_words(prompt: str) -> list[str]:
-    normalized = normalize_text(prompt)
-    words = re.findall(r"[\w]+", normalized, flags=re.UNICODE)
-    return [word for word in words if len(word) >= 2 and word not in FACT_INVENTORY_FILTER_STOPWORDS]
-
-
-def contains_keyword(normalized_text: str, keyword: str) -> bool:
-    normalized_keyword = normalize_text(keyword)
-    if not normalized_keyword:
-        return False
-    if len(normalized_keyword) <= 3 and normalized_keyword.isalnum():
-        return normalized_keyword in normalized_text.split()
-    return normalized_keyword in normalized_text
-
-
-def normalize_text(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    normalized = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return normalized.replace("đ", "d")
 
 
 def format_memory_context(

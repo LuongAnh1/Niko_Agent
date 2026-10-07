@@ -366,7 +366,9 @@ Test cần có:
 - Gate `retrieve` dùng query do gate trả.
 - Gate lỗi thì retrieve bằng raw prompt.
 - Trace có label, confidence, query và reason.
-- Inventory question kiểu “đang lưu fact nào” bypass gate để vẫn list memory.
+- Inventory question kiểu “đang lưu fact nào” vẫn đi qua gate; Decision Model
+  trả choice `list_facts` hoặc `fact_mode=list` để runtime list memory thay vì
+  search theo chữ `fact`.
 
 ### Phase 3: Unicode/Query Search Hardening
 

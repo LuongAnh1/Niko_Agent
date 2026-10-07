@@ -69,7 +69,8 @@ nhưng vẫn fail-open để không bỏ lỡ memory thật sự cần.
 - [x] Gate `retrieve` dùng query do model trả.
 - [x] Gate `retrieve` fallback raw prompt nếu query rỗng.
 - [x] Gate lỗi thì fail-open bằng raw prompt.
-- [x] Inventory question như “đang lưu fact nào” bypass gate.
+- [x] Inventory question như “đang lưu fact nào” đi qua gate và dùng choice
+  `list_facts` hoặc `fact_mode=list`, không bypass bằng keyword Python.
 - [x] Thêm metadata gate vào trace `memory_retrieval`.
 - [x] Thêm runtime log `memory_gate_decision`.
 - [x] Thêm runtime log `memory_gate_error`.
@@ -80,6 +81,66 @@ nhưng vẫn fail-open để không bỏ lỡ memory thật sự cần.
 - [x] Ghi prompt mẫu cho gate `skip`, `retrieve`, fail-open.
 - [ ] Nếu Nimble hay thiếu `query`, chỉnh instructions của gate.
 - [ ] Nếu gate làm chậm Deep rõ rệt, cân nhắc timeout riêng.
+
+## 2.5. Rà Soát Heuristic Hard Code Và Decision Model
+
+Mục đích: phân biệt rõ phần nào nên để Python quyết định vì đó là guardrail
+deterministic, và phần nào đang là "đoán ý người dùng" nên chuyển dần sang
+Decision Model. Nguyên tắc chung: code giữ các luật an toàn, IO, trạng thái,
+schema và fallback; Decision Model xử lý intent ngôn ngữ mơ hồ hoặc cần hiểu
+ngữ cảnh.
+
+- [x] Rà soát router local trong `niko/graphs/chat_reply/router.py`.
+- [x] Ghi nhận `deep_job_active` là state runtime, không thay bằng Decision Model.
+- [x] Ghi nhận local reply cho `ok/ping/chào/cảm ơn/khen` là nhánh cực rẻ, có thể
+  giữ bằng code nếu phạm vi vẫn nhỏ và rõ.
+- [ ] Không mở rộng vô hạn `ACK_VALUES`, `GREETING_KEYWORDS`, `THANKS_KEYWORDS`,
+  `PRAISE_KEYWORDS`; nếu bắt đầu nhiều biến thể tự nhiên thì chuyển vùng đó sang
+  Fast triage/Decision Model.
+- [x] Ghi nhận `len(prompt)`, newline và code fence là tín hiệu cấu trúc, nên giữ
+  bằng code để route Deep bảo thủ.
+- [ ] Rà lại `DEEP_KEYWORDS`: các keyword nghiệp vụ như `memory/fact/lần trước`
+  có thể giữ tạm để không bỏ sót memory, nhưng danh sách topic chung như
+  `api/github/server/repo` không nên là nguồn route chính lâu dài; vùng mơ hồ
+  nên để Decision Model quyết định.
+- [x] Ghi nhận Fast triage `reply_now/send_to_deep` đã dùng Decision Model khi
+  `NIKO_DECISION_MODEL_ENABLED=1`.
+- [x] Ghi nhận normalize alias và parse JSON legacy trong Fast triage chỉ là
+  adapter/schema guardrail, không phải phần cần Decision Model.
+- [x] Rà soát inventory memory trong `niko/memory/context.py` và
+  `niko/memory/runtime.py`.
+- [x] Đổi kết luận inventory: không bypass gate bằng keyword Python nữa. Câu
+  "đang lưu fact nào" vẫn là intent ngôn ngữ, nên để Decision Model chọn mode
+  truy xuất.
+- [x] Thay heuristic `fact_inventory_filter_words(...)` bằng extra field từ
+  Decision Model: choice `list_facts|recent_episodes` hoặc
+  `fact_mode=list|search|none`, `episode_mode=recent|search|none`.
+- [x] Inventory chung phải đi `fact_mode=list`; inventory theo chủ đề thật đi
+  `fact_mode=search` kèm `query`; không tự đoán bằng stopword list dài.
+- [x] Ghi nhận retrieval gate `skip/retrieve`, write gate `remember/discard` và
+  memory candidate classifier đã là Decision Model.
+- [x] Rà soát consolidation trong `niko/memory/consolidation.py`.
+- [x] Ghi nhận explicit patterns như `ghi nhớ/hãy nhớ/từ giờ` có thể giữ bằng code
+  như shortcut cho câu lệnh lưu memory rõ ràng.
+- [ ] Không để `EPISODIC_KEYWORDS` và ngưỡng độ dài là tiêu chí chính lâu dài cho
+  episodic memory; phase sau nên có summarizer/candidate generator bằng model,
+  rồi classifier quyết định lưu hay bỏ.
+- [x] Rà soát sticker flow.
+- [x] Ghi nhận chọn mood sticker đã dùng Decision Model; phần chọn `file_id`,
+  fallback mood, normalize mood và mode `off` là deterministic config, nên giữ
+  bằng code.
+- [x] Rà soát Telegram gateway/auth.
+- [x] Ghi nhận allowlist chat/user, group mention policy, command `/id`,
+  `/whoami`, instance guard và split message là IO/security rule, không thay bằng
+  Decision Model.
+- [x] Rà soát output guardrail trong `niko/graphs/chat_reply/prompts.py`.
+- [x] Ghi nhận `looks_like_fake_tool_call(...)`, suffix handling, truncate và
+  sanitize là guardrail định dạng/an toàn, nên giữ bằng code.
+- [x] Thêm test regression cho câu inventory chung: "Hiện tại em đang lưu những
+  fact nào về anh?" phải đi qua retrieval decision rồi dùng `list_facts` hoặc
+  `fact_mode=list`.
+- [x] Thêm trace/runtime log phân biệt `fact_mode` và `episode_mode` để debug dễ
+  hơn khi inventory bị rỗng.
 
 ## 3. Phase 3: Unicode/Query Search Hardening
 
@@ -160,7 +221,8 @@ và cảm giác “có vẻ chạy”.
 - [x] Unit test gate `skip` không gọi store search.
 - [x] Unit test gate `retrieve` dùng query gate trả.
 - [x] Unit test gate lỗi fail-open.
-- [x] Unit test inventory question bypass gate.
+- [x] Unit test inventory question đi qua Decision Model và trả `list_facts` hoặc
+  `fact_mode=list`.
 - [x] Unit test trace có gate metadata.
 - [ ] Eval prompt mẫu cho câu không cần memory.
 - [ ] Eval prompt mẫu cho câu hỏi cần memory trực tiếp.

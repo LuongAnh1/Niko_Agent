@@ -15,6 +15,10 @@ from bots.decision_model.memory import (
     MEMORY_DISCARD,
     MEMORY_REMEMBER,
     MEMORY_RETRIEVE,
+    MEMORY_RETRIEVAL_LIST,
+    MEMORY_RETRIEVAL_NONE,
+    MEMORY_RETRIEVAL_RECENT,
+    MEMORY_RETRIEVAL_SEARCH,
     MEMORY_SKIP,
     MemoryRetrievalDecision,
     MemoryWriteDecision,
@@ -24,10 +28,7 @@ from bots.decision_model.memory import (
 from niko.memory.consolidation import ConsolidationBatch, ConsolidationResult, ConsolidationRunResult, MemoryConsolidator
 from niko.memory.context import (
     RetrievedMemory,
-    asks_for_episode_inventory,
-    asks_for_fact_inventory,
     compact_episode_summary,
-    fact_inventory_filter_words,
     format_memory_context,
     log_memory_gate_decision,
     log_memory_gate_error,
@@ -75,16 +76,14 @@ class MemoryRuntime:
             return RetrievedMemory(text="", facts=[], episodes=[], enabled=False)
 
         top_k = memory_top_k()
-        fact_inventory = asks_for_fact_inventory(prompt)
-        episode_inventory = asks_for_episode_inventory(prompt)
-        gate = self.evaluate_retrieval_gate(prompt, gateway_message, bypass=fact_inventory or episode_inventory)
+        gate = self.evaluate_retrieval_gate(prompt, gateway_message)
 
         if gate["decision"] == MEMORY_SKIP:
             return self._build_result("", [], [], gate)
 
         search_query = gate["query"] or prompt
-        facts = self._retrieve_facts(prompt, search_query, top_k, fact_inventory)
-        episodes = self._retrieve_episodes(search_query, top_k, fact_inventory, episode_inventory)
+        facts = self._retrieve_facts(search_query, top_k, str(gate["fact_mode"]))
+        episodes = self._retrieve_episodes(search_query, top_k, str(gate["episode_mode"]))
         text = format_memory_context(facts, episodes, gateway_message=gateway_message)
         return self._build_result(text, facts, episodes, gate)
 
@@ -191,13 +190,15 @@ class MemoryRuntime:
         except Exception as exc:
             trace_logger.event(trace_id, "memory_write_error", {"target": "episodes", "error": str(exc)})
 
-    def evaluate_retrieval_gate(self, prompt: str, gateway_message=None, *, bypass: bool = False) -> dict[str, object]:
+    def evaluate_retrieval_gate(self, prompt: str, gateway_message=None) -> dict[str, object]:
         """Chạy gate nếu bật; lỗi gate fail-open để Deep vẫn có cơ hội dùng memory."""
         gate_state: dict[str, object] = {
             "enabled": memory_gate_enabled(),
             "decision": "",
             "query": "",
             "reason": "",
+            "fact_mode": MEMORY_RETRIEVAL_SEARCH,
+            "episode_mode": MEMORY_RETRIEVAL_SEARCH,
             "confidence": None,
             "label": "",
             "probabilities": {},
@@ -205,18 +206,6 @@ class MemoryRuntime:
             "error": "",
         }
         if not gate_state["enabled"]:
-            return gate_state
-
-        if bypass:
-            gate_state.update(
-                {
-                    "decision": MEMORY_RETRIEVE,
-                    "query": prompt,
-                    "reason": "inventory_question_bypasses_gate",
-                    "label": "inventory_bypass",
-                }
-            )
-            log_memory_gate_decision(gate_state)
             return gate_state
 
         try:
@@ -227,6 +216,8 @@ class MemoryRuntime:
                     "decision": MEMORY_RETRIEVE,
                     "query": prompt,
                     "reason": "gate_error_fail_open",
+                    "fact_mode": MEMORY_RETRIEVAL_SEARCH,
+                    "episode_mode": MEMORY_RETRIEVAL_SEARCH,
                     "error": str(exc),
                 }
             )
@@ -238,6 +229,8 @@ class MemoryRuntime:
                 "decision": decision.decision,
                 "query": decision.query if decision.decision == MEMORY_RETRIEVE else "",
                 "reason": decision.reason,
+                "fact_mode": decision.fact_mode if decision.decision == MEMORY_RETRIEVE else MEMORY_RETRIEVAL_NONE,
+                "episode_mode": decision.episode_mode if decision.decision == MEMORY_RETRIEVE else MEMORY_RETRIEVAL_NONE,
                 "confidence": decision.confidence,
                 "label": decision.label,
                 "probabilities": decision.probabilities,
@@ -311,17 +304,20 @@ class MemoryRuntime:
         decider = self._write_decider or decide_memory_write
         return decider(prompt, answer, followups, gateway_message, route)
 
-    def _retrieve_facts(self, prompt: str, search_query: str, top_k: int, fact_inventory: bool):
-        # Câu hỏi "đang lưu fact nào" cần list inventory, không search theo chữ "fact".
-        if fact_inventory and not fact_inventory_filter_words(prompt):
+    def _retrieve_facts(self, search_query: str, top_k: int, fact_mode: str):
+        """Thực thi fact retrieval theo mode mà decision model đã chọn."""
+        if fact_mode == MEMORY_RETRIEVAL_NONE:
+            return []
+        if fact_mode == MEMORY_RETRIEVAL_LIST:
             return self.store.list_facts(top_k)
         return self.store.search_facts(search_query, top_k=top_k)
 
-    def _retrieve_episodes(self, search_query: str, top_k: int, fact_inventory: bool, episode_inventory: bool):
-        if episode_inventory:
-            return self.store.recent_episodes(top_k)
-        if fact_inventory:
+    def _retrieve_episodes(self, search_query: str, top_k: int, episode_mode: str):
+        """Thực thi episode retrieval theo mode mà decision model đã chọn."""
+        if episode_mode == MEMORY_RETRIEVAL_NONE:
             return []
+        if episode_mode == MEMORY_RETRIEVAL_RECENT:
+            return self.store.recent_episodes(top_k)
         return self.store.search_episodes(search_query, top_k=top_k)
 
     def _trace_write_gate(self, trace_logger, trace_id: str, gate: dict[str, object]) -> None:
@@ -346,6 +342,8 @@ class MemoryRuntime:
             gate_decision=str(gate["decision"]),
             gate_query=str(gate["query"]),
             gate_reason=str(gate["reason"]),
+            gate_fact_mode=str(gate["fact_mode"]),
+            gate_episode_mode=str(gate["episode_mode"]),
             gate_confidence=gate["confidence"] if isinstance(gate["confidence"], float) else None,
             gate_label=str(gate["label"]),
             gate_probabilities=gate["probabilities"] if isinstance(gate["probabilities"], dict) else {},

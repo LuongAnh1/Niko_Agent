@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from bots.decision_model.client import (
+    ChoiceDecision,
     DecisionModelConfig,
     build_ollama_unload_payload,
     build_systemone_choice_payload,
@@ -18,13 +19,22 @@ from bots.decision_model.sticker import (
 from bots.decision_model.memory import (
     MEMORY_DISCARD,
     MEMORY_EPISODIC_EVENT,
+    MEMORY_LIST_FACTS,
     MEMORY_RETRIEVE,
+    MEMORY_RETRIEVAL_LIST,
+    MEMORY_RETRIEVAL_NONE,
+    MEMORY_RETRIEVAL_RECENT,
+    MEMORY_RETRIEVAL_SEARCH,
+    MEMORY_RECENT_EPISODES,
     MEMORY_REMEMBER,
     MEMORY_SEMANTIC_FACT,
     MEMORY_SKIP,
     build_memory_candidate_criteria,
     build_memory_retrieval_criteria,
     build_memory_write_criteria,
+    decide_memory_retrieval,
+    normalize_episode_retrieval_mode,
+    normalize_fact_retrieval_mode,
     normalize_memory_candidate_choice,
     normalize_memory_retrieval_choice,
     normalize_memory_write_choice,
@@ -139,11 +149,46 @@ class DecisionModelTests(unittest.TestCase):
 
         self.assertIn(MEMORY_SKIP, criteria)
         self.assertIn(MEMORY_RETRIEVE, criteria)
+        self.assertIn(MEMORY_LIST_FACTS, criteria)
+        self.assertIn(MEMORY_RECENT_EPISODES, criteria)
         self.assertEqual(normalize_memory_retrieval_choice("read memory"), MEMORY_RETRIEVE)
         self.assertEqual(normalize_memory_retrieval_choice("no memory"), MEMORY_SKIP)
+        self.assertEqual(normalize_memory_retrieval_choice("list facts"), MEMORY_RETRIEVE)
+        self.assertEqual(normalize_memory_retrieval_choice("recent episodes"), MEMORY_RETRIEVE)
 
         with self.assertRaises(RuntimeError):
             normalize_memory_retrieval_choice("maybe")
+
+    def test_memory_retrieval_inventory_choices_set_default_modes(self):
+        with patch("bots.decision_model.memory.systemone_choice", return_value=ChoiceDecision(choice=MEMORY_LIST_FACTS)):
+            fact_inventory = decide_memory_retrieval("Hien tai em dang luu nhung fact nao?")
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(choice=MEMORY_RECENT_EPISODES),
+        ):
+            episode_inventory = decide_memory_retrieval("Gan day em nho nhung episode nao?")
+
+        self.assertEqual(fact_inventory.decision, MEMORY_RETRIEVE)
+        self.assertEqual(fact_inventory.fact_mode, MEMORY_RETRIEVAL_LIST)
+        self.assertEqual(fact_inventory.episode_mode, MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(episode_inventory.decision, MEMORY_RETRIEVE)
+        self.assertEqual(episode_inventory.fact_mode, MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(episode_inventory.episode_mode, MEMORY_RETRIEVAL_RECENT)
+
+    def test_memory_retrieval_modes_aliases_and_invalid_choices(self):
+        self.assertEqual(normalize_fact_retrieval_mode("", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_SEARCH)
+        self.assertEqual(normalize_fact_retrieval_mode("inventory", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_LIST)
+        self.assertEqual(normalize_fact_retrieval_mode("no facts", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(normalize_episode_retrieval_mode("list", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_RECENT)
+        self.assertEqual(
+            normalize_episode_retrieval_mode("topic search", default=MEMORY_RETRIEVAL_SEARCH),
+            MEMORY_RETRIEVAL_SEARCH,
+        )
+
+        with self.assertRaises(RuntimeError):
+            normalize_fact_retrieval_mode("maybe", default=MEMORY_RETRIEVAL_SEARCH)
+        with self.assertRaises(RuntimeError):
+            normalize_episode_retrieval_mode("maybe", default=MEMORY_RETRIEVAL_SEARCH)
 
     def test_memory_write_choice_aliases_and_criteria(self):
         criteria = build_memory_write_criteria()

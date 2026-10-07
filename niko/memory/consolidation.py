@@ -24,6 +24,8 @@ from niko.memory.store import MemoryStore, default_memory_store
 
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 12
 EXPLICIT_FACT_PATTERNS = (
+    "ghi nhớ rằng",
+    "ghi nho rang",
     "ghi nhớ",
     "ghi nho",
     "nhớ rằng",
@@ -219,7 +221,9 @@ class MemoryConsolidator:
         candidates: list[MemoryCandidate] = []
         explicit_fact = self._explicit_fact_candidate(batch)
         if explicit_fact is not None:
+            # Lệnh ghi nhớ rõ ràng nên tạo semantic fact, tránh lưu thêm episodic event trùng nghĩa.
             candidates.append(explicit_fact)
+            return candidates
 
         episodic_event = self._episodic_candidate(batch)
         if episodic_event is not None:
@@ -458,7 +462,7 @@ def _normalize_text(text: str) -> str:
 
 def _strip_explicit_fact_prefix(content: str) -> str:
     pattern = re.compile(
-        r"^\s*(em\s+)?(hãy\s+nhớ|hay\s+nho|ghi\s+nhớ|ghi\s+nho|nhớ\s+rằng|nho\s+rang|lưu\s+fact|luu\s+fact|lưu\s+rằng|luu\s+rang|từ\s+giờ|tu\s+gio)[:,\s-]*",
+        r"^\s*(em\s+)?(hãy\s+nhớ\s+rằng|hay\s+nho\s+rang|hãy\s+nhớ|hay\s+nho|ghi\s+nhớ\s+rằng|ghi\s+nho\s+rang|ghi\s+nhớ|ghi\s+nho|nhớ\s+rằng|nho\s+rang|lưu\s+fact|luu\s+fact|lưu\s+rằng|luu\s+rang|từ\s+giờ|tu\s+gio)[:,\s-]*",
         flags=re.IGNORECASE,
     )
     stripped = pattern.sub("", content, count=1).strip()

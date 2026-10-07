@@ -10,6 +10,10 @@ from bots.decision_model.memory import (
     MEMORY_EPISODIC_EVENT,
     MEMORY_REMEMBER,
     MEMORY_RETRIEVE,
+    MEMORY_RETRIEVAL_LIST,
+    MEMORY_RETRIEVAL_NONE,
+    MEMORY_RETRIEVAL_RECENT,
+    MEMORY_RETRIEVAL_SEARCH,
     MEMORY_SEMANTIC_FACT,
     MEMORY_SKIP,
     MemoryCandidateDecision,
@@ -130,6 +134,29 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["facts"][0]["source"], "consolidation")
         self.assertEqual(remaining, [])
         self.assertEqual(result.batch.row_ids, [row_id])
+
+    def test_consolidation_explicit_fact_strips_prefix_and_skips_duplicate_episode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat(
+                "chat-1",
+                "user",
+                "Ghi nhớ rằng anh thích checklist có mục đích rõ ràng và chia theo từng phase.",
+                source="test",
+            )
+            store.log_chat("chat-1", "assistant", "Đã ghi nhớ theo phase rõ ràng.", source="test")
+            consolidator = MemoryConsolidator(store=store)
+
+            batch = consolidator.preview_next_batch(limit=5)
+            candidates = consolidator.build_candidates(batch)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].kind_hint, MEMORY_SEMANTIC_FACT)
+        self.assertEqual(candidates[0].reason, "explicit_memory_statement")
+        self.assertEqual(
+            candidates[0].content,
+            "anh thích checklist có mục đích rõ ràng và chia theo từng phase.",
+        )
 
     def test_consolidation_run_writes_episodic_event_and_marks_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -554,7 +581,7 @@ class MemoryStoreTests(unittest.TestCase):
         decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
         self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_REMEMBER)
 
-    def test_fact_inventory_question_lists_recent_facts(self):
+    def test_decision_model_fact_inventory_lists_recent_facts(self):
         message = telegram_message_to_gateway(
             {
                 "text": "hello",
@@ -564,25 +591,41 @@ class MemoryStoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
-            store.add_fact("Vẻ ngoài", "Tất cả các anh đều đẹp trai", source="ops")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite", source="ops")
+            store.add_episode("Niko discussed an unrelated episode", source="ops")
+            decider = Mock(
+                return_value=MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    reason="fact inventory",
+                    fact_mode=MEMORY_RETRIEVAL_LIST,
+                    episode_mode=MEMORY_RETRIEVAL_NONE,
+                )
+            )
+            runtime = MemoryRuntime(store=store, retrieval_decider=decider)
 
             with patch.dict(
                 os.environ,
                 {
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
                     "NIKO_MEMORY_TOP_K": "3",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
                 },
                 clear=False,
             ):
-                memory = retrieve_memory_context("có fact nào em đang lưu không", message, store=store)
+                memory = runtime.retrieve_for_deep("Hien tai em dang luu nhung fact nao ve anh?", message)
 
-        self.assertEqual(memory.to_meta()["fact_count"], 1)
-        self.assertEqual(memory.to_meta()["episode_count"], 0)
-        self.assertIn("Vẻ ngoài", memory.text)
-        self.assertIn("Tất cả các anh đều đẹp trai", memory.text)
+        meta = memory.to_meta()
+        decider.assert_called_once()
+        self.assertEqual(meta["gate_decision"], MEMORY_RETRIEVE)
+        self.assertEqual(meta["gate_fact_mode"], MEMORY_RETRIEVAL_LIST)
+        self.assertEqual(meta["gate_episode_mode"], MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(meta["fact_count"], 1)
+        self.assertEqual(meta["episode_count"], 0)
+        self.assertIn("Niko stores semantic facts in SQLite", memory.text)
 
-    def test_truth_inventory_question_lists_recent_facts(self):
+    def test_decision_model_fact_inventory_with_topic_searches_matching_facts(self):
         message = telegram_message_to_gateway(
             {
                 "text": "hello",
@@ -592,15 +635,37 @@ class MemoryStoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
-            store.add_fact("Vẻ ngoài", "Tất cả các anh đều đẹp trai", source="ops")
+            store.add_fact("Dashboard", "Niko dashboard owns runtime config", source="ops")
+            store.add_fact("Jira", "Jira lane is a future business gateway", source="ops")
+            runtime = MemoryRuntime(
+                store=store,
+                retrieval_decider=lambda _prompt, _message: MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    query="dashboard runtime config",
+                    reason="topic inventory",
+                    fact_mode=MEMORY_RETRIEVAL_SEARCH,
+                    episode_mode=MEMORY_RETRIEVAL_NONE,
+                ),
+            )
 
-            with patch.dict(os.environ, {"NIKO_MEMORY_ENABLED": "1", "NIKO_MEMORY_RETRIEVAL_ENABLED": "1"}, clear=False):
-                memory = retrieve_memory_context("em có sự thật nào đang lưu không", message, store=store)
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ), patch.object(store, "list_facts", wraps=store.list_facts) as list_facts:
+                memory = runtime.retrieve_for_deep("Em dang luu fact nao ve dashboard?", message)
 
-        self.assertEqual(memory.to_meta()["fact_count"], 1)
-        self.assertIn("Vẻ ngoài", memory.text)
+        self.assertEqual(memory.to_meta()["gate_fact_mode"], MEMORY_RETRIEVAL_SEARCH)
+        self.assertIn("Niko dashboard owns runtime config", memory.text)
+        self.assertNotIn("Jira lane", memory.text)
+        list_facts.assert_not_called()
 
-    def test_truth_inventory_question_with_filter_searches_matching_facts(self):
+    def test_decision_model_episode_inventory_uses_recent_events(self):
         message = telegram_message_to_gateway(
             {
                 "text": "hello",
@@ -610,15 +675,36 @@ class MemoryStoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
-            store.add_fact("Vũ", "Cu to", source="ops")
-            store.add_fact("Vẻ ngoài", "Tất cả các anh đều đẹp trai", source="ops")
+            store.add_fact("Harness", "Niko stores semantic facts in SQLite", source="ops")
+            store.add_episode("Niko helped verify the memory write gate", source="ops")
+            runtime = MemoryRuntime(
+                store=store,
+                retrieval_decider=lambda _prompt, _message: MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    reason="episode inventory",
+                    fact_mode=MEMORY_RETRIEVAL_NONE,
+                    episode_mode=MEMORY_RETRIEVAL_RECENT,
+                ),
+            )
 
-            with patch.dict(os.environ, {"NIKO_MEMORY_ENABLED": "1", "NIKO_MEMORY_RETRIEVAL_ENABLED": "1"}, clear=False):
-                memory = retrieve_memory_context("có sự thật nào về vẻ ngoài em đang lưu?", message, store=store)
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                memory = runtime.retrieve_for_deep("Gan day em nho nhung episode nao?", message)
 
-        self.assertEqual(memory.to_meta()["fact_count"], 1)
-        self.assertIn("Vẻ ngoài", memory.text)
-        self.assertNotIn("Vũ", memory.text)
+        meta = memory.to_meta()
+        self.assertEqual(meta["gate_fact_mode"], MEMORY_RETRIEVAL_NONE)
+        self.assertEqual(meta["gate_episode_mode"], MEMORY_RETRIEVAL_RECENT)
+        self.assertEqual(meta["fact_count"], 0)
+        self.assertEqual(meta["episode_count"], 1)
+        self.assertIn("Niko helped verify the memory write gate", memory.text)
 
     def test_vietnamese_fact_search_uses_normalized_terms(self):
         message = telegram_message_to_gateway(
@@ -776,7 +862,7 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("ollama offline", meta["gate_error"])
         self.assertIn("Niko stores semantic facts in SQLite", memory.text)
 
-    def test_fact_inventory_bypasses_memory_gate_and_lists_facts(self):
+    def test_fact_inventory_uses_memory_gate_mode_to_list_facts(self):
         message = telegram_message_to_gateway(
             {
                 "text": "hello",
@@ -797,11 +883,22 @@ class MemoryStoreTests(unittest.TestCase):
                     "NIKO_RUNTIME_LOG_ENABLED": "0",
                 },
                 clear=False,
-            ), patch("niko.memory.runtime.decide_memory_retrieval") as gate:
+            ), patch(
+                "niko.memory.runtime.decide_memory_retrieval",
+                return_value=MemoryRetrievalDecision(
+                    decision=MEMORY_RETRIEVE,
+                    reason="fact inventory",
+                    fact_mode=MEMORY_RETRIEVAL_LIST,
+                    episode_mode=MEMORY_RETRIEVAL_NONE,
+                    label="retrieve",
+                ),
+            ) as gate:
                 memory = retrieve_memory_context("em đang lưu fact nào", message, store=store)
 
-        gate.assert_not_called()
-        self.assertEqual(memory.to_meta()["gate_label"], "inventory_bypass")
+        gate.assert_called_once()
+        self.assertEqual(memory.to_meta()["gate_label"], "retrieve")
+        self.assertEqual(memory.to_meta()["gate_fact_mode"], MEMORY_RETRIEVAL_LIST)
+        self.assertEqual(memory.to_meta()["gate_episode_mode"], MEMORY_RETRIEVAL_NONE)
         self.assertIn("Niko stores semantic facts in SQLite", memory.text)
 
     def test_deep_agent_prompt_includes_memory_context(self):
