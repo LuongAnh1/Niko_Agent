@@ -12,6 +12,8 @@ phụ trách, phần nào đã có, phần nào còn là phase sau.
 
 - `done`: đã có trong code hiện tại.
 - `planned`: hướng muốn xây tiếp, chưa hoàn chỉnh.
+- `V1 temporary`: đã chạy trong baseline, nhưng cố ý giữ nhẹ để sau này chuyển
+  sang Loop/tool workflow.
 - `boundary`: ranh giới không nên trộn vào chat memory v1.
 
 ## 1. Ranh Giới Lớn
@@ -64,18 +66,31 @@ flowchart TB
     WriteGate -->|remember| Episode[(episodes)]
     WriteGate -->|error fail-open| Episode
 
+    MemoryRuntime --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
+    CorrectionPath --> CorrectionGate{Correction gate<br/>none / correct / forget}
+    CorrectionGate -->|none| NoCorrection[Luồng chat bình thường]
+    CorrectionGate -->|correct / forget| CorrectionSearch[Search/list target facts]
+    CorrectionSearch --> Store
+    CorrectionSearch --> CorrectionMatch{Target rõ?}
+    CorrectionMatch -->|yes| CorrectionApply[Update/delete fact<br/>trace + runtime log]
+    CorrectionMatch -->|no| CorrectionClarify[Clarify reply<br/>pending IDs in RAM]
+
     MemoryRuntime --> Trace[Trace JSONL]
     MemoryRuntime --> RuntimeLog[Runtime log<br/>Bots dashboard]
+    CorrectionApply --> Trace
+    CorrectionClarify --> Trace
+    CorrectionApply --> RuntimeLog
+    CorrectionClarify --> RuntimeLog
 
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WriteGate,Episode,Trace,RuntimeLog,NoMemory,NoEpisode done;
+    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WriteGate,Episode,CorrectionPath,CorrectionGate,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,NoMemory,NoEpisode done;
 ```
 
 Điểm kiểm soát chính là `MemoryRuntime`. Graph và runtime không nên tự biết chi
-tiết gate/search/write nữa; chúng chỉ gọi pipeline memory.
+tiết gate/search/write/correction nữa; chúng chỉ gọi pipeline memory.
 
 ## 3. Retrieval Flow Cho Deep
 
@@ -213,7 +228,7 @@ flowchart TB
     Confidence -->|yes, forget| Delete[Delete fact có trace<br/>episode read-only in V1]
     Confidence -->|no| Clarify[Hỏi lại user, lưu pending IDs trong RAM]
 
-    Update --> Trace[memory_correction_decision / memory_write_* trace]
+    Update --> Trace[memory_correction_decision<br/>memory_correction_clarify<br/>memory_correction_applied]
     Delete --> Trace
     Clarify --> NormalFlow
 

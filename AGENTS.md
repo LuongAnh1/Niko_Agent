@@ -170,9 +170,10 @@ demo.
 
 Trace events are JSONL and should make a turn observable. Typical events include
 `turn_start`, `route_decision`, `memory_retrieval`, `memory_gate_decision`,
-`memory_write_chat_log`, `memory_write_decision`, `memory_write_episode`,
-`deep_job_started`, `deep_agent_call_started`, `deep_agent_call_finished`,
-`reply_delivered`, errors, and `turn_end`.
+`memory_correction_decision`, `memory_correction_clarify`,
+`memory_correction_applied`, `memory_write_chat_log`, `memory_write_decision`,
+`memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
+`deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
 
 Memory gate trace/runtime logs should include decision/label/query plus
 `fact_mode` and `episode_mode`, so inventory turns can be debugged without
@@ -219,7 +220,7 @@ bot process already owns that lock.
 - `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
   checklist and live verification status for chat memory work.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
-  architecture and retrieval/write/consolidation flow diagrams.
+  architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
 
 ## Environment And State
