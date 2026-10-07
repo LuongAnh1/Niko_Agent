@@ -179,6 +179,8 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Lấy batch chat log chưa consolidated theo batch size cố định.
 - [x] Thêm API mark-done chỉ đánh dấu đúng row đã đọc.
 - [x] Nối scaffold consolidation qua `MemoryRuntime` để giữ một cổng memory thống nhất.
+- [x] Ghi rõ trong docs/docstring: consolidation hiện manual-only qua dashboard/API,
+  chưa tự chạy sau N tin nhắn.
 - [ ] Thêm threshold tự động theo ngưỡng N exchange trước khi gọi model.
 - [x] Tạo memory candidates bảo thủ từ batch bằng rule nội bộ.
 - [ ] Summarizer tạo memory candidates từ batch.
@@ -193,6 +195,24 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
   tránh ghi episode nhiễu khi người dùng chỉ hỏi Niko đang nhớ gì.
 - [x] Live verify trên Telegram: hỏi Niko đang lưu fact nào, kiểm tra
   `memory_write_decision=discard` và không có `memory_write_episode` mới cho lượt inspect.
+
+### Phase 4 docs sync - consolidation manual baseline
+
+Mục đích: khóa lại trạng thái thật của consolidation trước khi thiết kế auto
+consolidation, để khi đọc checklist/docs không nhầm target flow thành hành vi đã
+chạy trong runtime.
+
+- [x] Cập nhật `niko/memory/consolidation.py`: docstring nói rõ lớp này không có
+  scheduler/threshold tự gọi.
+- [x] Cập nhật `niko/memory/runtime.py`: facade consolidation chỉ là manual
+  dashboard/API hook.
+- [x] Cập nhật `niko/ops/dashboard.py`: `Refresh batch` read-only, `Run once`
+  xử lý đúng một batch.
+- [x] Cập nhật docs harness/memory/plan để nhắc lại auto threshold/scheduler vẫn
+  là phase sau.
+- [ ] Thiết kế auto consolidation sau N exchange: threshold, lock, retry policy,
+  trace/runtime log và config dashboard.
+- [ ] Implement auto consolidation sau khi thiết kế trên được chốt.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
 

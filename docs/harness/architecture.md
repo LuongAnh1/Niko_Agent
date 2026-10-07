@@ -73,11 +73,11 @@ niko/
     runtime_log.py     # JSONL runtime log cho tab Bots
   memory/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
-    runtime.py         # MemoryRuntime điều phối retrieval/write/correction, consolidation và format context
+    runtime.py         # MemoryRuntime điều phối retrieval/write/correction, manual consolidation và format context
     context.py         # Dataclass, formatter và wrapper tương thích
     working_memory.py  # Recent conversation window tạm thời cho Deep/correction
     correction_workflow.py # Workflow sửa/xóa fact qua chat
-    consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
+    consolidation.py   # Scaffold thủ công đọc/mark batch chat_log chưa consolidated
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
     bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
@@ -108,6 +108,9 @@ gate, correction facade, manual consolidation và format context cho Deep.
 `MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
 Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
 search nếu không có FTS5.
+
+Consolidation hiện chỉ chạy khi dashboard/API gọi `Refresh batch` hoặc `Run
+once`; chưa có scheduler tự động sau N tin nhắn trong chat flow.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 

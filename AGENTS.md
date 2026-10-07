@@ -59,8 +59,8 @@ separate business backend lane that Niko can retrieve from later.
 - `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
   retrieval modes (`search/list/recent/none`), recent working-memory context,
   write gate, memory correction workflow facade, store search/list, chat log
-  writes, episode writes, consolidation scaffold, and context formatting before
-  Deep.
+  writes, episode writes, manual consolidation facade, and context formatting
+  before Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/memory/working_memory.py`: Ephemeral recent conversation window builder
@@ -139,6 +139,9 @@ Important boundaries:
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
   reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
   episodes and retrieval modes, but it does not write SQLite data itself.
+- Consolidation is manual-only in the current harness. Dashboard/API `Refresh
+  batch` previews the next batch, and `Run once` processes one batch; there is no
+  background scheduler or automatic "after N messages" trigger yet.
 - Memory correction treats `current_prompt` as the primary evidence. Recent
   turns are only attached when the current prompt has an explicit sửa/xóa/quên
   signal or is a pending fact-ID follow-up. Neutral prompts must not inherit old

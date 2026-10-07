@@ -206,7 +206,8 @@ Những phần còn thiếu hoặc mới ở mức scaffold so với Waku:
 - Đã có write gate v1, default-off, hiện chỉ quyết định ghi/bỏ `episodes`.
 - Đã có manual consolidation v1: đọc batch `chat_log`, tạo candidate bảo thủ,
   phân loại `semantic_fact` / `episodic_event` / `discard`, ghi facts/episodes và mark batch.
-- Chưa có threshold/scheduler tự động cho consolidation.
+- Chưa có threshold/scheduler tự động cho consolidation; `Refresh batch` chỉ xem
+  candidate và `Run once` mới xử lý thủ công một batch.
 - Đã có memory correction qua chat ở mức V1 tạm thời: intent gate, hỏi lại khi
   mơ hồ, update/delete fact có trace. Workflow bền hơn nên chuyển sang Loop/tool
   ở phase sau.
@@ -396,6 +397,10 @@ batch preview, candidate builder bảo thủ, memory type classifier, ghi facts/
 với `source=consolidation`, và dashboard/API trigger thủ công. Threshold/scheduler
 tự động và summarizer tự do vẫn để phase sau.
 
+Ghi chú 2026-10-08: trước khi bật tự động, docs và docstring đã được chốt lại để
+phân biệt rõ `Refresh batch` read-only, `Run once` manual-only và target flow
+`đủ N exchange` chưa tồn tại trong runtime.
+
 Luồng đề xuất:
 
 ```text
@@ -430,6 +435,10 @@ Config:
 
 Các config này dành cho auto consolidation phase sau; manual consolidation hiện
 chạy qua dashboard/API và chưa có scheduler nền.
+
+Khi bắt đầu phase auto, cần thêm thiết kế riêng cho threshold, single-instance
+lock, retry/error policy và trace event; không nên chỉ gọi `run_once` ngầm sau
+mỗi message.
 
 V1 consolidation đọc chat log local của một Niko instance. Khi mở rộng multi-user
 mới cần thêm scope filter theo `user_key` hoặc `conversation_id`.

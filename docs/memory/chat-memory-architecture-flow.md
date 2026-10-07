@@ -1,6 +1,6 @@
 # Chat Memory Architecture Flow
 
-Ngày cập nhật: 2026-10-07
+Ngày cập nhật: 2026-10-08
 Phạm vi: chat memory local của Niko Agent, single-user v1
 
 Tài liệu này là bản sơ đồ kiểm soát luồng memory. Nó gom lại trạng thái hiện tại
@@ -233,6 +233,13 @@ chưa xử lý, tạo candidate bảo thủ, dùng classifier `semantic_fact` / 
 để chạy thủ công. Phần chưa làm là threshold/scheduler tự động và summarizer tự do;
 guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã consolidate.
 
+Trong code hiện tại, dashboard/API là điểm kích hoạt duy nhất:
+
+- `Refresh batch` chỉ đọc batch/candidate kế tiếp để quan sát, không ghi gì.
+- `Run once` xử lý đúng một batch và mark những row đã đọc nếu classifier hợp lệ.
+- Nút `Đủ N exchange?` trong sơ đồ là target flow, chưa có scheduler nền nối vào
+  `ChatReplyGraph` hoặc `MemoryRuntime`.
+
 ## 6. Target Flow: Correction / Forget Memory
 
 ```mermaid
@@ -307,7 +314,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 1 | Decision model memory tasks | retrieval/write/classifier done, correction V1 temporary |
 | 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
-| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/summarizer planned |
+| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/scheduler/summarizer planned |
 | 5 | Correction/forget qua chat/dashboard | V1 temporary, delete/update/ambiguous/precheck skip live-verified |
 | 6 | Working memory rõ: recent/current/long-term | done v1 |
 | 7 | Eval riêng cho memory | done v1: deterministic eval scenarios + unit tests |
@@ -322,5 +329,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 6. `chat_log` luôn là operational log; write gate chỉ chặn long-term `episodes`.
 7. Retrieval gate lỗi thì fail-open để không bỏ lỡ memory cần dùng.
 8. Write/consolidation/correction lỗi thì không được làm mất log vận hành.
-9. Mọi quyết định memory phải có trace/runtime log đủ đọc.
-10. Multi-user scoped memory và lakehouse/Jira retrieval không nằm trong v1 mặc định.
+9. Consolidation hiện là manual-only; auto scheduler sau này phải có threshold,
+   lock và trace riêng trước khi nối vào chat flow.
+10. Mọi quyết định memory phải có trace/runtime log đủ đọc.
+11. Multi-user scoped memory và lakehouse/Jira retrieval không nằm trong v1 mặc định.

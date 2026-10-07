@@ -4,6 +4,9 @@
 policy retrieval, gate bằng decision model, retrieval modes, search/list store,
 write gate và consolidation vào một pipeline rõ ràng.
 
+Consolidation hiện chỉ là facade thủ công cho dashboard/API. Runtime không tự
+chạy scheduler nền, không tự đếm N tin nhắn rồi consolidate trong chat flow.
+
 Luồng sửa/xóa memory đi qua `MemoryCorrectionWorkflow`. Runtime chỉ giữ facade để
 ChatReplyGraph không phải biết chi tiết pending state, search target hay mutate DB.
 """
@@ -53,7 +56,7 @@ MemoryWriteDecider = Callable[[str, str, list[str] | None, object | None, str], 
 
 
 class MemoryRuntime:
-    """Cổng memory trung tâm cho retrieval modes, write gate, chat log và consolidation."""
+    """Cổng memory trung tâm cho retrieval, write, correction và manual consolidation."""
 
     def __init__(
         self,
@@ -80,7 +83,7 @@ class MemoryRuntime:
 
     @property
     def consolidator(self) -> MemoryConsolidator:
-        """Consolidation đi qua runtime để giữ một cổng memory thống nhất."""
+        """Consolidation đi qua runtime để giữ một cổng thống nhất, nhưng không tự chạy nền."""
         return self._consolidator or MemoryConsolidator(store=self.store)
 
     def retrieve_for_deep(self, prompt: str, gateway_message=None) -> RetrievedMemory:
@@ -141,7 +144,7 @@ class MemoryRuntime:
         limit: int | None = None,
         session_id: str | None = None,
     ) -> ConsolidationBatch:
-        """Xem batch chat log kế tiếp mà chưa ghi fact/episode hay mark consolidated."""
+        """Preview read-only batch kế tiếp; dùng cho Refresh batch trên dashboard."""
         return self.consolidator.preview_next_batch(limit=limit, session_id=session_id)
 
     def mark_consolidation_batch(
@@ -149,7 +152,7 @@ class MemoryRuntime:
         row_ids: list[int] | tuple[int, ...],
         reason: str = "manual",
     ) -> ConsolidationResult:
-        """Đánh dấu batch đã xử lý; phase sau sẽ gọi sau khi candidate hợp lệ."""
+        """Đánh dấu batch đã xử lý sau khi caller manual/auto có guardrail riêng."""
         return self.consolidator.mark_batch_done(row_ids, reason=reason)
 
     def run_consolidation_once(
@@ -157,7 +160,7 @@ class MemoryRuntime:
         limit: int | None = None,
         session_id: str | None = None,
     ) -> ConsolidationRunResult:
-        """Chạy consolidation thủ công một lần, không có scheduler nền."""
+        """Chạy consolidation thủ công đúng một batch, không có scheduler nền."""
         return self.consolidator.run_once(limit=limit, session_id=session_id)
 
     def record_chat_log(

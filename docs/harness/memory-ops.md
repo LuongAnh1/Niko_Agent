@@ -14,7 +14,8 @@ Kịch bản eval deterministic nằm ở [Chat Memory Eval Scenarios](memory-ev
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
 - `niko/memory/working_memory.py`: dựng recent conversation window tạm thời từ `chat_log` cho Deep prompt và correction context.
 - `niko/memory/correction_workflow.py`: workflow sửa/xóa fact qua chat, gồm pending choices, validate ID, update/delete và correction trace/log.
-- `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated và mark-done có kiểm soát.
+- `niko/memory/consolidation.py`: scaffold thủ công đọc batch `chat_log` chưa consolidated,
+  tạo candidate, classify, ghi/mark có kiểm soát; chưa có scheduler tự động.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
 - `niko/ops/bots.py`: start/stop Telegram Bot, warmup/stop Decision Model và snapshot tab Bots.
 - `niko/ops/config_schema.py`: schema, validate, mask secret và snapshot cho tab Config.
@@ -120,6 +121,14 @@ Dashboard Memory tab có khối `Consolidation` để chạy thủ công một b
 `chat_log` chưa consolidated. Luồng này tạo candidate bằng rule bảo thủ, dùng
 Nimble chỉ để phân loại `semantic_fact`, `episodic_event` hoặc `discard`, rồi mới
 ghi vào `facts`/`episodes` với `source=consolidation`.
+
+Trạng thái hiện tại:
+
+- `Refresh batch` chỉ preview batch/candidate kế tiếp, không ghi memory và không
+  mark `chat_log`.
+- `Run once` là trigger thủ công xử lý đúng một batch hiện tại.
+- Chưa có scheduler nền và chưa có cơ chế tự chạy sau N tin nhắn/exchange.
+- Auto consolidation theo threshold là phase tiếp theo, không phải hành vi hiện tại.
 
 Guardrail hiện tại:
 

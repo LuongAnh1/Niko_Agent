@@ -5,8 +5,9 @@ quyết định local chỉ phân loại candidate, rồi module này mới ghi 
 hoặc `episodes`. Nếu classifier lỗi thì batch không bị mark done để anh có thể
 chạy lại sau, tránh mất dữ liệu hội thoại.
 
-V1 chưa có scheduler/threshold tự động hoặc summarizer tự do; dashboard/manual
-trigger gọi `run_once` khi cần kiểm thử.
+V1 chưa có scheduler/threshold tự động hoặc summarizer tự do. Dashboard/API là
+caller duy nhất gọi `preview_next_batch` hoặc `run_once`; chat flow không tự bật
+consolidation sau N tin nhắn cho tới khi có phase auto riêng.
 """
 
 from __future__ import annotations
@@ -136,7 +137,7 @@ class MemoryCandidate:
 
 @dataclass(frozen=True)
 class ConsolidationRunResult:
-    """Kết quả chạy consolidation một lần, dùng cho API/dashboard và test."""
+    """Kết quả của một lần chạy manual, dùng cho API/dashboard và test."""
 
     status: str
     batch: ConsolidationBatch
@@ -161,7 +162,12 @@ class ConsolidationRunResult:
 
 
 class MemoryConsolidator:
-    """Pipeline consolidation thủ công: build candidate, classify, ghi và mark batch."""
+    """Pipeline consolidation thủ công: build candidate, classify, ghi và mark batch.
+
+    Lớp này không có timer, scheduler hay threshold tự gọi. Caller phải chủ động
+    preview/run từ dashboard, API hoặc test; phase auto sau này sẽ bọc quanh lớp
+    này thay vì nhét vòng lặp nền vào đây.
+    """
 
     def __init__(
         self,
@@ -182,7 +188,7 @@ class MemoryConsolidator:
         limit: int | None = None,
         session_id: str | None = None,
     ) -> ConsolidationBatch:
-        """Đọc batch kế tiếp mà không ghi gì, dùng cho debug hoặc bước model sau."""
+        """Đọc batch kế tiếp mà không ghi/mark gì; nút Refresh batch dùng đường này."""
         batch_limit = self.batch_size if limit is None else max(1, int(limit))
         rows = self.store.list_unconsolidated_chat(batch_limit, session_id=session_id)
         return ConsolidationBatch(rows=rows)
@@ -246,7 +252,7 @@ class MemoryConsolidator:
         return candidates
 
     def run_once(self, limit: int | None = None, session_id: str | None = None) -> ConsolidationRunResult:
-        """Chạy consolidation thủ công một lần; lỗi classifier thì không mark rows."""
+        """Chạy một batch thủ công; lỗi classifier thì không mark rows."""
         batch = self.preview_next_batch(limit=limit, session_id=session_id)
         candidates = self.build_candidates(batch)
         if batch.is_empty:
