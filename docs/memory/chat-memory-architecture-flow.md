@@ -223,22 +223,24 @@ flowchart TB
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class ChatLog,Batch,CandidateBuilder,Classifier,Facts,Episodes,NoMemory,Mark,Retry done;
-    class Threshold,Wait planned;
+    class ChatLog,Threshold,Wait,Batch,CandidateBuilder,Classifier,Facts,Episodes,NoMemory,Mark,Retry done;
 ```
 
 Scaffold consolidation hiện đã có: `chat_log` có `consolidated`, store đọc được batch
 chưa xử lý, tạo candidate bảo thủ, dùng classifier `semantic_fact` / `episodic_event`
 / `discard`, ghi facts/episodes với provenance `consolidation`, và có API dashboard
-để chạy thủ công. Phần chưa làm là threshold/scheduler tự động và summarizer tự do;
-guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã consolidate.
+để chạy thủ công. Auto consolidation default-off đã có threshold theo complete
+exchange, background worker và lock chống chạy trùng. Phần chưa làm là summarizer
+tự do; guardrail hiện tại vẫn là: classifier lỗi thì không mark row đã consolidate.
 
-Trong code hiện tại, dashboard/API là điểm kích hoạt duy nhất:
+Trong code hiện tại:
 
 - `Refresh batch` chỉ đọc batch/candidate kế tiếp để quan sát, không ghi gì.
 - `Run once` xử lý đúng một batch và mark những row đã đọc nếu classifier hợp lệ.
-- Nút `Đủ N exchange?` trong sơ đồ là target flow, chưa có scheduler nền nối vào
-  `ChatReplyGraph` hoặc `MemoryRuntime`.
+- `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1` cho phép `MemoryRuntime` trigger
+  background worker sau assistant reply thật, khi đủ
+  `NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES`.
+- `deep_agent_wait` và `busy_reply` không tính là assistant reply hoàn tất.
 
 ## 6. Target Flow: Correction / Forget Memory
 
@@ -314,7 +316,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 1 | Decision model memory tasks | retrieval/write/classifier done, correction V1 temporary |
 | 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
-| 4 | Write gate và consolidation | write gate done, manual consolidation candidate/classifier live-verified, auto threshold/scheduler/summarizer planned |
+| 4 | Write gate và consolidation | write gate done, manual path live-verified, auto threshold default-off done, summarizer planned |
 | 5 | Correction/forget qua chat/dashboard | V1 temporary, delete/update/ambiguous/precheck skip live-verified |
 | 6 | Working memory rõ: recent/current/long-term | done v1 |
 | 7 | Eval riêng cho memory | done v1: deterministic eval scenarios + unit tests |
@@ -329,7 +331,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 6. `chat_log` luôn là operational log; write gate chỉ chặn long-term `episodes`.
 7. Retrieval gate lỗi thì fail-open để không bỏ lỡ memory cần dùng.
 8. Write/consolidation/correction lỗi thì không được làm mất log vận hành.
-9. Consolidation hiện là manual-only; auto scheduler sau này phải có threshold,
-   lock và trace riêng trước khi nối vào chat flow.
+9. Auto consolidation phải default-off, có threshold complete exchange, lock và
+   trace/runtime log trước khi nối vào chat flow.
 10. Mọi quyết định memory phải có trace/runtime log đủ đọc.
 11. Multi-user scoped memory và lakehouse/Jira retrieval không nằm trong v1 mặc định.

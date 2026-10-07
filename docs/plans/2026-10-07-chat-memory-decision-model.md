@@ -204,10 +204,10 @@ Những phần còn thiếu hoặc mới ở mức scaffold so với Waku:
 
 - Đã có retrieval gate v1, default-off, dùng Nimble để chọn `skip/retrieve` khi bật.
 - Đã có write gate v1, default-off, hiện chỉ quyết định ghi/bỏ `episodes`.
-- Đã có manual consolidation v1: đọc batch `chat_log`, tạo candidate bảo thủ,
+- Đã có consolidation v1: đọc batch `chat_log`, tạo candidate bảo thủ,
   phân loại `semantic_fact` / `episodic_event` / `discard`, ghi facts/episodes và mark batch.
-- Chưa có threshold/scheduler tự động cho consolidation; `Refresh batch` chỉ xem
-  candidate và `Run once` mới xử lý thủ công một batch.
+- Đã có auto consolidation default-off theo ngưỡng complete exchange; `Refresh batch`
+  và `Run once` vẫn là đường thủ công để debug.
 - Đã có memory correction qua chat ở mức V1 tạm thời: intent gate, hỏi lại khi
   mơ hồ, update/delete fact có trace. Workflow bền hơn nên chuyển sang Loop/tool
   ở phase sau.
@@ -392,14 +392,14 @@ Phase này nhỏ nhưng đáng làm sớm vì Niko chat tiếng Việt là chín
 
 Mục tiêu: tự tạo semantic facts/episodes từ chat thật, nhưng không spam memory.
 
-Trạng thái: write gate v1 đã có; manual consolidation v1 đã có cột `consolidated`,
+Trạng thái: write gate v1 đã có; consolidation v1 đã có cột `consolidated`,
 batch preview, candidate builder bảo thủ, memory type classifier, ghi facts/episodes
-với `source=consolidation`, và dashboard/API trigger thủ công. Threshold/scheduler
-tự động và summarizer tự do vẫn để phase sau.
+với `source=consolidation`, dashboard/API trigger thủ công, và auto trigger
+default-off sau complete exchange. Summarizer tự do vẫn để phase sau.
 
-Ghi chú 2026-10-08: trước khi bật tự động, docs và docstring đã được chốt lại để
-phân biệt rõ `Refresh batch` read-only, `Run once` manual-only và target flow
-`đủ N exchange` chưa tồn tại trong runtime.
+Ghi chú 2026-10-08: auto consolidation đã được thêm theo hướng default-off,
+background worker, có lock chống chạy trùng, và chỉ tính complete exchange;
+`Refresh batch`/`Run once` vẫn giữ vai trò debug thủ công.
 
 Luồng đề xuất:
 
@@ -429,16 +429,15 @@ niko/memory/consolidation.py
 
 Config:
 
-- `NIKO_MEMORY_CONSOLIDATION_ENABLED`
-- `NIKO_MEMORY_CONSOLIDATE_EVERY_N`
-- `NIKO_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS`
+- `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED`
+- `NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES`
 
-Các config này dành cho auto consolidation phase sau; manual consolidation hiện
-chạy qua dashboard/API và chưa có scheduler nền.
+Các config này đang có trong dashboard Config. Auto mặc định tắt; manual
+consolidation vẫn chạy qua dashboard/API.
 
-Khi bắt đầu phase auto, cần thêm thiết kế riêng cho threshold, single-instance
-lock, retry/error policy và trace event; không nên chỉ gọi `run_once` ngầm sau
-mỗi message.
+Auto hiện chỉ chạy một batch mỗi lần trigger, dùng single-process lock, và ghi
+trace/runtime log started/finished/skipped/error. Không gọi `run_once` ngầm sau
+mỗi message; runtime chỉ trigger sau assistant reply thật.
 
 V1 consolidation đọc chat log local của một Niko instance. Khi mở rộng multi-user
 mới cần thêm scope filter theo `user_key` hoặc `conversation_id`.
@@ -539,16 +538,17 @@ Judge/eval mềm cho chất lượng trả lời vẫn để sau, khi prompt Dee
 
 Các bước đầu đã hoàn thành: `bots/decision_model/memory/` đã tách package,
 correction workflow đã tách khỏi `MemoryRuntime`, retrieval/write/candidate/correction
-gates đã có test và trace, search tiếng Việt đã được harden, manual consolidation
-đã chạy được qua dashboard/API, và Deep prompt đã có recent working-memory window.
+gates đã có test và trace, search tiếng Việt đã được harden, consolidation manual
+path đã chạy được qua dashboard/API, auto consolidation default-off đã có ngưỡng
+complete exchange, và Deep prompt đã có recent working-memory window.
 
 Em đề xuất bước tiếp theo nên là hai việc nhỏ, ít rủi ro:
 
-1. Cân nhắc threshold/scheduler consolidation tự động nếu demo cần.
+1. Live test auto consolidation với backlog nhỏ và quan sát trace/runtime log.
 2. Sau đó mới quay lại Loop/tool workflow bền cho memory correction nếu muốn bỏ pending RAM.
 
-Lý do: correction, working memory và eval baseline đã có; scheduler consolidation
-là phần còn thiếu rõ nhất nếu muốn memory tự gom từ chat log thay vì chạy thủ công.
+Lý do: correction, working memory và eval baseline đã có; auto consolidation cần
+được kiểm chứng live trước khi mở tiếp sang summarizer hoặc workflow memory phức tạp hơn.
 
 Không triển khai trong bước đầu:
 

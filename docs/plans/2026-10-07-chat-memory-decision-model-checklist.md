@@ -179,9 +179,9 @@ không spam memory bằng small talk hoặc dữ liệu không bền vững.
 - [x] Lấy batch chat log chưa consolidated theo batch size cố định.
 - [x] Thêm API mark-done chỉ đánh dấu đúng row đã đọc.
 - [x] Nối scaffold consolidation qua `MemoryRuntime` để giữ một cổng memory thống nhất.
-- [x] Ghi rõ trong docs/docstring: consolidation hiện manual-only qua dashboard/API,
-  chưa tự chạy sau N tin nhắn.
-- [ ] Thêm threshold tự động theo ngưỡng N exchange trước khi gọi model.
+- [x] Ghi rõ trong docs/docstring giai đoạn trước auto: consolidation từng chỉ có
+  manual path qua dashboard/API.
+- [x] Thêm threshold tự động theo ngưỡng N exchange trước khi gọi model.
 - [x] Tạo memory candidates bảo thủ từ batch bằng rule nội bộ.
 - [ ] Summarizer tạo memory candidates từ batch.
 - [x] Thêm `memory_type_classifier` để lọc `semantic_fact`, `episodic_event`, `discard`.
@@ -209,10 +209,25 @@ chạy trong runtime.
 - [x] Cập nhật `niko/ops/dashboard.py`: `Refresh batch` read-only, `Run once`
   xử lý đúng một batch.
 - [x] Cập nhật docs harness/memory/plan để nhắc lại auto threshold/scheduler vẫn
-  là phase sau.
-- [ ] Thiết kế auto consolidation sau N exchange: threshold, lock, retry policy,
+  là phase sau ở thời điểm manual baseline.
+- [x] Thiết kế auto consolidation sau N exchange: threshold, lock, retry policy,
   trace/runtime log và config dashboard.
-- [ ] Implement auto consolidation sau khi thiết kế trên được chốt.
+- [x] Implement auto consolidation sau khi thiết kế trên được chốt.
+
+### Phase 4 auto consolidation - default-off background worker
+
+Mục đích: để Niko tự gom `chat_log` thành long-term memory khi hội thoại đã đủ
+nguyên liệu, nhưng vẫn tránh làm chậm reply Telegram và tránh xử lý backlog bất ngờ.
+
+- [x] Thêm config dashboard `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED`, default `0`.
+- [x] Thêm config dashboard `NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES`, default `6`.
+- [x] Store có helper lấy batch chỉ khi đủ complete user/assistant exchange.
+- [x] Wait reply `deep_agent_wait` và `busy_reply` không tính là assistant reply hoàn tất.
+- [x] `MemoryRuntime.record_chat_log(...)` trigger auto sau assistant reply thật.
+- [x] Auto worker chạy background và có lock chống chạy trùng trong cùng process.
+- [x] Auto chỉ chạy một batch mỗi lần trigger; classifier lỗi thì không mark rows.
+- [x] Thêm trace/runtime log `memory_consolidation_auto_started/finished/skipped/error`.
+- [x] Unit test store/consolidator/runtime/config cho auto consolidation.
 
 ## 5. Phase 5: Memory Correction Qua Chat/Dashboard
 

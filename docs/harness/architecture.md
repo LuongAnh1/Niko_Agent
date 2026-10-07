@@ -73,11 +73,11 @@ niko/
     runtime_log.py     # JSONL runtime log cho tab Bots
   memory/
     store.py           # SQLite store: chat_log, facts, episodes, FTS/fallback search
-    runtime.py         # MemoryRuntime điều phối retrieval/write/correction, manual consolidation và format context
+    runtime.py         # MemoryRuntime điều phối retrieval/write/correction, consolidation và format context
     context.py         # Dataclass, formatter và wrapper tương thích
     working_memory.py  # Recent conversation window tạm thời cho Deep/correction
     correction_workflow.py # Workflow sửa/xóa fact qua chat
-    consolidation.py   # Scaffold thủ công đọc/mark batch chat_log chưa consolidated
+    consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
     bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
@@ -104,13 +104,14 @@ niko/
 
 `niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval
 gate, retrieval modes (`search/list/recent/none`), recent working memory, write
-gate, correction facade, manual consolidation và format context cho Deep.
+gate, correction facade, manual/auto consolidation và format context cho Deep.
 `MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
 Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
 search nếu không có FTS5.
 
-Consolidation hiện chỉ chạy khi dashboard/API gọi `Refresh batch` hoặc `Run
-once`; chưa có scheduler tự động sau N tin nhắn trong chat flow.
+Consolidation có đường manual qua dashboard/API (`Refresh batch`, `Run once`) và
+đường auto default-off sau complete exchange. Auto chỉ chạy khi bật
+`NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1`.
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
@@ -179,7 +180,7 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 - Memory correction V1 qua chat: nhận diện sửa/xóa fact, hỏi lại khi mơ hồ và
   update/delete SQLite có trace. Đây là lớp tạm trước khi có Loop/tool workflow.
 - Manual semantic facts qua dashboard.
-- Episodic record sau deep job và manual consolidation batch từ `chat_log`.
+- Episodic record sau deep job và consolidation batch từ `chat_log`.
 - JSONL trace và Mini Ops dashboard.
 
 Chưa có:

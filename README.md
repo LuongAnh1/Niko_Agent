@@ -19,7 +19,7 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
   - `episodes`: Episodic Memory sinh ra sau deep job.
   - recent working memory, retrieval/write/correction gate và consolidation scaffold cho các bước memory tiếp theo.
 - Mini Niko Ops dashboard: xem live harness graph, trace, chat log, memory; thêm/xóa facts; chỉnh runtime config; start/stop bot và xem runtime log.
-- Manual memory consolidation: Memory tab có thể preview/run một batch `chat_log` để tạo facts/episodes có provenance `consolidation`.
+- Memory consolidation: Memory tab có thể preview/run thủ công một batch `chat_log`; nếu bật config auto, Niko tự chạy nền sau khi đủ số exchange hoàn tất.
 
 ## Cấu Trúc Chính
 
@@ -108,7 +108,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
-- `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, trace và runtime log.
+- `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, auto consolidation, trace và runtime log.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -181,7 +181,8 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 
 Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại cố ý đơn giản để phục vụ demo và đo điểm yếu:
 
-- Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit/manual consolidation.
+- Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit consolidation, gồm manual `Run once` và auto default-off.
+- Auto consolidation default-off; khi bật, nó chỉ chạy sau complete exchange và vẫn dùng guardrail lỗi classifier thì không mark rows.
 - Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
 - Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.

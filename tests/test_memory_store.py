@@ -92,6 +92,61 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in session_rows], [second])
         self.assertTrue(all(not row["consolidated"] for row in all_rows))
 
+    def test_complete_exchange_batch_waits_for_real_assistant_reply(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.log_chat("chat-1", "user", "can deep", source="test")
+            wait = store.log_chat(
+                "chat-1",
+                "assistant",
+                "doi em chut",
+                source="test",
+                meta={"route": "deep_agent_wait"},
+            )
+            followup = store.log_chat("chat-1", "user", "bo sung them", source="test")
+            busy = store.log_chat(
+                "chat-1",
+                "assistant",
+                "em dang xu ly",
+                source="test",
+                meta={"route": "busy_reply"},
+            )
+            final = store.log_chat(
+                "chat-1",
+                "assistant",
+                "da xu ly xong",
+                source="test",
+                meta={"route": "deep_agent_final"},
+            )
+
+            before_final_threshold = store.list_unconsolidated_complete_exchange_batch(
+                exchange_threshold=2,
+                session_id="chat-1",
+            )
+            complete_batch = store.list_unconsolidated_complete_exchange_batch(
+                exchange_threshold=1,
+                session_id="chat-1",
+            )
+
+        self.assertEqual(before_final_threshold, [])
+        self.assertEqual([row["id"] for row in complete_batch], [first, wait, followup, busy, final])
+
+    def test_complete_exchange_batch_counts_multiple_local_exchanges(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            first = store.log_chat("chat-1", "user", "chao", source="test")
+            second = store.log_chat("chat-1", "assistant", "chao anh", source="test", meta={"route": "local_reply"})
+            third = store.log_chat("chat-1", "user", "ghi nho", source="test")
+            fourth = store.log_chat("chat-1", "assistant", "da ghi", source="test", meta={"route": "local_reply"})
+            other = store.log_chat("chat-2", "user", "khac", source="test")
+            store.log_chat("chat-2", "assistant", "khac", source="test", meta={"route": "local_reply"})
+
+            batch = store.list_unconsolidated_complete_exchange_batch(exchange_threshold=2, session_id="chat-1")
+            session_other = store.list_unconsolidated_complete_exchange_batch(exchange_threshold=1, session_id="chat-2")
+
+        self.assertEqual([row["id"] for row in batch], [first, second, third, fourth])
+        self.assertEqual([row["id"] for row in session_other], [other, other + 1])
+
     def test_consolidator_preview_and_mark_batch_does_not_touch_new_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
@@ -146,6 +201,30 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["facts"][0]["source"], "consolidation")
         self.assertEqual(remaining, [])
         self.assertEqual(result.batch.row_ids, [row_id])
+
+    def test_auto_consolidation_run_waits_for_exchange_threshold(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.log_chat("chat-1", "user", "Ghi nhớ rằng anh thích auto consolidation", source="test")
+            store.log_chat("chat-1", "assistant", "da nho", source="test", meta={"route": "local_reply"})
+            consolidator = MemoryConsolidator(
+                store=store,
+                candidate_classifier=lambda _candidate: MemoryCandidateDecision(
+                    decision=MEMORY_SEMANTIC_FACT,
+                    reason="explicit fact",
+                ),
+            )
+
+            too_early = consolidator.run_complete_exchange_once(exchange_threshold=2, session_id="chat-1")
+            result = consolidator.run_complete_exchange_once(exchange_threshold=1, session_id="chat-1")
+            remaining = store.list_unconsolidated_chat(limit=5)
+            snapshot = store.snapshot()
+
+        self.assertEqual(too_early.status, "empty")
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(result.marked_count, 2)
+        self.assertEqual(remaining, [])
+        self.assertEqual(snapshot["counts"]["facts"], 1)
 
     def test_consolidation_explicit_fact_strips_prefix_and_skips_duplicate_episode(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -580,6 +659,125 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["counts"]["episodes"], 0)
         decision_events = [event for event in events if event.get("kind") == "memory_write_decision"]
         self.assertEqual(decision_events[0]["data"]["decision"], MEMORY_DISCARD)
+
+    def test_memory_runtime_auto_consolidation_default_off_does_not_start_worker(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime = MemoryRuntime(store=store)
+
+            with patch.object(runtime, "_start_auto_consolidation_thread") as start_thread:
+                with patch.dict(
+                    os.environ,
+                    {
+                        "NIKO_MEMORY_ENABLED": "1",
+                        "NIKO_MEMORY_WRITE_ENABLED": "1",
+                        "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED": "0",
+                    },
+                    clear=False,
+                ):
+                    runtime.record_chat_log("456", "assistant", "chao anh", message, "local_reply", "turn-1", trace_logger)
+
+        start_thread.assert_not_called()
+
+    def test_memory_runtime_auto_consolidation_starts_only_after_real_assistant_reply(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "hello",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime = MemoryRuntime(store=store)
+
+            with patch.object(runtime, "_start_auto_consolidation_thread") as start_thread:
+                with patch.dict(
+                    os.environ,
+                    {
+                        "NIKO_MEMORY_ENABLED": "1",
+                        "NIKO_MEMORY_WRITE_ENABLED": "1",
+                        "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED": "1",
+                    },
+                    clear=False,
+                ):
+                    runtime.record_chat_log(
+                        "456",
+                        "assistant",
+                        "doi em chut",
+                        message,
+                        "deep_agent_wait",
+                        "turn-1",
+                        trace_logger,
+                    )
+                    runtime.record_chat_log(
+                        "456",
+                        "assistant",
+                        "em dang xu ly",
+                        message,
+                        "busy_reply",
+                        "turn-1",
+                        trace_logger,
+                    )
+                    runtime.record_chat_log(
+                        "456",
+                        "assistant",
+                        "xong roi anh",
+                        message,
+                        "local_reply",
+                        "turn-1",
+                        trace_logger,
+                    )
+
+        start_thread.assert_called_once_with("456", "turn-1", trace_logger)
+
+    def test_memory_runtime_auto_consolidation_runs_one_complete_exchange_batch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            store.log_chat("456", "user", "Ghi nhớ rằng anh thích auto consolidation", source="test")
+            store.log_chat("456", "assistant", "da nho", source="test", meta={"route": "local_reply"})
+            runtime = MemoryRuntime(
+                store=store,
+                consolidator=MemoryConsolidator(
+                    store=store,
+                    candidate_classifier=lambda _candidate: MemoryCandidateDecision(
+                        decision=MEMORY_SEMANTIC_FACT,
+                        reason="explicit fact",
+                    ),
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED": "1",
+                    "NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                result = runtime.run_auto_consolidation_once("456", trace_id="turn-1", trace_logger=trace_logger)
+
+            snapshot = store.snapshot()
+            events = trace_logger.read_events()
+
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(result.marked_count, 2)
+        self.assertEqual(snapshot["counts"]["facts"], 1)
+        self.assertTrue(any(event.get("kind") == "memory_consolidation_auto_started" for event in events))
+        self.assertTrue(any(event.get("kind") == "memory_consolidation_auto_finished" for event in events))
 
     def test_memory_runtime_write_gate_discard_skips_memory_inventory_episode(self):
         message = telegram_message_to_gateway(

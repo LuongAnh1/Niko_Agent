@@ -1012,7 +1012,7 @@
         <div class="records">
           <div class="record">
             <div class="splitline"><span>Next batch</span><span class="badge warn">${esc(batch.rows_read || 0)} row(s)</span></div>
-            <div class="meta">Manual run only. Model errors do not mark rows consolidated.</div>
+            <div class="meta">Manual run/debug. Auto consolidation is controlled in Config and keeps the same guardrails.</div>
             <div class="actions" style="margin-left:0;margin-top:12px">
               <button class="primary" data-consolidation-action="run" type="button"${batch.rows_read ? "" : " disabled"}>Run once</button>
               <button data-consolidation-action="refresh" type="button">Refresh batch</button>

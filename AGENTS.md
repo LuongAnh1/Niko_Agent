@@ -59,8 +59,8 @@ separate business backend lane that Niko can retrieve from later.
 - `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
   retrieval modes (`search/list/recent/none`), recent working-memory context,
   write gate, memory correction workflow facade, store search/list, chat log
-  writes, episode writes, manual consolidation facade, and context formatting
-  before Deep.
+  writes, episode writes, manual/auto consolidation facade, and context
+  formatting before Deep.
 - `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
   compatibility wrappers such as `retrieve_memory_context(...)`.
 - `niko/memory/working_memory.py`: Ephemeral recent conversation window builder
@@ -133,15 +133,18 @@ Important boundaries:
   window rebuilt from `chat_log` for the current turn, but that window is not
   Semantic/Episodic long-term memory.
 - Semantic extraction is not mature yet. Facts are mainly added through Ops/API
-  and explicit/manual consolidation; free-form summarizer extraction is not built
-  yet.
+  and explicit consolidation, either manual `Run once` or default-off auto; free-form
+  summarizer extraction is not built yet.
 - Episodic records are basic summaries of deep work, not rich event models yet.
 - Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
   reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
   episodes and retrieval modes, but it does not write SQLite data itself.
-- Consolidation is manual-only in the current harness. Dashboard/API `Refresh
-  batch` previews the next batch, and `Run once` processes one batch; there is no
-  background scheduler or automatic "after N messages" trigger yet.
+- Consolidation has manual and default-off auto paths. Dashboard/API `Refresh
+  batch` previews the next batch, and `Run once` processes one batch. Auto
+  consolidation only runs when `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1`, after
+  enough complete user/assistant exchanges, in a background worker guarded by a
+  single-process lock. Wait/busy assistant replies do not count as completed
+  exchanges.
 - Memory correction treats `current_prompt` as the primary evidence. Recent
   turns are only attached when the current prompt has an explicit sửa/xóa/quên
   signal or is a pending fact-ID follow-up. Neutral prompts must not inherit old
@@ -282,6 +285,8 @@ NIKO_MEMORY_GATE_ENABLED=0
 NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_WRITE_GATE_ENABLED=0
 NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
+NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=0
+NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES=6
 NIKO_MEMORY_TOP_K=4
 NIKO_MEMORY_RECENT_TURNS=6
 NIKO_MEMORY_RECENT_CHAR_BUDGET=2400

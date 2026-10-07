@@ -1,13 +1,14 @@
-"""Consolidation thủ công để gom `chat_log` thành long-term memory.
+"""Consolidation để gom `chat_log` thành long-term memory.
 
 Luồng hiện tại cố ý bảo thủ: rule nội bộ chỉ tạo candidate fact/episode, model
 quyết định local chỉ phân loại candidate, rồi module này mới ghi vào `facts`
 hoặc `episodes`. Nếu classifier lỗi thì batch không bị mark done để anh có thể
 chạy lại sau, tránh mất dữ liệu hội thoại.
 
-V1 chưa có scheduler/threshold tự động hoặc summarizer tự do. Dashboard/API là
-caller duy nhất gọi `preview_next_batch` hoặc `run_once`; chat flow không tự bật
-consolidation sau N tin nhắn cho tới khi có phase auto riêng.
+V1 vẫn cố ý bảo thủ: manual dashboard/API gọi `preview_next_batch` hoặc
+`run_once`; auto runtime chỉ được gọi sau khi đủ complete exchange và vẫn dùng
+cùng guardrail. Module này không tự tạo scheduler nền, nó chỉ cung cấp thao tác
+batch cho caller.
 """
 
 from __future__ import annotations
@@ -137,7 +138,7 @@ class MemoryCandidate:
 
 @dataclass(frozen=True)
 class ConsolidationRunResult:
-    """Kết quả của một lần chạy manual, dùng cho API/dashboard và test."""
+    """Kết quả của một lần chạy consolidation, dùng cho API/dashboard/auto và test."""
 
     status: str
     batch: ConsolidationBatch
@@ -162,11 +163,11 @@ class ConsolidationRunResult:
 
 
 class MemoryConsolidator:
-    """Pipeline consolidation thủ công: build candidate, classify, ghi và mark batch.
+    """Pipeline consolidation: build candidate, classify, ghi và mark batch.
 
-    Lớp này không có timer, scheduler hay threshold tự gọi. Caller phải chủ động
-    preview/run từ dashboard, API hoặc test; phase auto sau này sẽ bọc quanh lớp
-    này thay vì nhét vòng lặp nền vào đây.
+    Lớp này không có timer hay vòng lặp nền tự gọi. Caller chủ động chọn batch:
+    dashboard dùng batch thô kế tiếp, còn auto runtime dùng batch đủ complete
+    exchange rồi gọi cùng đường xử lý.
     """
 
     def __init__(
@@ -191,6 +192,18 @@ class MemoryConsolidator:
         """Đọc batch kế tiếp mà không ghi/mark gì; nút Refresh batch dùng đường này."""
         batch_limit = self.batch_size if limit is None else max(1, int(limit))
         rows = self.store.list_unconsolidated_chat(batch_limit, session_id=session_id)
+        return ConsolidationBatch(rows=rows)
+
+    def preview_complete_exchange_batch(
+        self,
+        exchange_threshold: int,
+        session_id: str | None = None,
+    ) -> ConsolidationBatch:
+        """Đọc batch auto chỉ khi đã đủ số exchange hoàn tất."""
+        rows = self.store.list_unconsolidated_complete_exchange_batch(
+            exchange_threshold=exchange_threshold,
+            session_id=session_id,
+        )
         return ConsolidationBatch(rows=rows)
 
     def mark_batch_done(self, row_ids: list[int] | tuple[int, ...], reason: str = "manual") -> ConsolidationResult:
@@ -254,6 +267,19 @@ class MemoryConsolidator:
     def run_once(self, limit: int | None = None, session_id: str | None = None) -> ConsolidationRunResult:
         """Chạy một batch thủ công; lỗi classifier thì không mark rows."""
         batch = self.preview_next_batch(limit=limit, session_id=session_id)
+        return self._run_batch(batch)
+
+    def run_complete_exchange_once(
+        self,
+        exchange_threshold: int,
+        session_id: str | None = None,
+    ) -> ConsolidationRunResult:
+        """Chạy auto một batch khi đủ complete exchange; thiếu ngưỡng thì trả empty."""
+        batch = self.preview_complete_exchange_batch(exchange_threshold=exchange_threshold, session_id=session_id)
+        return self._run_batch(batch)
+
+    def _run_batch(self, batch: ConsolidationBatch) -> ConsolidationRunResult:
+        """Xử lý một batch đã được caller chọn sẵn; lỗi classifier thì không mark rows."""
         candidates = self.build_candidates(batch)
         if batch.is_empty:
             return ConsolidationRunResult("empty", batch, [], [], [], [], 0)
