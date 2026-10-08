@@ -31,7 +31,7 @@ def bots_snapshot(bot_manager: Any) -> list[dict[str, Any]]:
             "id": status.get("id", "telegram"),
             "name": "Telegram Bot",
             "kind": "process",
-            "description": "Long polling gateway nhan tin Telegram va day vao ChatReplyGraph.",
+            "description": "Long polling gateway nhan tin Telegram va day vao GatewayRunner.",
             "health": "running" if status.get("running") else "stopped",
             "actions": ["start", "stop", "restart"],
         }
@@ -225,7 +225,7 @@ class TelegramBotProcessManager:
         status.update(
             {
                 "name": "Telegram Bot",
-                "description": "Long polling gateway nhan tin Telegram va day vao ChatReplyGraph.",
+                "description": "Long polling gateway nhan tin Telegram va day vao GatewayRunner.",
                 "kind": "process",
                 "health": "stopping" if status.get("stopping") else "running" if status["running"] else "stopped",
                 "token_set": bool(token_value.strip()),

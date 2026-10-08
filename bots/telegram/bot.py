@@ -3,7 +3,7 @@
 File này cố tình chỉ làm những việc thuộc Telegram: long polling, auth theo
 chat/user, lọc mention trong group, gửi reply/sticker và chuyển raw message
 thành `ChatGatewayMessage`. Mọi quyết định agent, memory, triage hay Deep job
-đều đi qua `ChatReplyGraph` để gateway không phình thành business logic.
+đều đi qua `GatewayRunner` để gateway không phình thành business logic.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from bots.decision_model.sticker import (
 )
 from bots.telegram.instance_guard import TelegramBotAlreadyRunning, acquire_telegram_bot_instance
 from bots.telegram.sticker_picker import choose_sticker_file_id, load_sticker_config
-from niko.graphs.chat_reply import ChatReplyGraph
 from niko.chat_gateway import (
     format_identity_reply,
     parse_allowed_user_keys,
@@ -36,6 +35,7 @@ from niko.chat_gateway import (
     telegram_message_to_gateway,
 )
 from niko.config import env_flag, env_value, load_env_files, resolve_project_path
+from niko.gateway import GatewayRunner
 from niko.harness.runtime_log import default_runtime_logger
 
 
@@ -50,7 +50,7 @@ DEFAULT_TELEGRAM_STICKER_TIMEOUT_SECONDS = 5
 DEFAULT_TELEGRAM_STARTUP_RETRIES = 2
 DEFAULT_TELEGRAM_STARTUP_RETRY_DELAY_SECONDS = 3.0
 STICKER_SET_CACHE: dict[str, list[dict]] = {}
-CHAT_REPLY_GRAPH = ChatReplyGraph()
+GATEWAY_RUNNER = GatewayRunner()
 
 
 def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
@@ -476,7 +476,7 @@ def handle_message(
     """Xử lý một Telegram message đã lấy từ polling.
 
     Thứ tự này quan trọng: `/id` luôn hữu ích để cấu hình allowlist, group
-    mention được lọc trước, rồi mới kiểm tra auth và đẩy sang ChatReplyGraph.
+    mention được lọc trước, rồi mới kiểm tra auth và đẩy sang GatewayRunner.
     """
     gateway_message = telegram_message_to_gateway(message, user_aliases)
     chat_id = message["chat"]["id"]
@@ -535,7 +535,7 @@ def handle_message(
         send_chat_action(token, chat_id)
 
     try:
-        route = CHAT_REPLY_GRAPH.handle_message(prompt, prompt_message, deliver_reply, notify_working)
+        route = GATEWAY_RUNNER.handle_message(prompt, prompt_message, deliver_reply, notify_working)
         runtime_log(
             "telegram_message_processed",
             f"Da xu ly Telegram message: route={route}, chat_id={chat_id}, user_key={gateway_message.user.key}",

@@ -1,11 +1,12 @@
 # Luồng Xử Lý Chat Telegram
 
-Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; phần route, memory, trace và deep job nằm trong `ChatReplyGraph`.
+Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; gateway gọi `GatewayRunner`, còn phần route, memory, trace và deep job hiện vẫn nằm trong `ChatReplyGraph`.
 
 ## Thành Phần
 
 - `bots/telegram/bot.py`: Telegram gateway.
 - `niko.chat_gateway`: chuẩn hóa message Telegram thành `ChatGatewayMessage`.
+- `niko.gateway.GatewayRunner`: runner mỏng nhận message/callback từ gateway rồi ủy quyền sang chat graph hiện tại.
 - `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối flow chat.
 - `niko.graphs.chat_reply.router`: rule router local/deep/fast/busy.
 - `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
@@ -26,7 +27,7 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 5. Nếu là group và `TELEGRAM_GROUP_MODE=mentions`, chỉ xử lý message có tag bot.
 6. Kiểm tra `TELEGRAM_ALLOWED_CHAT_IDS` và `CHAT_ALLOWED_USER_KEYS`.
 7. Tạo callback `deliver_reply` và `notify_working`.
-8. Gọi `CHAT_REPLY_GRAPH.handle_message(...)`.
+8. Gọi `GATEWAY_RUNNER.handle_message(...)`.
 9. Khi graph trả lời, gateway gửi message trước.
 10. Nếu bật sticker, gateway chạy worker nền: hỏi Nimble local chọn mood sticker,
     rồi map mood đó sang file_id Telegram. Nếu Nimble chọn `no_sticker` hoặc lỗi,
@@ -46,7 +47,7 @@ route chính của chat.
 Nếu `NIKO_AGENT_MODE=single`:
 
 ```text
-Telegram -> ChatReplyGraph -> Deep Agent -> Telegram
+Telegram -> GatewayRunner -> ChatReplyGraph -> Deep Agent -> Telegram
 ```
 
 Graph gọi `runtime.call_deep_agent(...)` đồng bộ. Runtime nạp hook, identity context và memory context nếu bật.
@@ -58,6 +59,7 @@ Nếu `NIKO_AGENT_MODE=two_agent`:
 ```text
 Telegram message
   -> Telegram gateway
+  -> GatewayRunner.handle_message
   -> ChatReplyGraph.handle_message
   -> router.decide_agent_route
   -> local reply | Fast triage | Deep background | busy reply
@@ -228,7 +230,8 @@ User Telegram message
         -> reply identity, stop
      -> group mention filter
      -> chat/user auth
-     -> ChatReplyGraph.handle_message
+     -> GatewayRunner.handle_message
+        -> ChatReplyGraph.handle_message
         -> write turn_start + incoming chat log
         -> decide route
         -> memory correction intent?

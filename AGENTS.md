@@ -44,6 +44,10 @@ separate business backend lane that Niko can retrieve from later.
   imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
+- `niko/gateway/`: Phase 1 gateway runner. Owns the channel-agnostic handoff
+  from normalized gateway messages/callbacks into the current chat workflow.
+  For now it delegates directly to `ChatReplyGraph` and must stay behavior
+  preserving; it is not the future app orchestrator yet.
 - `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
   LoopRuntime, and observer mechanics. Keep it independent from Telegram and
   from any single domain workflow.
@@ -103,8 +107,16 @@ separate business backend lane that Niko can retrieve from later.
   documents.
 
 Important current boundary: Niko has a runnable baseline harness, not a generic
-agent framework core yet. `ChatReplyGraph` is still a hand-written business graph
-for chat, not a reusable Node/Edge/Workflow engine like Waku's graph runtime.
+agent framework core yet. `GatewayRunner` is only a thin bridge into the existing
+chat graph. `ChatReplyGraph` is still a hand-written business graph for chat,
+not a reusable Node/Edge/Workflow engine like Waku's graph runtime.
+The target split for gateway runner, app assembly, turn orchestrator, graphs,
+Loop, and tools started with the Phase 1 `niko/gateway/` runner. The broader
+target is documented in `docs/plans/2026-10-08-niko-core-split-survey.md`; do
+not assume `NikoApp` or the turn orchestrator exist until later phases create
+them. The phase-by-phase implementation direction now lives in
+`docs/plans/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
+tracking in `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 ## Chat Flow
 
@@ -112,8 +124,11 @@ The Telegram gateway converts each accepted Telegram message into
 `ChatGatewayMessage`, then calls:
 
 ```python
-from niko.graphs.chat_reply import ChatReplyGraph
+from niko.gateway import GatewayRunner
 ```
+
+`GatewayRunner` currently forwards the turn to `ChatReplyGraph` without changing
+route labels, trace events, memory behavior, or Telegram callbacks.
 
 `ChatReplyGraph` runs either `single` or `two_agent` mode according to
 `NIKO_AGENT_MODE`.
@@ -287,6 +302,15 @@ bot process already owns that lock.
   for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
 - `docs/plans/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
   keeping Markdown docs and source file comments aligned with the current repo state.
+- `docs/plans/2026-10-08-niko-core-split-survey.md`: survey plan for separating
+  gateway runner, app assembly, turn orchestration, graphs, Loop, and tools.
+- `docs/plans/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
+  the core/gateway/graph split survey and docs sync.
+- `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
+  implementation direction for actually refactoring gateway runner, app assembly,
+  turn orchestrator, Jira workflow selection, and memory correction selection.
+- `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
+  to tick after each core/gateway/graph split phase is implemented and verified.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
@@ -390,6 +414,11 @@ not relevant.
 ## Editing Rules For Future Sessions
 
 - Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
+- Keep `niko/gateway/` as a behavior-preserving runner until the app/turn
+  orchestrator is explicitly introduced.
+- Do not implement `NikoApp` or the turn orchestrator split without following
+  `docs/plans/2026-10-08-niko-core-split-implementation-plan.md` and updating
+  its checklist.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the
   Telegram gateway. Nimble is for route/label decisions, not free-form reply
   generation.

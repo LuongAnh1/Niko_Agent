@@ -205,6 +205,41 @@ class TelegramPromptTests(unittest.TestCase):
 
         self.assertTrue(send_message.call_args.args[2].startswith("@anhluong "))
 
+    def test_telegram_message_uses_gateway_runner(self):
+        message = {
+            "text": "alo",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": 456, "type": "private"},
+        }
+
+        class FakeGatewayRunner:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def handle_message(self, prompt, gateway_message, deliver_reply, notify_working=None):
+                self.calls.append((prompt, gateway_message, deliver_reply, notify_working))
+                deliver_reply("runner reply")
+                return "runner_route"
+
+        runner = FakeGatewayRunner()
+
+        with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "0"}, clear=False), patch(
+            "bots.telegram.bot.GATEWAY_RUNNER", runner
+        ), patch("bots.telegram.bot.send_message") as send_message, patch(
+            "bots.telegram.bot.maybe_send_sticker_async"
+        ) as sticker:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        self.assertEqual(len(runner.calls), 1)
+        prompt, gateway_message, deliver_reply, notify_working = runner.calls[0]
+        self.assertEqual(prompt, "alo")
+        self.assertEqual(gateway_message.chat_id, "456")
+        self.assertIsNotNone(deliver_reply)
+        self.assertIsNotNone(notify_working)
+        send_message.assert_called_once()
+        self.assertEqual(send_message.call_args.args[2], "runner reply")
+        sticker.assert_called_once()
+
     def test_deep_agent_result_is_composed_by_fast_agent(self):
         message = telegram_message_to_gateway(
             {
