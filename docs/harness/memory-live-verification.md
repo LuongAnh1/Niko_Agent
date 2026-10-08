@@ -276,3 +276,54 @@ thêm.
   `tests/test_decision_model.py`.
 - Deferred cho Loop/tool workflow: test sửa fact end-to-end sau khi chọn ID và retrieval lại nội dung
   mới; test xóa fact duy nhất không cần hỏi lại; dashboard delete/update episode nếu sau này cho phép.
+
+## Kết quả cập nhật 2026-10-08
+
+### Phase 4B Loop correction - durable pending qua restart
+
+Mục đích: xác nhận ambiguous correction follow-up không còn phụ thuộc RAM của process bot. Sau khi bot hỏi chọn fact ID,
+anh restart Telegram Bot rồi gửi `fact #...`; runtime phải đọc lại pending từ SQLite, validate ID, mutate đúng fact và clear
+pending của lượt đó.
+
+Kết quả live test: pass.
+
+- Lượt đầu lúc 2026-10-08 03:23:10 UTC gửi `Niko, quên fact checklist`.
+- Correction gate chọn `forget_memory`, `query=checklist`; Loop chạy `search_facts`, thấy nhiều fact khớp và trả clarify với `fact_ids=[12, 6, 7]`.
+- Trace có `memory_correction_pending_created`, `pending_trace_id=60fb24aa-9a82-40af-90db-4f5f8bf346ee`, TTL 15 phút.
+- Runtime log xác nhận dashboard stop/start bot giữa hai lượt: `telegram_bot_stop_finished` lúc 03:23:36 UTC, `telegram_bot_started` lúc 03:23:39 UTC.
+- Lượt follow-up lúc 2026-10-08 03:23:57 UTC gửi `fact #12 nhé`.
+- Trace có `memory_correction_context_fallback`, sau đó `memory_correction_applied action=delete_fact fact_id=12`.
+- Trace có `memory_correction_pending_resolved` trỏ về `pending_trace_id=60fb24aa-9a82-40af-90db-4f5f8bf346ee`, xác nhận pending được nối lại sau restart.
+- Kiểm tra SQLite sau test: fact #12 không còn trong bảng `facts`.
+- Lưu ý sau test: conversation còn một pending mới được tạo ở lượt test sau lúc 03:25:48 UTC cho `fact_ids=[6, 7]`; đây không phải pending còn sót của Test 1.
+
+### Phase 4B Loop correction - invalid ID và update ambiguous
+
+Mục đích: xác nhận pending durable không mutate khi user chọn ID ngoài danh sách, sau đó vẫn xử lý được một workflow ambiguous update có replacement và clear pending khi resolve.
+
+Kết quả live test: pass.
+
+- Lượt Test 2 lúc 2026-10-08 03:24:56 UTC gửi `Niko, quên fact checklist`; Loop hỏi lại với `fact_ids=[6, 7]` và trace có `memory_correction_pending_created`.
+- Follow-up lúc 2026-10-08 03:25:20 UTC gửi `fact #199 nhé`.
+- Trace ghi `memory_correction_context_fallback`, sau đó `memory_correction_clarify` với `clarify_reason=pending_fact_id_not_offered`.
+- Không có `memory_correction_applied` trong turn `fact #199 nhé`, nên DB không bị mutate khi ID không thuộc pending choices.
+- Lượt Test 3 lúc 2026-10-08 03:25:43 UTC gửi `Niko, sửa fact checklist thành anh thích checklist có tiêu chí hoàn thành rõ ràng`.
+- Guardrail đưa decision cuối về `correct_memory`; Loop tìm nhiều fact khớp và tạo pending mới với `fact_ids=[6, 7]`, `replacement=anh thích checklist có tiêu chí hoàn thành rõ ràng`.
+- Follow-up lúc 2026-10-08 03:26:16 UTC gửi `fact #6 nhé`.
+- Trace ghi `memory_correction_context_fallback`, `memory_correction_applied action=update_fact fact_id=6`, và `memory_correction_pending_resolved`.
+- Kiểm tra SQLite sau test: fact #6 đã đổi content thành `anh thích checklist có tiêu chí hoàn thành rõ ràng`, fact #7 giữ nguyên, `memory_correction_pending` không còn row cho conversation này.
+
+### Phase 4B Loop correction - expired pending không mutate
+
+Mục đích: xác nhận pending đã hết hạn thì follow-up `fact #...` không được dùng lại action cũ để xóa/sửa fact.
+
+Kết quả live test: pass.
+
+- Lượt đầu lúc 2026-10-08 03:38:04 UTC gửi `Niko, quên fact checklist`.
+- Loop hỏi lại với `fact_ids=[13, 7]`; trace có `memory_correction_pending_created`, `pending_trace_id=3cd0e7ce-b072-4f13-a90d-d841e67c61ff`.
+- Để test nhanh, chỉnh `expires_at` của pending trong SQLite về `2000-01-01T00:00:00Z`, sau đó restart Telegram Bot để RAM cache không còn giữ hạn cũ.
+- Follow-up lúc 2026-10-08 03:40:26 UTC gửi `fact #13 nhé`.
+- Trace ghi `memory_correction_pending_expired`, `expires_at=946684800.0`, trỏ về đúng `pending_trace_id=3cd0e7ce-b072-4f13-a90d-d841e67c61ff`.
+- Không có `memory_correction_applied` trong turn expired.
+- Reply báo lựa chọn fact trước đó đã hết hạn và yêu cầu gửi lại yêu cầu sửa/xóa memory.
+- Kiểm tra SQLite sau test: fact #13 và fact #7 vẫn còn, `memory_correction_pending` đã clear.

@@ -128,8 +128,24 @@ Trạng thái 2026-10-08:
   pending và ambiguous update có replacement. Targeted run:
   `rtk python -m pytest tests/test_memory_correction_loop.py tests/test_memory_store.py -q`
   -> `67 passed`.
-- Cần live test sau khi bật flag trên dashboard để xác nhận trace/dashboard đọc
-  rõ `loop_*` events trong môi trường Telegram thật.
+- Live test durable pending qua restart đã pass trên Telegram thật: bot hỏi chọn
+  `fact_ids=[12, 6, 7]`, dashboard stop/start bot giữa hai lượt, follow-up
+  `fact #12 nhé` được resolve bằng pending SQLite, ghi
+  `memory_correction_context_fallback`, `memory_correction_applied action=delete_fact fact_id=12`
+  và `memory_correction_pending_resolved`.
+- Live test invalid ID đã pass: follow-up `fact #199 nhé` với pending `[6, 7]`
+  ghi `memory_correction_clarify` reason `pending_fact_id_not_offered`, không có
+  `memory_correction_applied`.
+- Live test ambiguous update có replacement đã pass: prompt sửa `checklist` tạo
+  pending `[6, 7]`, follow-up `fact #6 nhé` ghi `update_fact fact_id=6`,
+  `memory_correction_pending_resolved`; SQLite xác nhận fact #6 đổi content, fact #7
+  giữ nguyên và pending được clear.
+- Live test expired pending đã pass: pending `[13, 7]` được chỉnh `expires_at` về
+  quá khứ, restart Telegram Bot để bỏ RAM cache, follow-up `fact #13 nhé` ghi
+  `memory_correction_pending_expired`, không có `memory_correction_applied`;
+  SQLite xác nhận fact #13 và #7 vẫn còn, pending được clear.
+- Phase 4B live đã khóa các nhánh chính: durable resolve qua restart, invalid ID,
+  ambiguous update có replacement, và expired pending.
 
 ## Phase 5: Dashboard And Observability
 
