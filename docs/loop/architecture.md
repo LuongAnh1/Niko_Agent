@@ -5,9 +5,10 @@ Phạm vi: kiến trúc Loop tổng quát cho Niko Agent, chưa phải code runt
 
 Tài liệu này mô tả Loop như một slot xử lý tool có thể dùng chung cho chat
 memory, Jira/business data và các workflow cần nhiều bước về sau. Hiện tại Niko
-vẫn chạy bằng `ChatReplyGraph` viết tay; `niko/loop/` đã có core V0 độc lập và
-`niko/memory/loop_tools.py` đã có fact tools V0, nhưng chưa được nối vào chat
-flow hoặc correction workflow thật.
+vẫn chạy bằng `ChatReplyGraph` viết tay; `niko/loop/` đã có core V0 độc lập,
+`niko/memory/loop_tools.py` đã có fact tools V0, và memory correction có bridge
+V0 default-off qua Loop. Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira
+workflow.
 
 ## 1. Vai Trò Của Loop
 
@@ -133,11 +134,18 @@ Mặc định triển khai gần nhất nên chọn V0 để hợp với runtime
 
 ## 5. Use Case Đầu Tiên: Memory Correction
 
-Memory correction hiện là Phase 5 V1 tạm thời trong
+Memory correction mặc định vẫn là Phase 5 V1 tạm thời trong
 `niko/memory/correction_workflow.py`: gate nhận diện intent, Python search fact,
-hỏi lại khi mơ hồ, pending ID nằm trong RAM, rồi update/delete SQLite.
+hỏi lại khi mơ hồ, pending ID được lưu trong SQLite với TTL 15 phút, rồi
+update/delete SQLite.
 
-Khi có Loop, correction nên chuyển dần thành workflow tool:
+Phase 4A đã thêm bridge default-off trong `niko/memory/correction_loop.py`. Khi
+bật `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, correction prompt trực tiếp được đưa
+qua LoopRuntime + fact tools sau correction gate; nếu loop lỗi thì fallback về
+V1. Pending ambiguous fact-ID follow-up vẫn đi qua facade V1 để giữ hành vi
+live-test ổn định, nhưng state chờ chọn fact đã bền qua restart.
+
+Hướng hoàn chỉnh hơn là chuyển correction thành workflow tool có state bền:
 
 ```text
 user prompt
@@ -192,5 +200,6 @@ chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối c
 | Tool slot trên dashboard | đã có về mặt hiển thị |
 | Loop core `niko/loop/` | done V0 |
 | ToolRegistry tổng quát | done V0 |
-| Memory fact tools qua Loop | done V0 adapter, chưa nối chat flow |
+| Memory fact tools qua Loop | done V0 adapter |
+| Memory correction qua Loop | V0 default-off, fallback về V1, pending follow-up bền trong SQLite nhưng facade vẫn V1 |
 | Jira tools qua Loop | planned |

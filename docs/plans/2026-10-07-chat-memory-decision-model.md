@@ -459,9 +459,10 @@ ràng.
 
 Trạng thái: đã triển khai V1 tạm thời cho chat memory local. Vì Niko chưa có
 tool loop hoàn chỉnh, phần này cố ý nhẹ: Decision Model chỉ nhận diện intent,
-Python giữ pending fact IDs trong RAM, validate lựa chọn, rồi update/delete
-SQLite có trace. Khi Loop/tool slot hoàn chỉnh hơn, luồng này nên chuyển thành
-workflow/tool có state bền, thay vì tiếp tục mở rộng pending logic trong chat.
+Python giữ pending fact IDs trong SQLite với TTL 15 phút, validate lựa chọn, rồi
+update/delete SQLite có trace. Khi Loop/tool slot hoàn chỉnh hơn, luồng này nên
+chuyển thành workflow/tool rõ contract hơn, thay vì tiếp tục mở rộng pending logic
+trong chat.
 
 ```text
 Incoming prompt
@@ -545,7 +546,7 @@ complete exchange, và Deep prompt đã có recent working-memory window.
 Em đề xuất bước tiếp theo nên là hai việc nhỏ, ít rủi ro:
 
 1. Live test auto consolidation với backlog nhỏ và quan sát trace/runtime log.
-2. Sau đó mới quay lại Loop/tool workflow bền cho memory correction nếu muốn bỏ pending RAM.
+2. Sau đó mới quay lại Loop/tool workflow đầy đủ cho memory correction nếu muốn bỏ facade pending V1.
 
 Lý do: correction, working memory và eval baseline đã có; auto consolidation cần
 được kiểm chứng live trước khi mở tiếp sang summarizer hoặc workflow memory phức tạp hơn.

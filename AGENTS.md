@@ -70,10 +70,15 @@ separate business backend lane that Niko can retrieve from later.
   from `chat_log`, shared by Deep prompt context and correction decision context.
 - `niko/memory/correction_workflow.py`: Phase 5 V1 chat memory correction
   workflow. Owns pending fact choices, fact match/apply guardrails, and
-  correction trace/runtime logs while `MemoryRuntime` keeps the public facade.
+  durable pending state in SQLite while `MemoryRuntime` keeps the public facade.
+- `niko/memory/correction_loop.py`: Phase 4A default-off bridge from correction
+  prompts to LoopRuntime + memory fact tools. It handles direct correction
+  prompts when `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, and falls back to V1 on
+  loop errors.
 - `niko/memory/loop_tools.py`: Memory fact tools for Loop core V0. Owns
   `search_facts`, `list_facts`, `update_fact`, and `delete_fact` adapters over
-  `MemoryStore`; these tools are not wired into chat flow yet.
+  `MemoryStore`; direct correction prompts can use them through the default-off
+  correction loop bridge, but there is still no complete chat/Jira tool router.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
 - `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
 - `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
@@ -157,13 +162,16 @@ Important boundaries:
   correction context. When a reply only selects a pending fact ID, Python
   validates it against the pending choices and uses the pending action without
   calling the model again. Python still performs all update/delete operations.
-  This correction flow is a Phase 5 V1 temporary chat baseline; when the
-  Loop/tool slot matures, memory correction should become an explicit
-  workflow/tool with durable state instead of accumulating more ad-hoc chat
-  pending logic.
+  Ambiguous fact choices are also saved in `memory_correction_pending` with a
+  15-minute TTL, so `fact #...` follow-ups can survive a new `MemoryRuntime`
+  instance. This correction flow is still a Phase 5 V1 temporary chat baseline.
+  Phase 4A/4B add a default-off loop bridge for direct correction prompts and
+  durable pending state, but the pending follow-up facade remains V1 until the
+  generic Loop/tool slot owns the whole correction workflow.
 - Loop core V0 exists in `niko/loop/`, and memory fact tool adapters exist in
-  `niko/memory/loop_tools.py`, but they are not connected to chat flow yet and
-  do not make a complete tool router. Jira domain tools are still planned.
+  `niko/memory/loop_tools.py`, with correction loop V0 behind
+  `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`. This does not make a complete tool
+  router. Jira domain tools are still planned.
 
 ## Business Domains And Future Jira Gateway
 
@@ -298,6 +306,7 @@ NIKO_MEMORY_GATE_ENABLED=0
 NIKO_MEMORY_WRITE_ENABLED=1
 NIKO_MEMORY_WRITE_GATE_ENABLED=0
 NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
+NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0
 NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=0
 NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES=6
 NIKO_MEMORY_TOP_K=4

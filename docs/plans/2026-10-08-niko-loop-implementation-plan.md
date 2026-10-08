@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Niko Loop Tổng Quát
 
 Ngày tạo: 2026-10-08
-Trạng thái: Phase 2 core V0 và Phase 3 memory fact tools V0 đã triển khai, chưa nối vào chat flow
+Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correction loop default-off và Phase 4B durable pending correction đã triển khai
 
 ## Mục Tiêu
 
@@ -86,8 +86,21 @@ Việc cần làm:
 - Thêm route trong `ChatReplyGraph` hoặc `MemoryRuntime` để correction prompt có
   thể vào Loop memory workflow.
 - Reuse precheck hiện tại để neutral prompt không bị kéo sai context.
-- Chuyển ambiguous fact flow sang Loop state/result thay vì pending RAM thuần.
+- Chuyển ambiguous fact flow sang durable pending state thay vì pending RAM thuần.
 - Giữ fallback về `MemoryCorrectionWorkflow` trong giai đoạn đầu nếu Loop lỗi.
+
+Trạng thái 2026-10-08:
+
+- Đã thêm `niko/memory/correction_loop.py` để chạy prompt sửa/xóa fact trực tiếp
+  qua `LoopRuntime` + `search_facts` / `update_fact` / `delete_fact`.
+- Đã thêm config `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0`; đường mới chỉ chạy khi
+  bật cùng `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`.
+- Đã giữ fallback về V1 khi loop lỗi.
+- Đã thêm durable pending state trong SQLite cho ambiguous fact-ID follow-up. Nhánh
+  resolve vẫn đi qua facade V1 để giữ hành vi đã live-test, nhưng dữ liệu chờ chọn
+  fact sống qua restart và có TTL 15 phút.
+- Đã thêm trace events `memory_correction_pending_created`,
+  `memory_correction_pending_resolved`, `memory_correction_pending_expired`.
 
 Tiêu chí hoàn thành:
 

@@ -46,8 +46,8 @@ Reply/turn events -> Trace/Ops
 
 Trong đó `Tool Slot` mới là vị trí dự kiến cho vòng sau, chưa phải tool router hoàn chỉnh.
 Thiết kế Loop tổng quát nằm ở `docs/loop/architecture.md`; baseline hiện tại đã
-có Loop core V0 trong `niko/loop/`, nhưng chưa nối vào chat flow hoặc tool domain
-thật.
+có Loop core V0 trong `niko/loop/` và một bridge correction default-off, nhưng
+chưa phải tool router hoàn chỉnh cho toàn bộ chat flow hoặc Jira domain.
 
 ## Bố Cục Repo
 
@@ -85,6 +85,7 @@ niko/
     context.py         # Dataclass, formatter và wrapper tương thích
     working_memory.py  # Recent conversation window tạm thời cho Deep/correction
     correction_workflow.py # Workflow sửa/xóa fact qua chat
+    correction_loop.py # Bridge correction default-off qua LoopRuntime + fact tools
     consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
     loop_tools.py      # search/list/update/delete fact tools cho Loop core V0
   ops/
@@ -114,7 +115,11 @@ niko/
 `niko.memory` là memory baseline. `MemoryRuntime` là cổng điều phối retrieval
 gate, retrieval modes (`search/list/recent/none`), recent working memory, write
 gate, correction facade, manual/auto consolidation và format context cho Deep.
-`MemoryCorrectionWorkflow` giữ pending state/mutate guardrail cho Phase 5 V1.
+`MemoryCorrectionWorkflow` giữ durable pending state và mutate guardrail cho
+Phase 5 V1.
+`MemoryCorrectionLoopWorkflow` là bridge Phase 4A default-off: prompt correction
+trực tiếp có thể chạy qua LoopRuntime + fact tools khi bật
+`NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, còn lỗi loop fallback về V1.
 Store hiện dùng SQLite local, có FTS5 nếu môi trường SQLite hỗ trợ và fallback
 search nếu không có FTS5.
 
@@ -125,11 +130,11 @@ Consolidation có đường manual qua dashboard/API (`Refresh batch`, `Run once
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
 Loop core V0 là lớp tool workflow độc lập với Telegram. Fact tool adapters đã có
-trong `niko/memory/loop_tools.py`, nhưng `ChatReplyGraph` chưa gọi Loop trong
-chat flow. Khi nối vào memory correction hoặc Jira retrieval, tool không tự gửi
-reply Telegram và mọi mutate phải đi qua guardrail Python có trace. Phase đầu
-dùng Python-controlled loop vì runtime hiện gọi Claude qua `fcc-claude` CLI,
-chưa có native tool-use API ổn định trong application code.
+trong `niko/memory/loop_tools.py`; memory correction có đường thử nghiệm
+default-off để gọi Loop sau correction gate và trước nhánh V1 search/apply. Tool
+không tự gửi reply Telegram và mọi mutate phải đi qua guardrail Python có trace.
+Phase đầu dùng Python-controlled loop vì runtime hiện gọi Claude qua
+`fcc-claude` CLI, chưa có native tool-use API ổn định trong application code.
 
 ## Import Chính
 
@@ -194,7 +199,10 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 - Retrieval/write gate bằng local Decision Model, gồm mode inventory qua
   `fact_mode`/`episode_mode`.
 - Memory correction V1 qua chat: nhận diện sửa/xóa fact, hỏi lại khi mơ hồ và
-  update/delete SQLite có trace. Đây là lớp tạm trước khi có Loop/tool workflow.
+  update/delete SQLite có trace. Pending ambiguous fact-ID được lưu trong SQLite
+  với TTL 15 phút. Đây là lớp tạm trước khi có Loop/tool workflow đầy đủ.
+- Memory correction Loop V0 default-off: dùng LoopRuntime + fact tools cho prompt
+  correction trực tiếp, fallback về V1 khi loop lỗi.
 - Manual semantic facts qua dashboard.
 - Episodic record sau deep job và consolidation batch từ `chat_log`.
 - JSONL trace và Mini Ops dashboard.
@@ -202,7 +210,7 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 Chưa có:
 
 - Tool router hoàn chỉnh nối vào chat flow.
-- Chat/correction flow thật gọi memory tools qua Loop.
+- Tool router hoàn chỉnh sở hữu toàn bộ ambiguous/pending correction workflow.
 - Jira tools thật chạy qua Loop.
 - Automatic semantic extraction đáng tin cậy từ mọi đoạn chat.
 - Embedding/rerank/graph reasoning.

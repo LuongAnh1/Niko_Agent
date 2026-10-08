@@ -37,6 +37,7 @@ niko/memory/runtime.py           # Khung điều phối retrieval/write/correcti
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/memory/working_memory.py    # Recent conversation window cho Deep/correction
 niko/memory/correction_workflow.py # Workflow sửa/xóa fact qua chat
+niko/memory/correction_loop.py   # Bridge correction default-off qua LoopRuntime + fact tools
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
 niko/memory/loop_tools.py        # Fact tool adapters cho Loop core V0
 niko/ops/                       # Mini Niko Ops dashboard
@@ -187,9 +188,14 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit consolidation, gồm manual `Run once` và auto default-off.
 - Auto consolidation default-off; khi bật, nó chỉ chạy sau complete exchange và vẫn dùng guardrail lỗi classifier thì không mark rows.
-- Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
+- Memory correction qua chat vẫn mặc định dùng V1 tạm thời. Nếu bật
+  `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, correction prompt trực tiếp có thể
+  chạy qua LoopRuntime + fact tools; lỗi loop fallback về V1. Pending ambiguous
+  fact-ID vẫn đi qua facade V1, nhưng state chờ chọn fact đã lưu trong SQLite với
+  TTL 15 phút để sống qua restart runtime.
 - Loop tổng quát đã có core V0 độc lập trong `niko/loop/` và fact tool adapters
-  trong `niko/memory/loop_tools.py`, nhưng chưa nối vào chat flow/correction flow.
+  trong `niko/memory/loop_tools.py`, cộng với bridge correction V0 default-off.
+  Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira flow.
 - Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

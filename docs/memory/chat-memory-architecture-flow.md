@@ -82,7 +82,7 @@ flowchart TB
     CorrectionSearch --> Store
     CorrectionSearch --> CorrectionMatch{Target rõ?}
     CorrectionMatch -->|yes| CorrectionApply[Update/delete fact<br/>trace + runtime log]
-    CorrectionMatch -->|no| CorrectionClarify[Clarify reply<br/>pending IDs in RAM]
+    CorrectionMatch -->|no| CorrectionClarify[Clarify reply<br/>durable pending IDs in SQLite]
     CorrectionPending --> CorrectionPendingMatch{ID thuộc pending choices?}
     CorrectionPendingMatch -->|yes| CorrectionApply
     CorrectionPendingMatch -->|no| CorrectionClarify
@@ -256,7 +256,7 @@ flowchart TB
     Search --> Confidence{Match đủ chắc?}
     Confidence -->|yes, correct| Update[Update fact có trace<br/>episode read-only in V1]
     Confidence -->|yes, forget| Delete[Delete fact có trace<br/>episode read-only in V1]
-    Confidence -->|no| Clarify[Hỏi lại user, lưu pending IDs trong RAM]
+    Confidence -->|no| Clarify[Hỏi lại user, lưu pending IDs trong SQLite]
     Pending --> Validate{ID thuộc pending choices?}
     Validate -->|yes, correct| Update
     Validate -->|yes, forget| Delete
@@ -278,10 +278,26 @@ trước, rồi mới update/delete có trace. Decision Model ở correction gat
 intent/query/replacement; Python runtime mới validate target và mutate SQLite.
 Precheck ở đầu luồng giữ `current_prompt` làm bằng chứng chính: nếu prompt không có
 tín hiệu sửa/xóa/quên và không phải reply chọn pending fact ID, runtime bỏ qua
-correction gate để recent history cũ không kéo sai intent. Phase 5 V1 hiện đủ làm
-baseline tạm cho chat memory local; khi Loop/tool slot trưởng thành, phần confirm
-target và mutate memory nên chuyển thành workflow/tool có state bền thay vì pending
-RAM trong runtime.
+correction gate để recent history cũ không kéo sai intent. Pending lựa chọn fact ID
+được lưu bền trong SQLite với TTL 15 phút, nên follow-up kiểu `fact #8 nhé` vẫn
+resolve được sau khi runtime/dashboard restart. Phase 5 V1 hiện đủ làm baseline tạm
+cho chat memory local; khi Loop/tool slot trưởng thành, phần confirm target và
+mutate memory nên chuyển tiếp thành workflow/tool rõ contract hơn thay vì mở rộng
+thêm logic chat ad-hoc.
+
+Phase 4A của Loop đã thêm một đường thử nghiệm default-off: khi bật
+`NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, correction prompt trực tiếp đi qua
+`MemoryCorrectionLoopWorkflow` sau correction gate. Loop dùng `search_facts`,
+`update_fact`, `delete_fact` để xử lý target rõ, hỏi lại khi match mơ hồ hoặc
+thiếu replacement, và fallback về V1 nếu loop lỗi. Follow-up chỉ chọn pending
+fact ID vẫn đi qua facade V1 để giữ hành vi live-test hiện tại ổn định, nhưng
+pending state đã được lưu trong bảng `memory_correction_pending`.
+Nếu Decision Model nhận đúng intent nhưng bỏ trống `query`, runtime trích target
+từ prompt kiểu `quên fact ...` / `sửa fact ...`. Loop chỉ tự chọn một fact khi
+query đủ cụ thể và một candidate vượt trội; query ngắn hoặc cùng điểm vẫn hỏi
+lại để tránh xóa nhầm. Trước khi hỏi lại, Loop còn lọc candidate quá yếu: nếu
+search chỉ khớp các từ chung như `thích` nhưng không khớp nội dung đặc trưng của
+target, kết quả được coi là `no_fact_match` thay vì bắt user chọn ID.
 
 ## 6.5 Target Flow: Generic Loop / Tool Workflow
 
@@ -289,9 +305,9 @@ RAM trong runtime.
 flowchart TB
     Graph[ChatReplyGraph] --> NeedTool{Cần workflow nhiều bước?}
     NeedTool -->|no| Normal[Fast/Deep/local flow hien tai]
-    NeedTool -->|yes| Loop[Loop Runtime planned]
-    Loop --> Controller[Controller<br/>Decision Model / JSON prompt / future tool-use]
-    Controller --> Registry[ToolRegistry planned]
+    NeedTool -->|yes| Loop[Loop Runtime]
+    Loop --> Controller[Controller<br/>Python V0 / Decision Model / future tool-use]
+    Controller --> Registry[ToolRegistry]
     Registry --> MemoryTools[Memory tools<br/>search/list/update/delete facts]
     Registry --> JiraTools[Jira/business tools future]
     MemoryTools --> Store[(SQLite memory)]
@@ -303,19 +319,22 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Graph,Normal,Store,Final,Trace done;
-    class Loop,Controller,Registry,MemoryTools,JiraTools planned;
+    class Graph,Normal,Loop,Controller,Registry,MemoryTools,Store,Final,Trace done;
+    class JiraTools planned;
     class External boundary;
 ```
 
 Loop core V0 đã có trong `niko/loop/`, và fact tool adapters đã có trong
-`niko/memory/loop_tools.py`. Chúng vẫn chưa được nối vào luồng chat hoặc
-correction V1. Tài liệu triển khai nằm ở `docs/loop/architecture.md` và checklist
-ở `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
-thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow:
-controller chọn search/list/update/delete, Python validate target rồi mới mutate
-SQLite. Cùng runtime Loop đó sẽ mở sang Jira/business tools nhưng không trộn dữ
-liệu Jira vào chat memory SQLite mặc định.
+`niko/memory/loop_tools.py`. Bridge correction V0 default-off đã nối các tool này
+vào correction prompt trực tiếp. Pending fact-ID follow-up hiện đã có state bền
+trong SQLite, nhưng phần điều phối vẫn là facade V1 chứ chưa phải tool router tổng
+quát cho chat. Tài liệu triển khai nằm ở
+`docs/loop/architecture.md` và checklist ở
+`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
+thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow có
+state rõ contract hơn: controller chọn search/list/update/delete, Python validate
+target rồi mới mutate SQLite. Cùng runtime Loop đó sẽ mở sang Jira/business tools nhưng
+không trộn dữ liệu Jira vào chat memory SQLite mặc định.
 
 ## 7. Các Lớp Dữ Liệu
 
@@ -351,7 +370,7 @@ cho consolidation. Long-term memory hiện nằm ở `facts` và `episodes`.
 | 2 | Retrieval gate cho Deep | done, live-verified, default-off |
 | 3 | Unicode/query search hardening | done |
 | 4 | Write gate và consolidation | write gate done, manual path live-verified, auto threshold default-off done, summarizer planned |
-| 5 | Correction/forget qua chat/dashboard | V1 temporary, delete/update/ambiguous/precheck skip live-verified |
+| 5 | Correction/forget qua chat/dashboard | V1 temporary, delete/update/ambiguous/precheck skip live-verified; Loop V0 default-off live-tested; ambiguous follow-up có pending SQLite TTL 15 phút |
 | 6 | Working memory rõ: recent/current/long-term | done v1 |
 | 7 | Eval riêng cho memory | done v1: deterministic eval scenarios + unit tests |
 

@@ -67,19 +67,69 @@ Trạng thái 2026-10-08:
 Mục đích: đưa luồng sửa/xóa fact đang tạm trong Phase 5 V1 sang Loop nhưng không
 làm mất hành vi đã live-test ổn.
 
-- [ ] Route correction prompt vào Loop memory workflow.
-- [ ] Giữ precheck để neutral prompt không inherit correction context cũ.
-- [ ] Ambiguous fact flow dùng Loop result/state thay vì pending RAM thuần.
-- [ ] Có fallback về `MemoryCorrectionWorkflow` khi Loop lỗi trong giai đoạn đầu.
-- [ ] Live test delete ambiguous fact.
-- [ ] Live test update fact thiếu replacement.
-- [ ] Live test readonly inventory không bị coi là correction.
+- [x] Route correction prompt trực tiếp vào Loop memory workflow khi bật
+      `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`.
+- [x] Giữ precheck để neutral prompt không inherit correction context cũ.
+- [x] Ambiguous fact follow-up dùng durable pending state thay vì pending RAM thuần.
+- [x] Có fallback về `MemoryCorrectionWorkflow` khi Loop lỗi trong giai đoạn đầu.
+- [x] Thêm config dashboard cho `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0`.
+- [x] Unit test delete fact rõ target qua Loop.
+- [x] Unit test update fact rõ target qua Loop.
+- [x] Unit test thiếu replacement và ambiguous target không mutate DB.
+- [x] Unit test loop lỗi fallback về V1.
+- [x] Live test delete ambiguous fact.
+- [x] Unit test delete no-match không được hỏi chọn ID từ weak matches.
+- [x] Live retest delete no-match sau relevance filter.
+- [x] Live test update unique có replacement.
+- [x] Live test update fact thiếu replacement.
+- [x] Live test readonly inventory không bị coi là correction.
 
 Tiêu chí hoàn thành:
 
 - Bot vẫn hỏi lại khi target mơ hồ.
 - Bot chỉ update/delete khi ID/action/replacement hợp lệ.
 - Trace đọc được toàn bộ quyết định và tool call.
+
+Trạng thái 2026-10-08:
+
+- Đã xong Phase 4A default-off. Direct correction prompt có thể chạy qua
+  `MemoryCorrectionLoopWorkflow`, dùng LoopRuntime và fact tools, rồi trả kết
+  quả về facade V1.
+- Live test unique delete phát hiện Nimble có thể trả intent `forget_memory`
+  nhưng bỏ trống `query`, làm search theo cả prompt và match nhiều fact
+  `checklist`. Đã thêm fallback trích query từ prompt sửa/xóa và ranking bảo thủ
+  trong Loop: query đủ cụ thể như `anh thích checklist màu xanh` chọn fact vượt
+  trội; query ngắn như `checklist` vẫn hỏi lại.
+- Live test delete ambiguous thật đã pass: query ngắn `checklist` làm bot hỏi lại
+  danh sách fact, follow-up `fact #...` được pending V1 xóa đúng ID.
+- Live test delete no-match phát hiện search trả weak matches chỉ vì chung từ
+  chung như `thích`; bot đã hỏi chọn ID dù prompt `anh thích bánh màu cầu vồng`
+  không có fact thật. Đã thêm relevance filter trong Loop: candidate chỉ được
+  giữ nếu khớp đủ từ nội dung đặc trưng; match yếu bị coi là `no_fact_match`.
+  Đã thêm unit regression; live retest sau sửa đã pass với
+  `memory_correction_clarify` reason `no_fact_match`.
+- Live test update unique có replacement đã pass: prompt `sửa fact anh thích
+  checklist màu đỏ thành anh thích checklist màu tím` đi qua `search_facts`,
+  chọn fact #12, gọi `update_fact`, ghi `memory_correction_applied` và SQLite
+  lưu `previous_content` trong meta.
+- Live test update thiếu replacement đã pass: prompt `sửa fact checklist màu tím`
+  đi qua `search_facts`, tìm fact #12 nhưng không gọi `update_fact`; Loop trả
+  clarify `missing_replacement` và không ghi `memory_correction_applied`.
+- Live test readonly inventory đã pass: prompt `hiện tại em có những fact gì về
+  anh` bị correction precheck skip với reason `no_explicit_correction_signal`,
+  sau đó retrieval gate dùng `fact_mode=list`; không có `update_fact` hoặc
+  `delete_fact`.
+- Phase 4B đã thêm bảng `memory_correction_pending`: ambiguous follow-up lưu
+  `conversation_id`, action, query, replacement, candidate fact IDs, trace ID và TTL
+  15 phút. Reply chỉ chọn `fact #...` có thể resolve sau khi tạo `MemoryRuntime`
+  mới; ID ngoài danh sách không mutate DB; pending hết hạn bị clear và có trace
+  `memory_correction_pending_expired`.
+- Unit test Phase 4B đã thêm cho durable create/resolve, invalid ID, expired
+  pending và ambiguous update có replacement. Targeted run:
+  `rtk python -m pytest tests/test_memory_correction_loop.py tests/test_memory_store.py -q`
+  -> `67 passed`.
+- Cần live test sau khi bật flag trên dashboard để xác nhận trace/dashboard đọc
+  rõ `loop_*` events trong môi trường Telegram thật.
 
 ## Phase 5: Dashboard And Observability
 

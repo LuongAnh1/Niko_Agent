@@ -173,7 +173,9 @@ Memory correction chạy trước local/fast/deep route thông thường khi
 `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`. Đây là Phase 5 V1 tạm thời: Nimble
 chỉ chọn intent `none/correct_memory/forget_memory`, còn Python runtime search
 facts, hỏi lại khi mơ hồ, validate `fact #...` trong pending choices và mới
-update/delete SQLite có trace. Episode vẫn read-only qua chat ở V1.
+update/delete SQLite có trace. Pending choices được lưu trong SQLite với TTL 15
+phút để lượt chọn fact có thể sống qua restart runtime. Episode vẫn read-only qua
+chat ở V1.
 
 Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
 
