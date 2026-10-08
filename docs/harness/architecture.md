@@ -172,14 +172,14 @@ Phase đầu dùng Python-controlled loop vì runtime hiện gọi Claude qua
 Sau khi thêm memory correction loop và Jira issue workflow, repo đã bắt đầu tách
 lựa chọn workflow cấp turn ra khỏi `ChatReplyGraph`: Phase 4 đưa Jira selection
 lên `NikoApp`, Phase 5 khóa memory correction selection ở `NikoApp`. Target refactor đã
-được khảo sát trong `docs/plans/2026-10-08-niko-core-split-survey.md`: giữ
+được khảo sát trong `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`: giữ
 `bots/<gateway>/` cho platform IO, thêm gateway runner chung, thêm app assembly
 root để ráp memory/tools/graphs/runtime, rồi đưa lựa chọn workflow cấp turn ra
 khỏi `ChatReplyGraph` khi có logic thật sự cần tách.
 
 Phương hướng triển khai theo phase nằm ở
-`docs/plans/2026-10-08-niko-core-split-implementation-plan.md`; checklist để tick
-từng phần nằm ở `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
+`docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`; checklist để tick
+từng phần nằm ở `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 Trạng thái hiện tại: Phase 1 đã có package `niko/gateway/` với `GatewayRunner`
 mỏng. Phase 2 đã có `niko/app.py` với `NikoApp` assembly root. Phase 3 được

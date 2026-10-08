@@ -139,11 +139,11 @@ is still a hand-written business graph for local/Fast/Deep chat, not a reusable
 Node/Edge/Workflow engine like Waku's graph runtime. The target split for
 gateway runner, app assembly, graph workflows, Loop, and tools started with
 `niko/gateway/` and `niko/app.py`. The broader target is documented in
-`docs/plans/2026-10-08-niko-core-split-survey.md`; do not add a separate
+`docs/plans/core-split/2026-10-08-niko-core-split-survey.md`; do not add a separate
 orchestrator layer unless a future workflow owner needs real behavior beyond
 `NikoApp`. The phase-by-phase implementation direction now lives in
-`docs/plans/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
-tracking in `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
+`docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
+tracking in `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 ## Chat Flow
 
@@ -172,7 +172,11 @@ In `two_agent` mode:
   `NIKO_FAST_AGENT_COMMAND` to generate the quick reply.
 - Nimble decision `send_to_deep` queues a Deep background job and sends a wait
   reply.
-- Deep receives memory context only when memory retrieval is enabled.
+- Fast triage/Fast reply receive a short recent `chat_log` window as working
+  memory so context-dependent follow-ups are not answered blindly. This is not
+  long-term facts/episodes retrieval.
+- Deep receives working memory plus long-term memory context according to memory
+  retrieval settings.
 - When `NIKO_JIRA_TOOLS_ENABLED=1`, `NikoApp` can route prompts with Jira issue
   keys through `niko/graphs/jira_issue/` before normal chat. The workflow fetches
   fixture data with Loop, adds evidence context to Deep, and returns a safe
@@ -185,8 +189,12 @@ In `two_agent` mode:
 - If Deep is already busy in the same conversation, new messages are appended to
   the active job followups and the bot returns `busy_reply`.
 
-Nimble triage intentionally receives only prompt and light gateway metadata, not
-memory context. This keeps route decisions clean and fast. Legacy Fable JSON
+Nimble triage receives the current prompt, light gateway metadata, and a short
+`recent_turns` working-memory window. It should choose `send_to_deep` when the
+turn depends on missing/uncertain context, tools, Jira, code, memory, or careful
+analysis. If Nimble still chooses `reply_now` with confidence below
+`NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, `ChatReplyGraph` overrides that
+choice to `send_to_deep` so Fast does not answer blindly. Legacy Fable JSON
 triage still exists as a fallback path when the decision model is disabled, but
 new triage work should prefer `bots/decision_model/`.
 
@@ -203,9 +211,9 @@ Important boundaries:
 
 - `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
   operational log that can later feed analysis.
-- Working memory is ephemeral: Deep can receive a short recent conversation
-  window rebuilt from `chat_log` for the current turn, but that window is not
-  Semantic/Episodic long-term memory.
+- Working memory is ephemeral: Fast triage/reply and Deep can receive a short
+  recent conversation window rebuilt from `chat_log` for the current turn, but
+  that window is not Semantic/Episodic long-term memory.
 - Semantic extraction is not mature yet. Facts are mainly added through Ops/API
   and explicit consolidation, either manual `Run once` or default-off auto; free-form
   summarizer extraction is not built yet.
@@ -320,26 +328,31 @@ bot process already owns that lock.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
 - `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
-- `docs/plans/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
+- `docs/plans/README.md`: grouped index for short-term implementation plans and
+  checklists under memory, loop, Jira, core split, and maintenance.
+- `docs/plans/memory/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
   implementation plan using the local Decision Model.
-- `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
+- `docs/plans/memory/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
   checklist and live verification status for chat memory work.
-- `docs/plans/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
+- `docs/plans/memory/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
   checklist for current Phase 6/7 memory flow verification.
-- `docs/plans/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
+- `docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
   for the generic Loop runtime.
-- `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
+- `docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
   for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
-- `docs/plans/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
+- `docs/plans/jira/2026-10-08-jira-live-test-checklist.md`: live Telegram/dashboard
+  checklist for Jira runtime tools, fixture no-data behavior, gate prompts, and
+  read-only boundary.
+- `docs/plans/maintenance/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
   keeping Markdown docs and source file comments aligned with the current repo state.
-- `docs/plans/2026-10-08-niko-core-split-survey.md`: survey plan for separating
+- `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`: survey plan for separating
   gateway runner, app assembly, graph workflow selection, Loop, and tools.
-- `docs/plans/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
+- `docs/plans/core-split/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
   the core/gateway/graph split survey and docs sync.
-- `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
+- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
   implementation direction for actually refactoring gateway runner, app assembly,
   graph workflow selection, Jira workflow selection, and memory correction selection.
-- `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
+- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
   to tick after each core/gateway/graph split phase is implemented and verified.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
@@ -377,6 +390,7 @@ NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
 NIKO_DECISION_MODEL_NAME=nimble
 NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
 NIKO_DECISION_MODEL_KEEP_ALIVE=-1
+NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD=0.65
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_STATE_DIR=niko/.runtime
 NIKO_TRACE_ENABLED=1
@@ -452,7 +466,7 @@ not relevant.
   workflows live under `niko/graphs/` and reusable loop mechanics live under
   `niko/loop/`.
 - Do not move additional workflow selection responsibilities without following
-  `docs/plans/2026-10-08-niko-core-split-implementation-plan.md` and updating
+  `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md` and updating
   its checklist.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the
   Telegram gateway. Nimble is for route/label decisions, not free-form reply

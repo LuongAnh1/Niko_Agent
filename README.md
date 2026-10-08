@@ -208,8 +208,10 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 - [Niko Loop Architecture](docs/loop/architecture.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo/demo-guide.md)
-- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)
-- [Kế hoạch Niko Loop 2026-10-08](docs/plans/2026-10-08-niko-loop-implementation-plan.md)
+- [Mục lục kế hoạch triển khai](docs/plans/README.md)
+- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/memory/2026-10-07-chat-memory-decision-model.md)
+- [Kế hoạch Niko Loop 2026-10-08](docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md)
+- [Checklist Live Test Jira Runtime Tools 2026-10-08](docs/plans/jira/2026-10-08-jira-live-test-checklist.md)
 - [Memory Roadmap](docs/memory/roadmap.md)
 
 ## Ranh Giới Baseline
@@ -228,7 +230,11 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
   và Jira issue context flow default-off trong `niko/graphs/jira_issue/`.
   Jira Decision Gate cũng default-off và chỉ chọn gate/route, không tự gọi tool.
   Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira flow.
-- Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
+- Deep prompt đã có recent working memory ngắn hạn. Fast triage/Fast reply cũng
+  nhận recent chat window để hiểu follow-up gần, nhưng không tự search long-term
+  facts/episodes. Nếu Fast triage chọn `reply_now` với confidence thấp hơn
+  `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, graph sẽ đẩy sang Deep. Retrieval
+  dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.
 - Lakehouse/Knowledge Graph là lane memory backend nghiệp vụ riêng cho Jira/tài liệu; nó không phải nơi lưu mặc định chat Telegram, và Niko chỉ nên nối vào khi cần context business.

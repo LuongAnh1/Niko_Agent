@@ -14,8 +14,9 @@ Mục đích: chốt tài liệu nào là nguồn đọc chính, tài liệu nà
 - [x] `README.md` mô tả đúng dashboard-first config, Ollama/Nimble, Loop core V0, durable pending, Jira issue context flow và Jira Decision Gate default-off.
 - [x] `AGENTS.md` mô tả đúng boundary hiện tại cho `niko/loop/`, `niko/tools/`, `niko/memory/correction_workflow.py`, `niko/memory/correction_loop.py`, `niko/graphs/jira_issue/` và `bots/decision_model/jira.py`.
 - [x] `docs/harness/memory-live-verification.md` là nhật ký live verification canonical.
-- [x] `docs/plans/2026-10-07-chat-memory-live-test-checklist.md` được giữ như historical, không còn là checklist hiện tại.
-- [x] `docs/plans/README.md` liệt kê đủ plan/checklist mới của Loop và checklist đồng bộ docs.
+- [x] `docs/plans/memory/2026-10-07-chat-memory-live-test-checklist.md` được giữ như historical, không còn là checklist hiện tại.
+- [x] `docs/plans/README.md` đã chia mục lục theo `memory/`, `loop/`, `jira/`, `core-split/`, `maintenance/`.
+- [x] `docs/plans/jira/2026-10-08-jira-live-test-checklist.md` ghi rõ các live test còn cần khóa cho Jira runtime tools.
 
 ## 2. Memory Và Loop Docs
 

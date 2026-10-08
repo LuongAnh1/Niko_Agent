@@ -1,7 +1,7 @@
 # Checklist Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
+Tài liệu gốc: `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`
 Trạng thái: Phase 6 đã hoàn tất dashboard/docs/runtime-log cleanup cho core split
 
 ## Phase 0: Khóa Tài Liệu Triển Khai

@@ -4,14 +4,14 @@ Ngày cập nhật: 2026-10-08
 Phạm vi: chat memory local của Niko Agent, single-user v1
 
 Tài liệu này là bản sơ đồ kiểm soát luồng memory. Nó gom lại trạng thái hiện tại
-và kiến trúc muốn xây theo kế hoạch trong `docs/plans/2026-10-07-chat-memory-decision-model.md`.
+và kiến trúc muốn xây theo kế hoạch trong `docs/plans/memory/2026-10-07-chat-memory-decision-model.md`.
 Mục tiêu là nhìn vào đây để biết dữ liệu đi qua đâu, quyết định nào do model nhỏ
 phụ trách, phần nào đã có, phần nào còn là phase sau.
 
 Nhật ký live verification chính nằm ở `docs/harness/memory-live-verification.md`.
 Checklist Phase 6/7 ngày 2026-10-07 hiện được giữ như bản historical để đối chiếu
 expected/result cũ; checklist Loop hiện tại nằm ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`.
+`docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`.
 
 ## Legend
 
@@ -162,7 +162,11 @@ sequenceDiagram
 Nguyên tắc: retrieval gate lỗi thì fail-open, vì bỏ lỡ memory cần thiết thường tệ
 hơn việc retrieve hơi dư. Khi gate trả `skip`, runtime chỉ bỏ qua long-term
 `facts/episodes`; recent conversation window vẫn có thể được inject như working memory
-ngắn hạn cho Deep. Fast triage không nhận memory context để giữ route JSON sạch.
+ngắn hạn cho Deep. Fast triage/Fast reply cũng nhận một `recent_turns` ngắn để
+không trả lời mù ngữ cảnh, nhưng phần này chỉ là chat window tạm thời, không phải
+long-term facts/episodes và không tự search store. Khi Fast triage chọn
+`reply_now` với confidence thấp hơn `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`,
+graph ép sang Deep.
 
 Inventory không còn bypass gate bằng keyword Python. Câu kiểu "đang lưu fact nào"
 vẫn đi qua Decision Model; model chọn `list_facts`, `recent_episodes`, hoặc trả
@@ -340,7 +344,7 @@ issue key và gọi tool. Pending fact-ID follow-up hiện đã có state bền
 trong SQLite, nhưng phần điều phối memory correction vẫn là facade V1 chứ chưa phải tool router tổng
 quát cho chat. Tài liệu triển khai nằm ở
 `docs/loop/architecture.md` và checklist ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
+`docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
 thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow có
 state rõ contract hơn: controller chọn search/list/update/delete, Python validate
 target rồi mới mutate SQLite. Jira/business tools hiện vẫn read-only và không trộn dữ liệu

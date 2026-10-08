@@ -15,8 +15,10 @@ from typing import Callable
 
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger, TraceTurn, default_trace_logger
+from niko.memory.context import memory_recent_char_budget, memory_recent_turns
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore, default_memory_store
+from niko.memory.working_memory import recent_chat_window
 import niko.graphs.chat_reply.prompts as prompts
 from niko.graphs.chat_reply.router import (
     AgentRoute,
@@ -515,13 +517,15 @@ class ChatReplyGraph:
             return route.kind
 
         if route.kind == ROUTE_FAST_AGENT:
+            recent_turns = self._recent_turns_for_fast(conversation_id, prompt)
             self.trace_logger.event(trace_turn.turn_id, "fast_triage_started", {})
             self._notify_working_async(notify_working, trace_turn.turn_id)
-            decision = prompts.try_call_fast_agent_decision(prompt, gateway_message)
+            decision = prompts.try_call_fast_agent_decision(prompt, gateway_message, recent_turns=recent_turns)
             if decision:
                 decision_meta = {
                     "decision": decision.route,
                     "has_reply": bool(decision.reply),
+                    "recent_turn_count": len(recent_turns),
                 }
                 if decision.provider:
                     decision_meta["provider"] = decision.provider
@@ -545,12 +549,38 @@ class ChatReplyGraph:
                     format_fast_triage_log(decision),
                     data={**decision_meta, "trace_id": trace_turn.turn_id},
                 )
+                if prompts.fast_triage_reply_confidence_too_low(decision):
+                    threshold = prompts.fast_triage_reply_confidence_threshold()
+                    guardrail_meta = {
+                        "decision": decision.route,
+                        "confidence": decision.confidence,
+                        "threshold": threshold,
+                        "reason": "reply_confidence_below_threshold",
+                        "recent_turn_count": len(recent_turns),
+                    }
+                    self.trace_logger.event(trace_turn.turn_id, "fast_triage_guardrail_to_deep", guardrail_meta)
+                    runtime_log(
+                        "fast_triage_guardrail_to_deep",
+                        "Fast triage chon reply_now nhung confidence thap, chuyen sang deep agent.",
+                        data={**guardrail_meta, "trace_id": trace_turn.turn_id},
+                    )
+                    decision = prompts.FastAgentDecision(
+                        route=prompts.FAST_DECISION_SEND_TO_DEEP,
+                        reply=prompts.build_deep_wait_reply(),
+                        confidence=decision.confidence,
+                        label=decision.label,
+                        probabilities=decision.probabilities,
+                        provider=decision.provider,
+                        model=decision.model,
+                        usage=decision.usage,
+                    )
             if decision and decision.route == prompts.FAST_DECISION_REPLY_NOW:
                 # Nimble chỉ quyết định route; nếu không có text thì Fable sinh reply nhanh.
                 fast_reply = decision.reply or prompts.try_call_fast_agent(
                     prompt,
                     gateway_message,
                     task=prompts.FAST_AGENT_TASK_REPLY,
+                    recent_turns=recent_turns,
                 )
                 if not fast_reply:
                     runtime_log(
@@ -607,6 +637,20 @@ class ChatReplyGraph:
             trace_id=trace_turn.turn_id,
         )
         return route.kind
+
+    def _recent_turns_for_fast(self, conversation_id: str, prompt: str) -> list[dict[str, str]]:
+        """Working memory ngắn cho Fast triage/reply; không nạp long-term facts."""
+        try:
+            return recent_chat_window(
+                self.memory_store,
+                conversation_id,
+                prompt,
+                limit=min(memory_recent_turns(), 6),
+                char_budget=min(memory_recent_char_budget(), 1800),
+                per_turn_limit=500,
+            )
+        except Exception:
+            return []
 
     def _start_trace_turn(self, conversation_id: str, prompt: str, gateway_message) -> TraceTurn:
         return self.trace_logger.turn_start(conversation_id, gateway_message.user.key, prompt, gateway_message)

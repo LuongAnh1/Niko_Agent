@@ -91,7 +91,12 @@ SQLite store. Runtime có một guardrail hẹp sau model: nếu model đã mở
 ràng, retrieval layer ép mode thực thi về `fact_mode=list` hoặc
 `episode_mode=recent` để tránh search rỗng kiểu `search_facts("fact")`.
 
-Fast triage không nhận memory context để giữ JSON sạch.
+Fast triage/Fast reply nhận một working memory ngắn (`recent_turns`) lấy từ
+`chat_log` để xử lý follow-up gần như "cái vừa rồi". Phần này không phải
+long-term facts/episodes và không tự search store; nếu recent context không đủ
+chắc, triage phải chọn `send_to_deep`. Reply nhanh còn có guardrail confidence:
+`reply_now` dưới `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD` sẽ bị đẩy sang
+Deep.
 
 Recent conversation là working memory ngắn hạn, không phải long-term facts/episodes.
 Nó được dựng lại từ `chat_log` theo `conversation_id`, bỏ chính incoming prompt

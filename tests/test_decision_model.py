@@ -63,6 +63,7 @@ from bots.decision_model.triage import (
     ROUTE_REPLY_NOW,
     ROUTE_SEND_TO_DEEP,
     build_triage_criteria,
+    build_triage_state,
     normalize_route_choice,
 )
 
@@ -139,6 +140,21 @@ class DecisionModelTests(unittest.TestCase):
     def test_route_choice_aliases(self):
         self.assertEqual(normalize_route_choice("reply_now"), ROUTE_REPLY_NOW)
         self.assertEqual(normalize_route_choice("handoff"), ROUTE_SEND_TO_DEEP)
+
+    def test_triage_state_includes_recent_turns(self):
+        state = build_triage_state(
+            "cái vừa rồi có đang bị block không em?",
+            recent_turns=[
+                {"role": "user", "content": "phân tích NIKO-101 giúp anh", "route": "incoming"},
+                {"role": "assistant", "content": "Dạ em đã lấy context Jira của NIKO-101.", "route": "jira_issue_wait"},
+            ],
+        )
+
+        self.assertEqual(state["prompt"], "cái vừa rồi có đang bị block không em?")
+        self.assertEqual(len(state["recent_turns"]), 2)
+        self.assertEqual(state["recent_turns"][0]["role"], "user")
+        self.assertIn("NIKO-101", state["recent_turns"][0]["content"])
+        self.assertEqual(state["recent_turns"][1]["route"], "jira_issue_wait")
 
     def test_jira_gate_choice_aliases_and_criteria(self):
         criteria = build_jira_gate_criteria()

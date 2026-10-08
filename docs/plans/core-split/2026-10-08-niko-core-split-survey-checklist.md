@@ -1,7 +1,7 @@
 # Checklist Khảo Sát Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-survey.md`
+Tài liệu gốc: `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`
 Phạm vi: khảo sát, đối chiếu, suy luận và cập nhật tài liệu; chưa refactor code.
 
 Ghi chú sau triển khai 2026-10-08: đề xuất `niko/orchestration/` đã được review
@@ -69,8 +69,8 @@ khai và test từng phần.
 Mục đích: các docs hiện tại biết có plan tách mới, nhưng không mô tả nhầm rằng
 code đã được refactor.
 
-- [x] Tạo `docs/plans/2026-10-08-niko-core-split-survey.md`.
-- [x] Tạo `docs/plans/2026-10-08-niko-core-split-survey-checklist.md`.
+- [x] Tạo `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`.
+- [x] Tạo `docs/plans/core-split/2026-10-08-niko-core-split-survey-checklist.md`.
 - [x] Cập nhật `docs/plans/README.md` để liệt kê plan/checklist mới.
 - [x] Cập nhật `docs/harness/architecture.md` với mục target refactor ngắn.
 - [x] Cập nhật `docs/loop/architecture.md` để nói Loop không phải app/gateway

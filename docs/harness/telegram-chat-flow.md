@@ -150,7 +150,14 @@ Nếu người dùng nhắn thêm khi Deep đang chạy, graph trả `busy_reply
 
 ## Memory Trong Flow
 
-Fast triage không nhận memory context để tránh làm hỏng JSON.
+Fast triage và Fast reply hiện nhận một working memory ngắn từ `chat_log`
+(`recent_turns`) để hiểu các câu nối ngữ cảnh như "cái vừa rồi". Phần này chỉ là
+vài lượt chat gần nhất trong cùng conversation, đã truncate, và không phải
+long-term semantic/episodic memory. Fast vẫn không tự search facts/episodes; nếu
+recent context không đủ chắc, triage phải chọn `send_to_deep`. Nếu Nimble vẫn
+chọn `reply_now` nhưng confidence thấp hơn
+`NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, `ChatReplyGraph` override sang
+Deep để tránh Fast trả lời thiếu dữ kiện.
 
 Deep agent nhận memory context khi:
 

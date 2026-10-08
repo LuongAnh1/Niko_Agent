@@ -9,7 +9,7 @@ Tài liệu này nối trạng thái hiện tại của `Niko_Agent` với hư�
   làm nguồn dữ liệu.
 
 Nếu anh muốn xem kế hoạch gần hơn cho memory trong chat/tương tác người dùng,
-đọc thêm [Kế hoạch Chat Memory Decision Model 2026-10-07](../plans/2026-10-07-chat-memory-decision-model.md).
+đọc thêm [Kế hoạch Chat Memory Decision Model 2026-10-07](../plans/memory/2026-10-07-chat-memory-decision-model.md).
 Tài liệu đó tập trung vào cách dùng local Ollama/Nimble như lớp Decision Model cho
 retrieval gate, write gate, consolidation, correction intent, working memory và
 các bước cải tiến chat memory single-user trong Niko.
@@ -46,7 +46,8 @@ Trace JSONL
   turn_end
 ```
 
-Deep agent có thể nhận memory context từ `facts` và `episodes`. Fast triage không nhận memory để giữ JSON sạch.
+Deep agent có thể nhận memory context từ `facts` và `episodes`. Fast triage chỉ nhận
+working memory ngắn từ recent chat, không nhận long-term facts/episodes mặc định.
 
 ## Điểm Mạnh Của Baseline
 

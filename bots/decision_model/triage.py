@@ -16,6 +16,8 @@ from bots.decision_model.client import ChoiceDecision, DecisionModelConfig, syst
 ROUTE_REPLY_NOW = "reply_now"
 ROUTE_SEND_TO_DEEP = "send_to_deep"
 QUESTION_NAME = "route"
+MAX_TRIAGE_RECENT_TURNS = 6
+MAX_TRIAGE_TURN_LENGTH = 500
 
 
 @dataclass(frozen=True)
@@ -35,11 +37,12 @@ class DecisionRoute:
 def decide_fast_route(
     prompt: str,
     gateway_message=None,
+    recent_turns: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
     config: DecisionModelConfig | None = None,
 ) -> DecisionRoute:
     """Gọi Nimble và map label về `reply_now` hoặc `send_to_deep`."""
     decision = systemone_choice(
-        state=build_triage_state(prompt, gateway_message),
+        state=build_triage_state(prompt, gateway_message, recent_turns=recent_turns),
         question_name=QUESTION_NAME,
         instructions=build_triage_instructions(),
         criteria=build_triage_criteria(),
@@ -56,9 +59,16 @@ def decide_fast_route(
     )
 
 
-def build_triage_state(prompt: str, gateway_message=None) -> dict[str, Any]:
-    """State gửi cho Nimble: prompt chính + một ít metadata gateway không nhạy cảm."""
-    state: dict[str, Any] = {"prompt": prompt}
+def build_triage_state(
+    prompt: str,
+    gateway_message=None,
+    recent_turns: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> dict[str, Any]:
+    """State gửi cho Nimble: prompt chính, gateway nhẹ và working memory ngắn."""
+    state: dict[str, Any] = {
+        "prompt": prompt,
+        "recent_turns": [_compact_turn(turn) for turn in list(recent_turns or [])[-MAX_TRIAGE_RECENT_TURNS:]],
+    }
     if gateway_message is None:
         return state
 
@@ -78,11 +88,13 @@ def build_triage_instructions() -> str:
     """Luật triage ngắn gọn, tránh biến Nimble thành agent sinh câu trả lời."""
     return (
         "Classify whether Niko should answer this Telegram message immediately "
-        "or send it to the Deep agent. Choose reply_now only for casual small talk, "
-        "simple everyday questions, or a short response that does not require tools, "
-        "memory, files, code work, planning, or careful analysis. Choose send_to_deep "
-        "for coding, debugging, architecture, project memory, documents, APIs, Jira, "
-        "GitHub, multi-step reasoning, personalized recall, or whenever uncertain."
+        "or send it to the Deep agent. Use recent_turns as short working memory. "
+        "Choose reply_now only for casual small talk, simple everyday questions, "
+        "or a short response that is safe from the current prompt plus recent_turns. "
+        "Choose send_to_deep for coding, debugging, architecture, project memory, "
+        "documents, APIs, Jira, GitHub, multi-step reasoning, personalized recall, "
+        "context-dependent follow-ups that recent_turns do not fully resolve, or "
+        "whenever uncertain."
     )
 
 
@@ -111,6 +123,27 @@ def normalize_route_choice(choice: str) -> str:
         return aliases[normalized]
     except KeyError as exc:
         raise RuntimeError(f"Ollama decision model tra route khong hop le: {choice or '(empty)'}") from exc
+
+
+def _compact_turn(turn: dict[str, Any]) -> dict[str, str]:
+    compact = {
+        "role": str(turn.get("role") or "")[:30],
+        "content": _truncate(str(turn.get("content") or ""), MAX_TRIAGE_TURN_LENGTH),
+    }
+    route = str(turn.get("route") or "")[:60]
+    if route:
+        compact["route"] = route
+    created_at = str(turn.get("created_at") or "")[:40]
+    if created_at:
+        compact["created_at"] = created_at
+    return compact
+
+
+def _truncate(value: str, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 20].rstrip() + "\n...[truncated]"
 
 
 def route_meta(decision: ChoiceDecision | DecisionRoute) -> dict[str, Any]:

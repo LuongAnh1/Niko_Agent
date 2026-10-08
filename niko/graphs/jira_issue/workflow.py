@@ -180,6 +180,12 @@ class JiraIssueAnalysisWorkflow:
             return JiraIssueAnalysisResult(False)
         if not _looks_like_jira_prompt(prompt, recent_issue_keys):
             return JiraIssueAnalysisResult(False)
+        if recent_issue_keys and _references_recent_jira_issue(prompt):
+            issue_key = recent_issue_keys[0]
+            gate = _rule_gate_state(issue_key, recent_issue_keys, reason="recent_issue_reference")
+            _trace_gate(trace_logger, trace_id, gate)
+            _log_jira_gate(gate)
+            return JiraIssueAnalysisResult(True, issue_key=issue_key, issue_keys=[issue_key], gate=gate)
 
         gate: dict[str, Any] = {
             "enabled": True,
@@ -384,7 +390,12 @@ def _configured_max_iterations() -> int:
         return DEFAULT_JIRA_LOOP_MAX_ITERATIONS
 
 
-def _rule_gate_state(issue_key: str, issue_keys: list[str]) -> dict[str, Any]:
+def _rule_gate_state(
+    issue_key: str,
+    issue_keys: list[str],
+    *,
+    reason: str = "issue_key_in_prompt",
+) -> dict[str, Any]:
     return {
         "enabled": True,
         "provider": "python_rule",
@@ -392,9 +403,9 @@ def _rule_gate_state(issue_key: str, issue_keys: list[str]) -> dict[str, Any]:
         "issue_key": issue_key,
         "issue_keys": issue_keys,
         "query": "",
-        "reason": "issue_key_in_prompt",
+        "reason": reason,
         "confidence": None,
-        "label": "issue_key_in_prompt",
+        "label": reason,
         "probabilities": {},
         "model": "",
         "error": "",
@@ -471,12 +482,24 @@ JIRA_SIGNAL_PHRASES = (
 )
 
 
+JIRA_RECENT_REFERENCE_WORDS = {"jira", "issue", "ticket", "task", "bug", "vé", "lỗi"}
+JIRA_RECENT_REFERENCE_PHRASES = ("vừa nãy", "vừa rồi", "lúc nãy", "ban nãy", "trước đó", "đó", "nay", "này")
+
+
 def _looks_like_jira_prompt(prompt: str, recent_issue_keys: list[str]) -> bool:
     if recent_issue_keys and any(phrase in prompt.lower() for phrase in ("vừa nãy", "vừa rồi", "đó", "nay", "này")):
         return True
     lowered = prompt.lower()
     words = {word.strip(".,:;!?`\"'()[]{}") for word in lowered.split()}
     return bool(words & JIRA_SIGNAL_WORDS) or any(phrase in lowered for phrase in JIRA_SIGNAL_PHRASES)
+
+
+def _references_recent_jira_issue(prompt: str) -> bool:
+    lowered = prompt.lower()
+    if not any(phrase in lowered for phrase in JIRA_RECENT_REFERENCE_PHRASES):
+        return False
+    words = {word.strip(".,:;!?`\"'()[]{}") for word in lowered.split()}
+    return bool(words & JIRA_RECENT_REFERENCE_WORDS)
 
 
 def _trace_gate(trace_logger, trace_id: str, gate: dict[str, Any]) -> None:

@@ -195,7 +195,8 @@ Niko hiện đã có:
 - FTS5 nếu có, fallback LIKE.
 - Deep agent được inject memory context.
 - Ollama/Nimble decision model đã dùng cho fast triage, sticker mood, retrieval gate và write gate.
-- Fast triage không nhận memory context để giữ route decision sạch.
+- Fast triage/Fast reply nhận `recent_turns` ngắn từ `chat_log` để hiểu follow-up
+  gần, nhưng không nhận long-term facts/episodes mặc định.
 - Dashboard Memory tab để thêm/xóa fact và xem episodes.
 - V1 đang hợp với giả định single-user: một Niko instance phục vụ một chủ sở hữu
   chính.
@@ -294,7 +295,8 @@ Ranh giới quan trọng:
 4. Retrieval gate lỗi thì fail-open; write/correction/consolidation lỗi thì
    fail-safe, không mất log và không ghi bừa.
 5. Memory nào được agent tự suy ra phải có provenance khác memory user nhập tay.
-6. Fast/Nimble triage vẫn không nhận memory context.
+6. Fast/Nimble triage đã nhận working memory ngắn; phần còn thiếu là eval rộng
+   hơn cho các follow-up phụ thuộc ngữ cảnh.
 7. Mọi quyết định memory phải trace được: gate decision, query, facts/episodes
    retrieved, consolidation result, errors.
 8. Người dùng phải có cách sửa/quên memory.

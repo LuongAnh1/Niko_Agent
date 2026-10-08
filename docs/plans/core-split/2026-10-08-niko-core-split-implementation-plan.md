@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Trạng thái: Phase 6 đã đồng bộ dashboard/docs/runtime log cho boundary NikoApp
-Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
+Tài liệu nền: `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
 

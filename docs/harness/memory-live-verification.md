@@ -229,7 +229,7 @@ thêm.
   `reason=no_explicit_correction_signal`, `recent_turn_count=0`, rồi route thường tiếp tục bằng
   `fast_agent`. Không có `memory_correction_clarify` hay `memory_correction_applied` cho turn này.
 - Đã thêm checklist live riêng cho Phase 6/7 tại
-  `docs/plans/2026-10-07-chat-memory-live-test-checklist.md` để các prompt tiếp theo có expected
+  `docs/plans/memory/2026-10-07-chat-memory-live-test-checklist.md` để các prompt tiếp theo có expected
   trace/log rõ ràng trước khi test.
 - Automated preflight 2026-10-07 trước khi test live tiếp: `rtk proxy git diff --check` pass,
   targeted pytest cho correction/decision/eval/telegram routing pass `78 passed`, full suite pass

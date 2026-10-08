@@ -143,6 +143,13 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "default": "-1",
                 "help": "`-1` giữ model ở lại trong RAM/VRAM sau warmup. Đổi về thời lượng ngắn nếu cần nhường tài nguyên máy.",
             },
+            {
+                "name": "NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD",
+                "label": "Fast reply confidence",
+                "type": "number",
+                "default": "0.65",
+                "help": "Nếu Nimble chọn `reply_now` nhưng confidence thấp hơn ngưỡng này, Niko sẽ đẩy sang Deep thay vì để Fast trả lời thiếu ngữ cảnh.",
+            },
         ],
     },
     {
