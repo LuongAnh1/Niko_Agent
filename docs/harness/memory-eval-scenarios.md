@@ -1,6 +1,6 @@
 # Chat Memory Eval Scenarios
 
-Ngày cập nhật: 2026-10-07
+Ngày cập nhật: 2026-10-08
 Phạm vi: eval nhỏ cho chat memory local của Niko Agent.
 
 Tài liệu này gom các prompt mẫu để kiểm tra memory bằng cách có thể lặp lại,
@@ -14,6 +14,7 @@ không chỉ dựa vào cảm giác khi live test Telegram. Unit test tương �
 - Chứng minh lỗi Ollama/Nimble không làm Deep mất fallback retrieval.
 - Chứng minh write gate có thể bỏ qua lượt inspect/list memory.
 - Chứng minh correction/forget mutate đúng fact và có trace.
+- Chứng minh ambiguous correction follow-up dùng pending SQLite, không phụ thuộc RAM process.
 - Chứng minh query tiếng Việt bỏ dấu vẫn tìm được fact có dấu.
 
 ## Scenario Bắt Buộc
@@ -27,6 +28,8 @@ không chỉ dựa vào cảm giác khi live test Telegram. Unit test tương �
 | M-05 | Write discard | `hiện tại em nhớ fact nào?` | Write gate trả `discard` | Không tạo episode mới, trace có `memory_write_decision=discard` |
 | M-06 | Correction forget | `Niko, quên fact anh thích checklist màu xanh` | Có một fact khớp duy nhất | Xóa đúng fact, trace có `memory_correction_applied` |
 | M-07 | Vietnamese search | `so thich checklist muc dich` | Fact có dấu tiếng Việt | Search trả đúng fact |
+| M-08 | Durable pending | `Niko, quên fact checklist` rồi restart bot và trả lời `fact #...` | Có nhiều fact checklist; correction loop bật | Pending đọc lại từ SQLite, ID hợp lệ mutate đúng fact, trace có `memory_correction_pending_resolved` |
+| M-09 | Pending guardrail | Trả lời `fact #199 nhé` hoặc để pending hết hạn rồi trả lời `fact #...` | Có pending đang chờ nhưng ID không hợp lệ hoặc hết hạn | Không mutate DB; trace có `pending_fact_id_not_offered` hoặc `memory_correction_pending_expired` |
 
 ## Live Telegram Smoke Test
 

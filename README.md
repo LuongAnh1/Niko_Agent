@@ -25,18 +25,23 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 
 ```text
 bots/telegram/                  # Telegram gateway
-bots/decision_model/            # Ollama/Nimble decision scripts cho triage, sticker, memory gates
+bots/decision_model/            # Ollama/Nimble decision scripts cho triage, sticker, memory/Jira gates
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
+niko/graphs/jira_issue/          # Jira issue context flow V0 qua Loop tools
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
+niko/loop/                       # Loop core V0: ToolRegistry, LoopRuntime, observer
 niko/memory/store.py             # SQLite memory store
 niko/memory/runtime.py           # Khung điều phối retrieval/write/correction/consolidation
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/memory/working_memory.py    # Recent conversation window cho Deep/correction
 niko/memory/correction_workflow.py # Workflow sửa/xóa fact qua chat
+niko/memory/correction_loop.py   # Bridge correction default-off qua LoopRuntime + fact tools
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
+niko/tools/memory/facts.py       # Fact tool adapters cho Loop core V0
+niko/tools/jira/issues.py        # Jira fixture tools read-only cho Loop core V0
 niko/ops/                       # Mini Niko Ops dashboard
   dashboard.py                   # HTTP server/entrypoint mỏng
   bots.py                        # Start/stop Telegram Bot, warmup/stop Decision Model
@@ -160,6 +165,10 @@ Các kịch bản demo nhanh:
 - Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
 - Yêu cầu Niko quên/sửa fact test: correction gate hỏi lại khi mơ hồ và chỉ update/delete khi đã rõ ID.
+- Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: graph dùng Jira Loop
+  tools đọc fixture, đưa context có evidence sang Deep và hiện Loop Steps trong Traces.
+- Bật thêm `NIKO_JIRA_DECISION_GATE_ENABLED=1` để Nimble xử lý prompt Jira mơ hồ
+  như `xem ticket vừa nãy`; issue key rõ vẫn đi rule Python cho nhanh và chắc.
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`,
   `memory_gate_decision`, `memory_write_decision`, `memory_correction_decision`, `turn_end`.
 - Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
@@ -172,9 +181,11 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 - [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
 - [Harness Memory & Ops](docs/harness/memory-ops.md)
 - [Chat Memory Eval Scenarios](docs/harness/memory-eval-scenarios.md)
+- [Niko Loop Architecture](docs/loop/architecture.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo/demo-guide.md)
 - [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)
+- [Kế hoạch Niko Loop 2026-10-08](docs/plans/2026-10-08-niko-loop-implementation-plan.md)
 - [Memory Roadmap](docs/memory/roadmap.md)
 
 ## Ranh Giới Baseline
@@ -183,7 +194,16 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit consolidation, gồm manual `Run once` và auto default-off.
 - Auto consolidation default-off; khi bật, nó chỉ chạy sau complete exchange và vẫn dùng guardrail lỗi classifier thì không mark rows.
-- Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
+- Memory correction qua chat vẫn mặc định dùng V1 tạm thời. Nếu bật
+  `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, correction prompt trực tiếp có thể
+  chạy qua LoopRuntime + fact tools; lỗi loop fallback về V1. Pending ambiguous
+  fact-ID vẫn đi qua facade V1, nhưng state chờ chọn fact đã lưu trong SQLite với
+  TTL 15 phút để sống qua restart runtime.
+- Loop tổng quát đã có core V0 độc lập trong `niko/loop/`, fact tool adapters
+  trong `niko/tools/memory/facts.py`, Jira fixture tools trong `niko/tools/jira/`
+  và Jira issue context flow default-off trong `niko/graphs/jira_issue/`.
+  Jira Decision Gate cũng default-off và chỉ chọn gate/route, không tự gọi tool.
+  Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira flow.
 - Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

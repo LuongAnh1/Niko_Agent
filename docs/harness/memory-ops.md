@@ -14,6 +14,10 @@ Kịch bản eval deterministic nằm ở [Chat Memory Eval Scenarios](memory-ev
 - `niko/memory/context.py`: dataclass/result, formatter và wrapper tương thích cho code cũ.
 - `niko/memory/working_memory.py`: dựng recent conversation window tạm thời từ `chat_log` cho Deep prompt và correction context.
 - `niko/memory/correction_workflow.py`: workflow sửa/xóa fact qua chat, gồm pending choices, validate ID, update/delete và correction trace/log.
+- `niko/memory/correction_loop.py`: bridge correction default-off qua LoopRuntime
+  và memory fact tools, có fallback về workflow V1 khi loop lỗi.
+- `niko/tools/memory/facts.py`: adapter search/list/update/delete fact cho Loop;
+  file cũ `niko/memory/loop_tools.py` đã xóa để tránh import nhầm.
 - `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated,
   tạo candidate, classify, ghi/mark có kiểm soát cho manual và auto path.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.
@@ -157,12 +161,25 @@ Các event trace liên quan:
 - `memory_consolidation_auto_finished`
 - `memory_consolidation_auto_skipped`
 - `memory_consolidation_auto_error`
+- `loop_started`
+- `loop_decision`
+- `loop_tool_call_started`
+- `loop_tool_call_finished`
+- `loop_final_answer`
+- `loop_limit_reached`
+- `loop_error`
 
 Với retrieval gate, trace/runtime log cần đọc cùng lúc `gate_decision`,
 `gate_label`, `gate_query`, `gate_fact_mode` và `gate_episode_mode`. Inventory
 chung có thể để `query` rỗng nhưng vẫn đúng nếu mode là `list` hoặc `recent`.
 Trace `memory_retrieval` cũng có `recent_turn_count` để biết Deep có nhận
 working memory gần đây không.
+
+Với Loop, tab `Traces` có khối `Loop Steps` gom các event loop theo `turn_id` và
+hiển thị iteration, decision, tool, trạng thái read-only/mutate, `ok` và `error`.
+Raw JSONL vẫn nằm bên dưới để debug sâu. Tab `Bots` cũng nhận runtime log source
+`loop`, nên có thể lọc event như `loop_tool_call_finished` mà không cần đọc
+terminal.
 
 ## Mini Niko Ops Dashboard
 
@@ -184,7 +201,7 @@ Dashboard có các tab:
 - Bots: start/stop/restart Telegram bot, chặn start trùng khi có instance external, warmup/stop Decision Model, xem runtime log dạng bảng.
 - Memory: thêm/xóa semantic facts, xem semantic facts và episodic events.
 - Chat: xem recent chat log.
-- Traces: xem JSONL trace event.
+- Traces: xem Loop steps theo turn và JSONL trace event thô.
 - Config: chỉnh runtime config theo nhóm, gồm Telegram token, agent commands, Nimble, sticker, memory và reply text.
 - Ops: xem endpoint và ranh giới baseline.
 
@@ -277,8 +294,9 @@ Niko kế thừa ý tưởng từ Waku: memory store local, semantic/episodic se
 
 Từ Phase 5 V1, Niko có một gate riêng để nhận diện lệnh sửa hoặc xóa chat memory qua Telegram.
 Gate này dùng local Decision Model/Nimble để chọn intent, nhưng không cho model tự ghi DB. Đây là
-baseline tạm thời để demo chat memory an toàn; khi Loop/tool slot hoàn chỉnh hơn, phần xác nhận,
-chọn target và mutate memory nên chuyển thành workflow/tool riêng có state bền hơn.
+baseline tạm thời để demo chat memory an toàn; pending fact-ID đã có state bền trong SQLite với
+TTL 15 phút, còn khi Loop/tool slot hoàn chỉnh hơn thì phần xác nhận, chọn target và mutate memory
+nên chuyển thành workflow/tool riêng rõ contract hơn.
 
 Code Decision Model cho chat memory đã được tách vào `bots/decision_model/memory/`:
 
@@ -293,10 +311,18 @@ chỉ còn facade để `ChatReplyGraph` không phải biết pending state hay 
 mutate SQLite.
 
 - `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0` mặc định tắt để tránh sửa/xóa bất ngờ trong demo.
+- `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0` mặc định tắt; khi bật cùng correction
+  detection, prompt sửa/xóa trực tiếp thử chạy qua LoopRuntime + fact tools trước
+  khi fallback về V1.
 - Khi bật, Decision Model chỉ trả về `none`, `correct_memory` hoặc `forget_memory`, kèm `query`, `target_type`, `replacement` nếu có.
 - Python runtime search facts bằng query/ID, chỉ update/delete khi match đúng một fact rõ ràng.
 - Nếu match nhiều fact, thiếu replacement hoặc target là episode, Niko hỏi lại hoặc báo read-only thay vì mutate.
-- Các event quan sát chính là `memory_correction_decision`, `memory_correction_applied`, `memory_correction_clarify`.
+- Các event quan sát chính là `memory_correction_decision`, `memory_correction_applied`,
+  `memory_correction_clarify`, `memory_correction_pending_created`,
+  `memory_correction_pending_resolved`, `memory_correction_pending_expired`;
+  khi bật Loop có thêm `loop_started`, `loop_decision`,
+  `loop_tool_call_started`, `loop_tool_call_finished`, `loop_final_answer` và
+  `memory_correction_loop_error` nếu phải fallback.
 - Nếu Nimble chọn sai giữa `forget_memory` và `correct_memory`, guardrail theo marker trong prompt có thể sửa intent
   cuối cùng; nếu `correct_memory` thiếu `replacement`, runtime trích phần sau `thành`/`thay bằng` như lớp an toàn hẹp.
 

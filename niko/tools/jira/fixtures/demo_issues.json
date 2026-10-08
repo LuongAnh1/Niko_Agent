@@ -1,0 +1,75 @@
+{
+  "issues": [
+    {
+      "key": "NIKO-101",
+      "project": {"key": "NIKO", "name": "Niko Agent"},
+      "summary": "Memory correction loop asks for the wrong follow-up action",
+      "description": "When a pending memory correction exists, a new correction prompt must replace the old pending workflow.",
+      "type": "Bug",
+      "status": "In Review",
+      "priority": "High",
+      "assignee": "Tran Anh",
+      "reporter": "QA",
+      "components": ["memory", "loop"],
+      "labels": ["phase-6", "tooling"],
+      "links": [
+        {"type": "relates", "key": "NIKO-77", "summary": "Loop observer events for dashboard"}
+      ],
+      "comments": [
+        {
+          "id": "c-101-1",
+          "author": "QA",
+          "created_at": "2026-10-08T02:00:00Z",
+          "body": "Reproduce by creating an ambiguous delete pending, then sending a new update request."
+        },
+        {
+          "id": "c-101-2",
+          "author": "Developer",
+          "created_at": "2026-10-08T07:30:00Z",
+          "body": "Guardrail should clear old pending state before evaluating a new explicit correction request."
+        }
+      ],
+      "changelog": [
+        {
+          "id": "h-101-1",
+          "field": "status",
+          "from": "Open",
+          "to": "In Progress",
+          "timestamp": "2026-10-08T03:00:00Z",
+          "author": "Developer"
+        },
+        {
+          "id": "h-101-2",
+          "field": "status",
+          "from": "In Progress",
+          "to": "In Review",
+          "timestamp": "2026-10-08T07:45:00Z",
+          "author": "Developer"
+        }
+      ]
+    },
+    {
+      "key": "NIKO-102",
+      "project": {"key": "NIKO", "name": "Niko Agent"},
+      "summary": "Expose Jira fixture tools through the generic Loop registry",
+      "description": "Add read-only Jira tools so the Loop runtime can fetch business issue context without using chat memory storage.",
+      "type": "Task",
+      "status": "Todo",
+      "priority": "Medium",
+      "assignee": "Niko",
+      "reporter": "Tran Anh",
+      "components": ["tools"],
+      "labels": ["jira", "fixture"],
+      "links": [],
+      "comments": [
+        {
+          "id": "c-102-1",
+          "author": "Tran Anh",
+          "created_at": "2026-10-08T08:00:00Z",
+          "body": "Jira tools are runtime integrations. Lakehouse remains a separate analytical data layer."
+        }
+      ],
+      "changelog": []
+    }
+  ]
+}

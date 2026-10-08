@@ -15,6 +15,7 @@ from typing import Callable
 
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger, TraceTurn, default_trace_logger
+from niko.graphs.jira_issue import JiraIssueAnalysisWorkflow, jira_tools_enabled
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore, default_memory_store
 import niko.graphs.chat_reply.prompts as prompts
@@ -46,6 +47,7 @@ class DeepAgentJob:
     started_at: float
     trace_id: str = ""
     followups: list[str] = field(default_factory=list)
+    deep_context: str = ""
 
 
 def two_agent_mode_enabled() -> bool:
@@ -153,9 +155,10 @@ class ChatReplyGraph:
         deliver_reply: ReplyCallback,
         notify_working: NotifyCallback | None = None,
         trace_id: str = "",
+        deep_context: str = "",
     ) -> bool:
         """Public helper để queue Deep job từ ngoài graph nếu cần."""
-        if not self._reserve_deep_agent_job(conversation_id, prompt, gateway_message, trace_id):
+        if not self._reserve_deep_agent_job(conversation_id, prompt, gateway_message, trace_id, deep_context):
             return False
 
         self._start_deep_agent_thread(conversation_id, prompt, gateway_message, deliver_reply, notify_working)
@@ -167,6 +170,7 @@ class ChatReplyGraph:
         prompt: str,
         gateway_message,
         trace_id: str,
+        deep_context: str = "",
     ) -> bool:
         """Đặt cờ job trước khi start thread để followup không chạy đua."""
         with self.deep_jobs_lock:
@@ -178,12 +182,17 @@ class ChatReplyGraph:
                 prompt,
                 time.time(),
                 trace_id=trace_id,
+                deep_context=deep_context,
             )
 
         self.trace_logger.event(
             trace_id,
             "deep_job_queued",
-            {"conversation_id": conversation_id, "user_key": gateway_message.user.key},
+            {
+                "conversation_id": conversation_id,
+                "user_key": gateway_message.user.key,
+                "extra_context_chars": len(deep_context or ""),
+            },
         )
         return True
 
@@ -231,6 +240,7 @@ class ChatReplyGraph:
                     gateway_message,
                     trace_id=trace_id,
                     trace_logger=self.trace_logger,
+                    extra_context=active_job.deep_context if active_job else "",
                 )
                 self.trace_logger.event(
                     trace_id,
@@ -300,9 +310,11 @@ class ChatReplyGraph:
         notify_working: NotifyCallback | None = None,
         wait_reply: str | None = None,
         trace_id: str = "",
+        deep_context: str = "",
+        wait_route: str = "deep_agent_wait",
     ) -> None:
         """Gửi wait reply trước, rồi mới start Deep để UX Telegram không bị im lặng."""
-        started = self._reserve_deep_agent_job(conversation_id, prompt, gateway_message, trace_id)
+        started = self._reserve_deep_agent_job(conversation_id, prompt, gateway_message, trace_id, deep_context)
         if started:
             final_reply = prompts.ensure_reply_suffix(wait_reply or prompts.build_deep_wait_reply())
             self._record_chat(
@@ -310,7 +322,7 @@ class ChatReplyGraph:
                 "assistant",
                 final_reply,
                 gateway_message,
-                route="deep_agent_wait",
+                route=wait_route,
                 trace_id=trace_id,
             )
             self.trace_logger.event(trace_id, "wait_reply_delivered", {"reply": prompts.truncate_text(final_reply, 1200)})
@@ -447,6 +459,17 @@ class ChatReplyGraph:
             self._deliver_reply_safely(deliver_reply, final_reply, trace_turn.turn_id)
             return correction.route
 
+        jira_result = self._handle_jira_issue_prompt(
+            conversation_id,
+            prompt,
+            gateway_message,
+            deliver_reply,
+            notify_working,
+            trace_turn.turn_id,
+        )
+        if jira_result:
+            return jira_result
+
         if route.kind == ROUTE_LOCAL_REPLY:
             # Local reply là nhánh rẻ nhất: không gọi Nimble/Fable/Deep.
             final_reply = prompts.ensure_reply_suffix(route.reply)
@@ -555,6 +578,79 @@ class ChatReplyGraph:
             trace_id=trace_turn.turn_id,
         )
         return route.kind
+
+    def _handle_jira_issue_prompt(
+        self,
+        conversation_id: str,
+        prompt: str,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        notify_working: NotifyCallback | None,
+        trace_id: str,
+    ) -> str:
+        """Nếu bật Jira tools và prompt có issue key, fetch context rồi đưa sang Deep."""
+        if not jira_tools_enabled():
+            return ""
+
+        workflow = JiraIssueAnalysisWorkflow()
+        result = workflow.handle(
+            prompt=prompt,
+            conversation_id=conversation_id,
+            user_key=gateway_message.user.key,
+            trace_id=trace_id,
+            trace_logger=self.trace_logger,
+            gateway_message=gateway_message,
+            recent_turns=self._recent_chat_for_jira_gate(conversation_id),
+        )
+        if not result.handled:
+            return ""
+
+        self.trace_logger.event(
+            trace_id,
+            "jira_issue_workflow_finished",
+            {
+                "route": result.route,
+                "issue_key": result.issue_key,
+                "issue_keys": result.issue_keys,
+                "has_deep_context": bool(result.deep_context),
+                "error": result.error,
+                "gate": result.gate,
+            },
+        )
+        if result.deep_context:
+            self.handoff_to_deep_agent(
+                conversation_id,
+                prompt,
+                gateway_message,
+                deliver_reply,
+                notify_working,
+                wait_reply=result.wait_reply,
+                trace_id=trace_id,
+                deep_context=result.deep_context,
+                wait_route="jira_issue_wait",
+            )
+            return result.route
+
+        final_reply = prompts.ensure_reply_suffix(result.reply)
+        self._record_chat(
+            conversation_id,
+            "assistant",
+            final_reply,
+            gateway_message,
+            route=result.route,
+            trace_id=trace_id,
+            meta={"issue_key": result.issue_key, "error": result.error},
+        )
+        self.trace_logger.turn_end(trace_id, reply=final_reply, status="ok", data={"route": result.route})
+        self._deliver_reply_safely(deliver_reply, final_reply, trace_id)
+        return result.route
+
+    def _recent_chat_for_jira_gate(self, conversation_id: str) -> list[dict]:
+        """Lấy recent chat rất ngắn để Jira gate hiểu các câu như 'ticket vừa nãy'."""
+        try:
+            return self.memory_store.chat_history(conversation_id, limit=8)
+        except Exception:
+            return []
 
     def _start_trace_turn(self, conversation_id: str, prompt: str, gateway_message) -> TraceTurn:
         return self.trace_logger.turn_start(conversation_id, gateway_message.user.key, prompt, gateway_message)

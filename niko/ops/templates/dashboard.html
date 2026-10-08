@@ -383,6 +383,28 @@
       border-radius: var(--radius);
       padding: var(--space-3);
     }
+    .loop-steps {
+      display: grid;
+      gap: var(--space-2);
+      margin-top: var(--space-3);
+    }
+    .loop-step {
+      display: grid;
+      grid-template-columns: minmax(110px, 170px) 1fr;
+      gap: var(--space-3);
+      align-items: start;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      background: var(--surface-bg);
+    }
+    .loop-step .meta {
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 720px) {
+      .loop-step { grid-template-columns: 1fr; }
+    }
     .empty {
       border: 1px dashed var(--rule-hard);
       border-radius: var(--radius);
@@ -676,6 +698,105 @@
         <div class="meta">${esc(c.session_id)} | ${fmt(c.created_at)}</div>
       </div>`;
     }
+    const loopKinds = new Set([
+      "loop_started",
+      "loop_decision",
+      "loop_tool_call_started",
+      "loop_tool_call_finished",
+      "loop_final_answer",
+      "loop_limit_reached",
+      "loop_error"
+    ]);
+    const eventPayload = (event) => event && typeof event.data === "object" && event.data ? event.data : {};
+    function loopEventGroups(traces) {
+      const groups = new Map();
+      (traces || []).forEach(event => {
+        const kind = traceKind(event);
+        if (!loopKinds.has(kind)) return;
+        const id = event.turn_id || event.trace_id || eventPayload(event).trace_id || "loop";
+        if (!groups.has(id)) groups.set(id, []);
+        groups.get(id).push(event);
+      });
+      return [...groups.entries()].map(([id, events]) => ({
+        id,
+        events: events.slice().sort((a, b) => eventTime(a) - eventTime(b)),
+        latest: Math.max(...events.map(eventTime))
+      })).sort((a, b) => b.latest - a.latest);
+    }
+    function loopStepSummary(event) {
+      const kind = traceKind(event);
+      const data = eventPayload(event);
+      if (kind === "loop_started") {
+        return {
+          title: "started",
+          badge: "warn",
+          detail: `tools=${data.tool_count ?? 0} | max_iterations=${data.max_iterations ?? "-"}`
+        };
+      }
+      if (kind === "loop_decision") {
+        return {
+          title: `decision: ${data.kind || "-"}`,
+          badge: data.kind === "tool" ? "warn" : "ok",
+          detail: `iteration=${data.iteration ?? "-"} | tool=${data.tool_name || "-"} | reason=${data.reason || "-"}`
+        };
+      }
+      if (kind === "loop_tool_call_started") {
+        return {
+          title: `tool start: ${data.tool_name || "-"}`,
+          badge: data.mutates_state ? "warn" : "",
+          detail: `iteration=${data.iteration ?? "-"} | mutates_state=${Boolean(data.mutates_state)}`
+        };
+      }
+      if (kind === "loop_tool_call_finished") {
+        return {
+          title: `tool finish: ${data.tool_name || "-"}`,
+          badge: data.ok ? "ok" : "bad",
+          detail: `iteration=${data.iteration ?? "-"} | ok=${Boolean(data.ok)} | error=${data.error || "-"}`
+        };
+      }
+      if (kind === "loop_final_answer") {
+        return {
+          title: "final answer",
+          badge: "ok",
+          detail: `iteration=${data.iteration ?? "-"}`
+        };
+      }
+      if (kind === "loop_limit_reached") {
+        return {
+          title: "limit reached",
+          badge: "bad",
+          detail: `iterations=${data.iterations ?? "-"} | tool_calls=${data.tool_call_count ?? "-"}`
+        };
+      }
+      if (kind === "loop_error") {
+        return {
+          title: "error",
+          badge: "bad",
+          detail: `iteration=${data.iteration ?? "-"} | ${data.error || "-"}`
+        };
+      }
+      return { title: kind, badge: "", detail: JSON.stringify(data) };
+    }
+    function loopStepRecord(event) {
+      const summary = loopStepSummary(event);
+      return `<div class="loop-step">
+        <div><span class="badge ${summary.badge}">${esc(traceKind(event))}</span></div>
+        <div>
+          <div class="record-title">${esc(summary.title)}</div>
+          <div class="meta">${esc(summary.detail)}</div>
+        </div>
+      </div>`;
+    }
+    function loopTurnRecord(group) {
+      return `<div class="record">
+        <div class="record-head">
+          <div class="record-title">Loop steps</div>
+          <span class="badge warn">${esc(group.id)}</span>
+        </div>
+        <div class="meta">${esc(group.events.length)} loop event(s), sorted by time.</div>
+        <div class="loop-steps">${group.events.map(loopStepRecord).join("")}</div>
+      </div>`;
+    }
     function traceRecord(t) {
       const kind = traceKind(t);
       return `<div class="record">
@@ -809,8 +930,8 @@
         if (kind === "memory_retrieval") memorySeen = true;
         if (kind === "deep_agent_call_started" || kind === "deep_job_started") deepRunning = true;
         if (kind === "deep_agent_call_finished" || event.type === "turn_end" || kind === "deep_agent_error") deepRunning = false;
-        if (kind.includes("tool_start")) toolRunning = true;
-        if (kind.includes("tool_end") || event.type === "turn_end") toolRunning = false;
+        if (kind.includes("tool_start") || kind.includes("tool_call_started")) toolRunning = true;
+        if (kind.includes("tool_end") || kind.includes("tool_call_finished") || event.type === "turn_end") toolRunning = false;
       });
       if (toolRunning) {
         return graphParts(["loop", "tools"], ["loop-tools"], "tool running");
@@ -1035,8 +1156,11 @@
       return `<section class="panel"><h2>Recent Chat</h2><div class="records">${chat}</div></section>`;
     }
     function renderTraces(data) {
+      const loopGroups = loopEventGroups(data.traces);
+      const loops = loopGroups.slice(0, 6).map(loopTurnRecord).join("") || empty("No loop events in the current trace tail.");
       const traces = data.traces.map(traceRecord).join("") || empty("No trace events yet.");
-      return `<section class="panel"><h2>Trace Events</h2><div class="records">${traces}</div></section>`;
+      return `<section class="panel"><h2>Loop Steps</h2><div class="records">${loops}</div></section>
+      <section class="panel"><h2>Trace Events</h2><div class="records">${traces}</div></section>`;
     }
     function botBadgeClass(bot) {
       const health = String(bot.health || "").toLowerCase();

@@ -2,14 +2,17 @@
 
 Module này tách Phase 5 V1 ra khỏi `MemoryRuntime`: Decision Model chỉ nhận diện
 intent và trích query/replacement, còn workflow Python giữ pending state, search
-fact, validate ID, update/delete SQLite và ghi trace/runtime log. Pending hiện
-vẫn là RAM state tạm thời; interface này giúp sau này đổi sang Loop/tool workflow
-có state bền mà không làm phình `MemoryRuntime`.
+fact, validate ID, update/delete SQLite và ghi trace/runtime log. Pending fact-ID
+đã có bản bền trong SQLite để user chọn tiếp sau restart, trong khi facade hiện
+tại vẫn giữ hành vi chat V1 và dần chuyển sang Loop/tool workflow. Một yêu cầu
+sửa/xóa mới sẽ thay thế pending cũ; chỉ reply chọn ID thuần như `fact #... nhé`
+mới được nối vào pending trước đó.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import re
 import threading
 import time
@@ -32,13 +35,15 @@ from bots.decision_model.memory.correction import (
     is_memory_readonly_prompt,
     normalize_correction_prompt_text,
 )
-from niko.memory.context import memory_correction_detection_enabled
+from niko.memory.context import memory_correction_detection_enabled, memory_correction_loop_enabled
+from niko.memory.correction_loop import MemoryCorrectionLoopWorkflow
 from niko.memory.store import MemoryStore, default_memory_store
 from niko.memory.working_memory import recent_chat_window
 
 
 MemoryCorrectionDecider = Callable[..., MemoryCorrectionDecision]
 MemoryStoreProvider = Callable[[], MemoryStore]
+PENDING_CORRECTION_TTL_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -53,13 +58,15 @@ class MemoryCorrectionResult:
 
 @dataclass(frozen=True)
 class PendingMemoryCorrection:
-    """State RAM tạm cho V1 khi correction gate cần user chọn fact ID."""
+    """State đang chờ user chọn fact ID, cache trong RAM và lưu bền ở SQLite."""
 
     decision: str
     query: str
     replacement: str
     fact_ids: list[int]
     created_at: float
+    expires_at: float
+    trace_id: str = ""
 
 
 class MemoryCorrectionWorkflow:
@@ -74,6 +81,7 @@ class MemoryCorrectionWorkflow:
         self._correction_decider = correction_decider
         self._pending_corrections: dict[str, PendingMemoryCorrection] = {}
         self._pending_corrections_lock = threading.RLock()
+        self._correction_loop_workflow = MemoryCorrectionLoopWorkflow(store_provider=lambda: self.store)
 
     @property
     def store(self) -> MemoryStore:
@@ -89,11 +97,14 @@ class MemoryCorrectionWorkflow:
         trace_logger,
     ) -> MemoryCorrectionResult:
         """Xử lý yêu cầu sửa/xóa fact qua chat nếu correction gate nhận diện rõ."""
-        decision_context = self.build_decision_context(conversation_id, prompt)
         pending_result = self._handle_pending_choice_without_model(conversation_id, prompt, trace_id, trace_logger)
         if pending_result is not None:
             return pending_result
 
+        if self._has_explicit_correction_signal(prompt):
+            self._clear_pending(conversation_id)
+
+        decision_context = self.build_decision_context(conversation_id, prompt)
         if not self._should_run_decision_gate(prompt, decision_context):
             gate = self._build_skipped_gate(decision_context, reason="no_explicit_correction_signal")
             if gate["enabled"]:
@@ -125,6 +136,10 @@ class MemoryCorrectionWorkflow:
             self._trace_clarify(trace_logger, trace_id, gate, "episode_read_only")
             return MemoryCorrectionResult(handled=True, reply=reply, decision=gate)
 
+        loop_result = self._try_handle_with_loop(conversation_id, prompt, trace_id, trace_logger, gate)
+        if loop_result is not None:
+            return loop_result
+
         facts = self._find_facts(prompt, str(gate["query"]))
         if not facts:
             reply = "Dạ em chưa tìm thấy fact nào khớp rõ với yêu cầu này, nên em chưa sửa/xóa gì cả anh."
@@ -132,7 +147,8 @@ class MemoryCorrectionWorkflow:
             return MemoryCorrectionResult(handled=True, reply=reply, decision=gate)
 
         if len(facts) > 1:
-            self._remember_pending(conversation_id, gate, [fact.id for fact in facts])
+            pending = self._remember_pending(conversation_id, gate, [fact.id for fact in facts], trace_id=trace_id)
+            self._trace_pending_created(trace_logger, trace_id, gate, pending, conversation_id)
             reply = self._build_ambiguous_fact_reply(facts)
             self._trace_clarify(
                 trace_logger,
@@ -393,7 +409,7 @@ class MemoryCorrectionWorkflow:
         fact_id = extract_fact_id(prompt)
         if fact_id is None:
             return None
-        pending = self._get_pending(conversation_id)
+        pending = self._get_pending(conversation_id, include_expired=True)
         if pending is None:
             return None
 
@@ -410,6 +426,14 @@ class MemoryCorrectionWorkflow:
         if base_gate:
             gate["model_decision"] = base_gate.get("decision")
             gate["model_label"] = base_gate.get("label")
+        if self._pending_expired(pending):
+            self._clear_pending(conversation_id)
+            self._trace_pending_expired(trace_logger, trace_id, gate, pending, conversation_id)
+            reply = (
+                "Dạ lựa chọn fact trước đó đã hết hạn rồi anh. Anh gửi lại yêu cầu sửa/xóa memory "
+                "giúp em để em tìm đúng fact mới nhé."
+            )
+            return MemoryCorrectionResult(handled=True, reply=reply, decision=gate)
         trace_logger.event(trace_id, "memory_correction_context_fallback", gate_event_data(gate))
 
         if fact_id not in pending.fact_ids:
@@ -449,6 +473,15 @@ class MemoryCorrectionWorkflow:
                     fact_id=fact.id,
                     conversation_id=conversation_id,
                 )
+                self._trace_pending_resolved(
+                    trace_logger,
+                    trace_id,
+                    gate,
+                    pending,
+                    conversation_id,
+                    action="delete_fact",
+                    fact_id=fact.id,
+                )
                 return MemoryCorrectionResult(
                     handled=True,
                     reply=f"Dạ em đã xóa fact #{fact.id}: {fact.subject} - {fact.content}",
@@ -479,6 +512,15 @@ class MemoryCorrectionWorkflow:
                     fact_id=fact.id,
                     conversation_id=conversation_id,
                 )
+                self._trace_pending_resolved(
+                    trace_logger,
+                    trace_id,
+                    gate,
+                    pending,
+                    conversation_id,
+                    action="update_fact",
+                    fact_id=fact.id,
+                )
                 return MemoryCorrectionResult(
                     handled=True,
                     reply=f"Dạ em đã sửa fact #{fact.id} thành: {replacement}",
@@ -496,7 +538,7 @@ class MemoryCorrectionWorkflow:
 
     def _is_pending_fact_choice_prompt(self, conversation_id: str, prompt: str) -> bool:
         """Nhận diện reply chỉ chọn ID trong workflow đang chờ, không tự đổi intent."""
-        if self._get_pending(conversation_id) is None:
+        if self._get_pending(conversation_id, include_expired=True) is None:
             return False
         if extract_fact_id(prompt) is None:
             return False
@@ -552,30 +594,141 @@ class MemoryCorrectionWorkflow:
         }
         return all(word in polite_choice_words for word in words)
 
-    def _remember_pending(self, conversation_id: str, gate: dict[str, object], fact_ids: list[int]) -> None:
-        """Ghi metadata phụ để model/callback biết danh sách fact ID hợp lệ ở lượt sau."""
+    def _remember_pending(
+        self,
+        conversation_id: str,
+        gate: dict[str, object],
+        fact_ids: list[int],
+        *,
+        trace_id: str = "",
+    ) -> PendingMemoryCorrection:
+        """Ghi pending fact ID vào RAM và SQLite để lượt sau vẫn resolve được sau restart."""
+        now = time.time()
+        record = self.store.set_memory_correction_pending(
+            conversation_id=conversation_id,
+            decision=str(gate.get("decision", "")),
+            query=str(gate.get("query", "")),
+            replacement=str(gate.get("replacement", "")),
+            fact_ids=fact_ids,
+            trace_id=trace_id,
+            ttl_seconds=PENDING_CORRECTION_TTL_SECONDS,
+        )
+        pending = PendingMemoryCorrection(
+            decision=record.decision,
+            query=record.query,
+            replacement=record.replacement,
+            fact_ids=record.fact_ids,
+            created_at=self._parse_utc_timestamp(record.created_at, fallback=now),
+            expires_at=self._parse_utc_timestamp(
+                record.expires_at,
+                fallback=now + PENDING_CORRECTION_TTL_SECONDS,
+            ),
+            trace_id=record.trace_id,
+        )
         with self._pending_corrections_lock:
-            self._pending_corrections[conversation_id] = PendingMemoryCorrection(
-                decision=str(gate["decision"]),
-                query=str(gate["query"]),
-                replacement=str(gate["replacement"]),
-                fact_ids=fact_ids,
-                created_at=time.time(),
-            )
+            self._pending_corrections[conversation_id] = pending
+        return pending
 
-    def _get_pending(self, conversation_id: str) -> PendingMemoryCorrection | None:
+    def _try_handle_with_loop(
+        self,
+        conversation_id: str,
+        prompt: str,
+        trace_id: str,
+        trace_logger,
+        gate: dict[str, object],
+    ) -> MemoryCorrectionResult | None:
+        """Thử correction qua Loop V0; lỗi thì fallback V1 hiện tại."""
+        if not memory_correction_loop_enabled():
+            return None
+        try:
+            outcome = self._correction_loop_workflow.handle(
+                prompt=prompt,
+                gate=gate,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                trace_logger=trace_logger,
+            )
+        except Exception as exc:
+            if trace_logger is not None:
+                trace_logger.event(trace_id, "memory_correction_loop_error", {"error": str(exc)})
+            return None
+
+        if not outcome.handled:
+            if outcome.error and trace_logger is not None:
+                trace_logger.event(trace_id, "memory_correction_loop_error", {"error": outcome.error})
+            return None
+
+        loop_gate = {
+            **gate,
+            "loop_enabled": True,
+            "loop_iterations": outcome.loop_result.iterations if outcome.loop_result else 0,
+            "loop_limit_reached": outcome.loop_result.limit_reached if outcome.loop_result else False,
+        }
+        if outcome.action and outcome.fact_id is not None:
+            self._clear_pending(conversation_id)
+            self._trace_applied(
+                trace_logger,
+                trace_id,
+                loop_gate,
+                action=outcome.action,
+                fact_id=outcome.fact_id,
+                conversation_id=conversation_id,
+            )
+        else:
+            if outcome.reason == "ambiguous_fact_match" and outcome.fact_ids:
+                pending = self._remember_pending(
+                    conversation_id,
+                    loop_gate,
+                    outcome.fact_ids,
+                    trace_id=trace_id,
+                )
+                self._trace_pending_created(trace_logger, trace_id, loop_gate, pending, conversation_id)
+            self._trace_clarify(
+                trace_logger,
+                trace_id,
+                loop_gate,
+                outcome.reason or "loop_final",
+                fact_ids=outcome.fact_ids,
+            )
+        return MemoryCorrectionResult(handled=True, reply=outcome.reply, decision=loop_gate)
+
+    def _get_pending(self, conversation_id: str, *, include_expired: bool = False) -> PendingMemoryCorrection | None:
         with self._pending_corrections_lock:
             pending = self._pending_corrections.get(conversation_id)
-            if pending is None:
+        if pending is None:
+            record = self.store.get_memory_correction_pending(conversation_id)
+            if record is None:
                 return None
-            if time.time() - pending.created_at > 300:
-                self._pending_corrections.pop(conversation_id, None)
-                return None
-            return pending
+            pending = PendingMemoryCorrection(
+                decision=record.decision,
+                query=record.query,
+                replacement=record.replacement,
+                fact_ids=record.fact_ids,
+                created_at=self._parse_utc_timestamp(record.created_at, fallback=time.time()),
+                expires_at=self._parse_utc_timestamp(record.expires_at, fallback=0.0),
+                trace_id=record.trace_id,
+            )
+            with self._pending_corrections_lock:
+                self._pending_corrections[conversation_id] = pending
+        if not include_expired and self._pending_expired(pending):
+            return None
+        return pending
+
+    @staticmethod
+    def _pending_expired(pending: PendingMemoryCorrection) -> bool:
+        return pending.expires_at <= time.time()
+
+    @staticmethod
+    def _parse_utc_timestamp(value: str, *, fallback: float) -> float:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return fallback
 
     def _clear_pending(self, conversation_id: str) -> None:
         with self._pending_corrections_lock:
             self._pending_corrections.pop(conversation_id, None)
+        self.store.clear_memory_correction_pending(conversation_id)
 
     @staticmethod
     def _build_ambiguous_fact_reply(facts) -> str:
@@ -590,6 +743,76 @@ class MemoryCorrectionWorkflow:
     def _build_pending_fact_mismatch_reply(fact_ids: list[int]) -> str:
         offered = ", ".join(f"#{fact_id}" for fact_id in fact_ids)
         return f"Dạ ID đó không nằm trong danh sách em vừa đưa. Anh chọn một trong các fact này giúp em nhé: {offered}."
+
+    def _trace_pending_created(
+        self,
+        trace_logger,
+        trace_id: str,
+        gate: dict[str, object],
+        pending: PendingMemoryCorrection,
+        conversation_id: str,
+    ) -> None:
+        if trace_logger is None:
+            return
+        trace_logger.event(
+            trace_id,
+            "memory_correction_pending_created",
+            {
+                **gate_event_data(gate),
+                "conversation_id": conversation_id,
+                "fact_ids": pending.fact_ids,
+                "pending_trace_id": pending.trace_id,
+                "expires_at": pending.expires_at,
+            },
+        )
+
+    def _trace_pending_resolved(
+        self,
+        trace_logger,
+        trace_id: str,
+        gate: dict[str, object],
+        pending: PendingMemoryCorrection,
+        conversation_id: str,
+        *,
+        action: str,
+        fact_id: int,
+    ) -> None:
+        if trace_logger is None:
+            return
+        trace_logger.event(
+            trace_id,
+            "memory_correction_pending_resolved",
+            {
+                **gate_event_data(gate),
+                "conversation_id": conversation_id,
+                "fact_ids": pending.fact_ids,
+                "pending_trace_id": pending.trace_id,
+                "action": action,
+                "fact_id": fact_id,
+            },
+        )
+
+    def _trace_pending_expired(
+        self,
+        trace_logger,
+        trace_id: str,
+        gate: dict[str, object],
+        pending: PendingMemoryCorrection,
+        conversation_id: str,
+    ) -> None:
+        if trace_logger is None:
+            return
+        trace_logger.event(
+            trace_id,
+            "memory_correction_pending_expired",
+            {
+                **gate_event_data(gate),
+                "conversation_id": conversation_id,
+                "fact_ids": pending.fact_ids,
+                "pending_trace_id": pending.trace_id,
+                "expires_at": pending.expires_at,
+            },
+        )
 
     def _trace_applied(
         self,

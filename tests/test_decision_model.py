@@ -16,6 +16,14 @@ from bots.decision_model.sticker import (
     build_sticker_mood_criteria,
     normalize_sticker_mood,
 )
+from bots.decision_model.jira import (
+    JIRA_ASK_FOR_ISSUE_KEY,
+    JIRA_SKIP,
+    JIRA_USE_TOOL,
+    build_jira_gate_criteria,
+    decide_jira_gate,
+    normalize_jira_gate_choice,
+)
 from bots.decision_model.memory import (
     MEMORY_CORRECT_MEMORY,
     MEMORY_CORRECTION_NONE,
@@ -41,6 +49,7 @@ from bots.decision_model.memory import (
     apply_memory_retrieval_prompt_hint,
     decide_memory_correction_intent,
     decide_memory_retrieval,
+    extract_memory_correction_query_from_prompt,
     extract_memory_correction_replacement_from_prompt,
     is_memory_readonly_prompt,
     memory_inventory_prompt_target,
@@ -130,6 +139,43 @@ class DecisionModelTests(unittest.TestCase):
     def test_route_choice_aliases(self):
         self.assertEqual(normalize_route_choice("reply_now"), ROUTE_REPLY_NOW)
         self.assertEqual(normalize_route_choice("handoff"), ROUTE_SEND_TO_DEEP)
+
+    def test_jira_gate_choice_aliases_and_criteria(self):
+        criteria = build_jira_gate_criteria()
+
+        self.assertIn(JIRA_USE_TOOL, criteria)
+        self.assertIn(JIRA_ASK_FOR_ISSUE_KEY, criteria)
+        self.assertIn(JIRA_SKIP, criteria)
+        self.assertEqual(normalize_jira_gate_choice("use jira"), JIRA_USE_TOOL)
+        self.assertEqual(normalize_jira_gate_choice("need_issue_key"), JIRA_ASK_FOR_ISSUE_KEY)
+        self.assertEqual(normalize_jira_gate_choice("normal_chat"), JIRA_SKIP)
+
+        with self.assertRaises(RuntimeError):
+            normalize_jira_gate_choice("maybe")
+
+    def test_jira_gate_decision_carries_metadata(self):
+        with patch(
+            "bots.decision_model.jira.systemone_choice",
+            return_value=ChoiceDecision(
+                choice=JIRA_USE_TOOL,
+                confidence=0.91,
+                probabilities={JIRA_USE_TOOL: 0.91, JIRA_SKIP: 0.09},
+                model="nimble",
+                usage={"input_tokens": 10},
+                extra={"issue_key": "niko-101", "query": "ticket vừa nãy", "reason": "followup"},
+            ),
+        ):
+            decision = decide_jira_gate(
+                "xem ticket vừa nãy giúp anh",
+                recent_turns=[{"role": "user", "content": "phân tích NIKO-101"}],
+            )
+
+        self.assertEqual(decision.decision, JIRA_USE_TOOL)
+        self.assertEqual(decision.issue_key, "NIKO-101")
+        self.assertEqual(decision.query, "ticket vừa nãy")
+        self.assertEqual(decision.reason, "followup")
+        self.assertEqual(decision.confidence, 0.91)
+        self.assertEqual(decision.model, "nimble")
 
     def test_sticker_mood_criteria_always_includes_no_sticker(self):
         criteria = build_sticker_mood_criteria(["happy", "coding"])
@@ -242,6 +288,19 @@ class DecisionModelTests(unittest.TestCase):
         self.assertEqual(decision.label, MEMORY_FORGET_MEMORY)
         self.assertEqual(decision.replacement, expected)
         self.assertEqual(extract_memory_correction_replacement_from_prompt(prompt), expected)
+
+    def test_memory_correction_extracts_query_when_model_omits_it(self):
+        prompt = "Niko, quên fact anh thích checklist màu xanh"
+
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(choice=MEMORY_FORGET_MEMORY),
+        ):
+            decision = decide_memory_correction_intent(prompt)
+
+        self.assertEqual(decision.decision, MEMORY_FORGET_MEMORY)
+        self.assertEqual(decision.query, "anh thích checklist màu xanh")
+        self.assertEqual(extract_memory_correction_query_from_prompt(prompt), "anh thích checklist màu xanh")
 
     def test_memory_retrieval_modes_aliases_and_invalid_choices(self):
         self.assertEqual(normalize_fact_retrieval_mode("", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_SEARCH)

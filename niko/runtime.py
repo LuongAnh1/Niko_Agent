@@ -142,8 +142,31 @@ def deep_agent_command() -> str:
     return env_value("CLAUDE_CLI_COMMAND", DEFAULT_CLAUDE_COMMAND)
 
 
-def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, trace_logger=None) -> str:
+def call_deep_agent(
+    prompt: str,
+    gateway_message,
+    trace_id: str | None = None,
+    trace_logger=None,
+    extra_context: str = "",
+) -> str:
     """Gọi Deep agent kèm memory context và ghi trace retrieval nếu có."""
+    return call_deep_agent_with_context(
+        prompt,
+        gateway_message,
+        trace_id=trace_id,
+        trace_logger=trace_logger,
+        extra_context=extra_context,
+    )
+
+
+def call_deep_agent_with_context(
+    prompt: str,
+    gateway_message,
+    trace_id: str | None = None,
+    trace_logger=None,
+    extra_context: str = "",
+) -> str:
+    """Gọi Deep agent với context bổ sung từ workflow tool như Jira."""
     memory_context = ""
     try:
         from niko.harness.trace import default_trace_logger
@@ -171,12 +194,22 @@ def call_deep_agent(prompt: str, gateway_message, trace_id: str | None = None, t
             data={"error": str(exc)},
         )
 
+    combined_context = "\n\n".join(part.strip() for part in (memory_context, extra_context) if part.strip())
+    if extra_context.strip() and trace_id:
+        try:
+            from niko.harness.trace import default_trace_logger
+
+            logger = trace_logger or default_trace_logger()
+            logger.event(trace_id, "deep_extra_context", {"chars": len(extra_context), "source": "graph_workflow"})
+        except Exception:
+            pass
+
     deep_prompt = build_niko_prompt(
         prompt,
         gateway_message,
         include_prompt_hook=True,
         prompt_label="Current user message",
-        memory_context=memory_context,
+        memory_context=combined_context,
     )
     return call_claude(deep_prompt, deep_agent_command())
 
@@ -196,6 +229,7 @@ __all__ = [
     "build_telegram_prompt",
     "call_claude",
     "call_deep_agent",
+    "call_deep_agent_with_context",
     "deep_agent_command",
     "load_prompt_hook",
     "load_telegram_prompt_hook",

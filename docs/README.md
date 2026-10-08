@@ -9,9 +9,11 @@ Thư mục này mô tả Niko Agent theo góc nhìn kỹ thuật và demo đồ 
 3. [Harness Memory & Ops](harness/memory-ops.md): SQLite memory, trace/runtime log, dashboard, runtime config và API.
 4. [Nghiệp vụ harness](business-domains/README.md): Telegram gateway hiện tại, Jira gateway dự kiến và hướng nâng cấp memory backend.
 5. [Demo Guide](demo/demo-guide.md): cách chạy bot/dashboard và các kịch bản demo.
-6. [Kế hoạch Chat Memory Decision Model 2026-10-07](plans/2026-10-07-chat-memory-decision-model.md): kế hoạch ngắn hạn cho chat memory single-user và Decision Model.
-7. [Sơ đồ Chat Memory](memory/chat-memory-architecture-flow.md): kiến trúc và luồng xử lý memory hiện tại/đích đến.
-8. [Memory Roadmap](memory/roadmap.md): baseline hiện tại, chat memory, và ranh giới với lakehouse/Jira memory backend.
+6. [Sơ đồ Chat Memory](memory/chat-memory-architecture-flow.md): kiến trúc và luồng xử lý memory hiện tại/đích đến.
+7. [Niko Loop Architecture](loop/architecture.md): Loop core V0, memory fact tools và hướng mở sang Jira/business tools.
+8. [Kế hoạch Chat Memory Decision Model 2026-10-07](plans/2026-10-07-chat-memory-decision-model.md): kế hoạch ngắn hạn cho chat memory single-user và Decision Model.
+9. [Kế hoạch Niko Loop 2026-10-08](plans/2026-10-08-niko-loop-implementation-plan.md): phase triển khai Loop core, memory tools, observability và Jira lane.
+10. [Memory Roadmap](memory/roadmap.md): baseline hiện tại, chat memory, và ranh giới với lakehouse/Jira memory backend.
 
 ## Bố Cục Folder
 

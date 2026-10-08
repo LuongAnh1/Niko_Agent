@@ -76,6 +76,32 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], 1)
         self.assertFalse(rows[0]["consolidated"])
 
+    def test_memory_correction_pending_state_can_be_saved_loaded_and_cleared(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+
+            saved = store.set_memory_correction_pending(
+                conversation_id="chat-1",
+                decision=MEMORY_FORGET_MEMORY,
+                query="checklist",
+                replacement="",
+                fact_ids=[3, "4", 0, "bad"],
+                trace_id="trace-1",
+                ttl_seconds=900,
+            )
+            loaded = store.get_memory_correction_pending("chat-1")
+            cleared = store.clear_memory_correction_pending("chat-1")
+            missing = store.get_memory_correction_pending("chat-1")
+
+        self.assertEqual(saved.fact_ids, [3, 4])
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.decision, MEMORY_FORGET_MEMORY)
+        self.assertEqual(loaded.query, "checklist")
+        self.assertEqual(loaded.fact_ids, [3, 4])
+        self.assertEqual(loaded.trace_id, "trace-1")
+        self.assertEqual(cleared, 1)
+        self.assertIsNone(missing)
+
     def test_unconsolidated_chat_batch_orders_and_filters_by_session(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
@@ -1213,6 +1239,8 @@ class MemoryStoreTests(unittest.TestCase):
                 {
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "0",
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",
                     "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
@@ -1250,6 +1278,7 @@ class MemoryStoreTests(unittest.TestCase):
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
                     "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_RUNTIME_LOG_ENABLED": "0",
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",
@@ -1565,6 +1594,69 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertEqual(calls, 1)
         self.assertEqual(applied.decision["decision"], MEMORY_FORGET_MEMORY)
         self.assertEqual(applied.decision["label"], "pending_followup")
+
+    def test_memory_correction_new_explicit_request_replaces_pending_context(self):
+        captured_contexts: list[dict] = []
+
+        def context_aware_decider(prompt, _gateway, decision_context=None):
+            captured_contexts.append(decision_context or {})
+            if "quên" in prompt:
+                return MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist",
+                    target_type=MEMORY_TARGET_FACT,
+                    reason="explicit forget",
+                )
+            self.assertEqual((decision_context or {}).get("active_workflow"), "")
+            self.assertEqual((decision_context or {}).get("pending_choices"), [])
+            return MemoryCorrectionDecision(
+                decision=MEMORY_CORRECT_MEMORY,
+                query="checklist",
+                target_type=MEMORY_TARGET_FACT,
+                replacement="anh thích checklist có mục tiêu rõ ràng",
+                reason="new explicit correction",
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
+            store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
+            runtime = MemoryRuntime(store=store, correction_decider=context_aware_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_LOOP_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                clarify = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+                first_pending = store.get_memory_correction_pending("456")
+                replace = runtime.handle_memory_correction(
+                    "456",
+                    "sửa fact checklist thành anh thích checklist có mục tiêu rõ ràng",
+                    self._message(),
+                    "trace-2",
+                    self._trace(temp_dir),
+                )
+                second_pending = store.get_memory_correction_pending("456")
+
+        self.assertTrue(clarify.handled)
+        self.assertEqual(first_pending.decision, MEMORY_FORGET_MEMORY)
+        self.assertTrue(replace.handled)
+        self.assertEqual(captured_contexts[1]["active_workflow"], "")
+        self.assertEqual(captured_contexts[1]["pending_choices"], [])
+        self.assertEqual(second_pending.decision, MEMORY_CORRECT_MEMORY)
+        self.assertEqual(second_pending.replacement, "anh thích checklist có mục tiêu rõ ràng")
 
     def test_memory_correction_decision_context_excludes_current_incoming_prompt(self):
         captured_contexts: list[dict] = []

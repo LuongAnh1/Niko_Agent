@@ -169,7 +169,7 @@ hay nội dung riêng tư dài vào tài liệu này.
 
 ### Ghi Chú UI
 
-- Trong tài liệu cũ gọi là `Preview consolidation`; trên dashboard hiện tại nút
+- Trong tài liệu cũ từng gọi là preview consolidation; trên dashboard hiện tại nút
   tương ứng là `Refresh batch`.
 - `Refresh batch` chỉ đọc batch/candidate, không ghi memory.
 - `Run once` mới gọi classifier, ghi fact/episode nếu được chọn, rồi mark đúng
@@ -276,3 +276,116 @@ thêm.
   `tests/test_decision_model.py`.
 - Deferred cho Loop/tool workflow: test sửa fact end-to-end sau khi chọn ID và retrieval lại nội dung
   mới; test xóa fact duy nhất không cần hỏi lại; dashboard delete/update episode nếu sau này cho phép.
+
+## Kết quả cập nhật 2026-10-08
+
+### Phase 4B Loop correction - durable pending qua restart
+
+Mục đích: xác nhận ambiguous correction follow-up không còn phụ thuộc RAM của process bot. Sau khi bot hỏi chọn fact ID,
+anh restart Telegram Bot rồi gửi `fact #...`; runtime phải đọc lại pending từ SQLite, validate ID, mutate đúng fact và clear
+pending của lượt đó.
+
+Kết quả live test: pass.
+
+- Lượt đầu lúc 2026-10-08 03:23:10 UTC gửi `Niko, quên fact checklist`.
+- Correction gate chọn `forget_memory`, `query=checklist`; Loop chạy `search_facts`, thấy nhiều fact khớp và trả clarify với `fact_ids=[12, 6, 7]`.
+- Trace có `memory_correction_pending_created`, `pending_trace_id=60fb24aa-9a82-40af-90db-4f5f8bf346ee`, TTL 15 phút.
+- Runtime log xác nhận dashboard stop/start bot giữa hai lượt: `telegram_bot_stop_finished` lúc 03:23:36 UTC, `telegram_bot_started` lúc 03:23:39 UTC.
+- Lượt follow-up lúc 2026-10-08 03:23:57 UTC gửi `fact #12 nhé`.
+- Trace có `memory_correction_context_fallback`, sau đó `memory_correction_applied action=delete_fact fact_id=12`.
+- Trace có `memory_correction_pending_resolved` trỏ về `pending_trace_id=60fb24aa-9a82-40af-90db-4f5f8bf346ee`, xác nhận pending được nối lại sau restart.
+- Kiểm tra SQLite sau test: fact #12 không còn trong bảng `facts`.
+- Lưu ý sau test: conversation còn một pending mới được tạo ở lượt test sau lúc 03:25:48 UTC cho `fact_ids=[6, 7]`; đây không phải pending còn sót của Test 1.
+
+### Phase 4B Loop correction - invalid ID và update ambiguous
+
+Mục đích: xác nhận pending durable không mutate khi user chọn ID ngoài danh sách, sau đó vẫn xử lý được một workflow ambiguous update có replacement và clear pending khi resolve.
+
+Kết quả live test: pass.
+
+- Lượt Test 2 lúc 2026-10-08 03:24:56 UTC gửi `Niko, quên fact checklist`; Loop hỏi lại với `fact_ids=[6, 7]` và trace có `memory_correction_pending_created`.
+- Follow-up lúc 2026-10-08 03:25:20 UTC gửi `fact #199 nhé`.
+- Trace ghi `memory_correction_context_fallback`, sau đó `memory_correction_clarify` với `clarify_reason=pending_fact_id_not_offered`.
+- Không có `memory_correction_applied` trong turn `fact #199 nhé`, nên DB không bị mutate khi ID không thuộc pending choices.
+- Lượt Test 3 lúc 2026-10-08 03:25:43 UTC gửi `Niko, sửa fact checklist thành anh thích checklist có tiêu chí hoàn thành rõ ràng`.
+- Guardrail đưa decision cuối về `correct_memory`; Loop tìm nhiều fact khớp và tạo pending mới với `fact_ids=[6, 7]`, `replacement=anh thích checklist có tiêu chí hoàn thành rõ ràng`.
+- Follow-up lúc 2026-10-08 03:26:16 UTC gửi `fact #6 nhé`.
+- Trace ghi `memory_correction_context_fallback`, `memory_correction_applied action=update_fact fact_id=6`, và `memory_correction_pending_resolved`.
+- Kiểm tra SQLite sau test: fact #6 đã đổi content thành `anh thích checklist có tiêu chí hoàn thành rõ ràng`, fact #7 giữ nguyên, `memory_correction_pending` không còn row cho conversation này.
+
+### Phase 4B Loop correction - expired pending không mutate
+
+Mục đích: xác nhận pending đã hết hạn thì follow-up `fact #...` không được dùng lại action cũ để xóa/sửa fact.
+
+Kết quả live test: pass.
+
+- Lượt đầu lúc 2026-10-08 03:38:04 UTC gửi `Niko, quên fact checklist`.
+- Loop hỏi lại với `fact_ids=[13, 7]`; trace có `memory_correction_pending_created`, `pending_trace_id=3cd0e7ce-b072-4f13-a90d-d841e67c61ff`.
+- Để test nhanh, chỉnh `expires_at` của pending trong SQLite về `2000-01-01T00:00:00Z`, sau đó restart Telegram Bot để RAM cache không còn giữ hạn cũ.
+- Follow-up lúc 2026-10-08 03:40:26 UTC gửi `fact #13 nhé`.
+- Trace ghi `memory_correction_pending_expired`, `expires_at=946684800.0`, trỏ về đúng `pending_trace_id=3cd0e7ce-b072-4f13-a90d-d841e67c61ff`.
+- Không có `memory_correction_applied` trong turn expired.
+- Reply báo lựa chọn fact trước đó đã hết hạn và yêu cầu gửi lại yêu cầu sửa/xóa memory.
+- Kiểm tra SQLite sau test: fact #13 và fact #7 vẫn còn, `memory_correction_pending` đã clear.
+
+### Phase 5 Loop observability - checklist live sắp chạy
+
+Mục đích: xác nhận dashboard đọc được từng step của Loop mà không cần quay lại terminal.
+Phần này kiểm tra observability, không thay đổi lại hành vi correction đã pass ở Phase
+4B.
+
+Trước khi test:
+
+- Dashboard đang chạy bản code mới.
+- Telegram Bot đã restart từ tab `Bots` sau khi cập nhật dashboard/template.
+- `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`.
+- `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`.
+- Decision Model đã warmup.
+
+Prompt smoke test đề xuất:
+
+- Ambiguous delete: `Niko, quên fact checklist`.
+- Update có replacement: `Niko, sửa fact checklist thành anh thích checklist có mục tiêu rõ ràng`.
+- No-match: `Niko, quên fact anh thích bánh màu cầu vồng`.
+
+Kỳ vọng cần nhìn trên dashboard:
+
+- Tab `Traces` có khối `Loop Steps` cho turn vừa test.
+- `Loop Steps` có các event chính: `loop_started`, `loop_decision`,
+  `loop_tool_call_started`, `loop_tool_call_finished`, `loop_final_answer`.
+- Tool step hiển thị được `tool_name`, `iteration`, `mutates_state`, `ok` và
+  `error` nếu có.
+- Tab `Bots` có runtime log source `loop`, ví dụ `loop_decision` hoặc
+  `loop_tool_call_finished`, message đọc được tool và trạng thái.
+- Raw JSON trace vẫn còn bên dưới để debug sâu.
+
+Kết quả tự động trước live test ban đầu:
+
+- Targeted tests cho loop/dashboard/correction đã pass.
+- Full suite đã pass.
+
+Kết quả live test: pass, có một chỉnh sửa guardrail nhỏ sau khi soi log.
+
+- Ba smoke case đã chạy đủ: ambiguous delete, update có replacement nhưng còn
+  nhiều fact khớp, và no-match.
+- Cả ba turn đều ghi được `loop_started`, `loop_decision`,
+  `loop_tool_call_started`, `loop_tool_call_finished` và `loop_final_answer`.
+- Dashboard đã hiện khối `Loop Steps`; tab `Bots` có runtime log `source=loop`
+  với message ngắn cho decision/tool/result.
+- Kết quả hành vi đúng kỳ vọng: ambiguous case chỉ hỏi chọn ID và tạo pending,
+  update ambiguous chưa mutate DB khi chưa có ID rõ, no-match không gọi
+  update/delete tool.
+- Khi soi trace phát hiện yêu cầu sửa/xóa mới vẫn mang pending metadata từ
+  pending trước đó. Đã sửa `MemoryCorrectionWorkflow` để pending cũ chỉ áp dụng
+  cho reply chọn ID thuần; yêu cầu sửa/xóa mới clear pending trước khi gọi
+  Decision Model.
+- Live retest sau restart: pass. Lượt ambiguous delete tạo pending xóa; lượt
+  sửa/xóa mới tiếp theo có `pending_choices=[]`, không mang workflow cũ, và tạo
+  pending sửa mới khi nhiều fact khớp. Follow-up chọn ID dùng
+  `memory_correction_context_fallback`, apply đúng `update_fact` và ghi
+  `memory_correction_pending_resolved`; không có `delete_fact` ở lượt resolve.
+- Đã chỉnh `MemoryCorrectionLoopWorkflow` để runtime log của loop đi cùng
+  thư mục state của `trace_logger`; test dùng trace tạm không ghi dữ liệu giả
+  vào log dashboard thật.
+- Verification tại thời điểm khóa Phase 5: targeted tests liên quan
+  memory/loop/dashboard pass `87 passed`; full suite pass `184 passed`.
