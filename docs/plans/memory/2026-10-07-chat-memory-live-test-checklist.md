@@ -11,9 +11,9 @@ working memory cho Deep khỏi context quyết định sửa/xóa memory.
 
 Tài liệu liên quan:
 
-- [Luồng kiến trúc chat memory](../memory/chat-memory-architecture-flow.md)
+- [Luồng kiến trúc chat memory](../../memory/chat-memory-architecture-flow.md)
 - [Checklist phase tổng](2026-10-07-chat-memory-decision-model-checklist.md)
-- [Nhật ký live verification](../harness/memory-live-verification.md)
+- [Nhật ký live verification](../../harness/memory-live-verification.md)
 
 ## 1. Chuẩn Bị Runtime Sạch
 
@@ -177,7 +177,7 @@ Mục đích: tránh phải đọc lại toàn bộ trace/runtime log sau này.
 - [x] Preflight tự động trước live test tiếp: `git diff --check` pass, targeted pytest pass
   `78 passed`, full pytest pass `144 passed`.
 - [ ] Sau mỗi prompt live, ghi pass/fail vào
-  [Memory Live Verification](../harness/memory-live-verification.md).
+  [Memory Live Verification](../../harness/memory-live-verification.md).
 - [ ] Nếu có chỉnh code, ghi rõ lỗi quan sát được, file đã sửa và unit test đã chạy.
 - [ ] Nếu chỉ chỉnh docs/checklist, chạy `rtk git diff --check`.
 - [ ] Nếu chỉnh logic memory, chạy targeted tests trước rồi mới chạy suite rộng hơn.

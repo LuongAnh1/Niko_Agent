@@ -1,4 +1,10 @@
-"""Registry nhỏ để Loop gọi tool theo contract thống nhất."""
+"""Registry thực thi tool cho Loop core V0.
+
+Registry chỉ giữ danh sách tool đã chuẩn hóa tên, expose schema cho controller
+và bọc lời gọi handler thành `ToolResult`. Nó không quyết định prompt nào được
+dùng tool, tool nào đủ an toàn, hay reply cuối cùng nên nói gì; các policy đó
+thuộc workflow domain như memory correction hoặc Jira issue analysis.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ from niko.loop.types import Tool, ToolContext, ToolResult
 
 
 class ToolRegistry:
-    """Lưu tool theo tên và bọc lỗi thực thi thành `ToolResult`."""
+    """Kho tool theo tên, có validate nhẹ và fail-safe khi handler lỗi."""
 
     def __init__(self, tools: list[Tool] | None = None) -> None:
         self._tools: dict[str, Tool] = {}
@@ -62,4 +68,3 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return self.get(name) is not None
-

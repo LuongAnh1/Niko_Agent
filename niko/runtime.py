@@ -1,8 +1,13 @@
-"""Runtime gọi LLM local của Niko.
+"""Runtime shell-out sang LLM CLI của Niko.
 
-Ứng dụng không gọi API LLM trực tiếp. Nó build prompt có persona, identity và
-memory context rồi shell out sang CLI đã cấu hình (`fcc-claude` hiện tại).
-Nhờ vậy Telegram/graph không cần biết chi tiết model, workdir hay command line.
+Ứng dụng không gọi API LLM trực tiếp. File này build argv, resolve workdir, nạp
+persona hook, thêm identity/memory context khi gọi Deep, rồi shell out sang CLI
+đã cấu hình (`fcc-claude` hiện tại). Telegram gateway và chat graph chỉ gọi
+runtime ở mức hàm public, không cần biết model, session, path hay command line.
+
+Lỗi command, timeout và non-zero exit được chuẩn hóa thành `RuntimeError` để
+trace/graph xử lý nhất quán. File này không chọn route và không tự quyết định
+memory nào cần retrieve; phần đó thuộc graph hoặc `MemoryRuntime`.
 """
 
 from __future__ import annotations

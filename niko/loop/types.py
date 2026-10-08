@@ -1,4 +1,14 @@
-"""Kiểu dữ liệu public cho Loop core V0."""
+"""Contract public của Loop core V0.
+
+Các dataclass trong file này là ranh giới chung giữa controller, runtime,
+tool adapter, workflow domain và test. Chúng cố ý nhỏ, dễ serialize và không
+nhúng khái niệm Telegram/Jira/memory cụ thể để Loop có thể dùng lại cho nhiều
+lane nghiệp vụ.
+
+`mutates_state` là tín hiệu quan sát/guardrail cho caller và dashboard, không
+phải quyền tự động để tool được phép sửa dữ liệu. Workflow gọi tool vẫn phải tự
+quyết định khi nào thao tác mutate là hợp lệ.
+"""
 
 from __future__ import annotations
 
@@ -90,4 +100,3 @@ class LoopController(Protocol):
         tools: list[dict[str, Any]],
     ) -> LoopDecision:
         ...
-

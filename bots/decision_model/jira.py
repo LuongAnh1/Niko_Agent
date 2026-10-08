@@ -1,8 +1,13 @@
-"""Decision gate cho Jira tools.
+"""Decision gate cho prompt Jira mơ hồ.
 
-Nimble chỉ quyết định prompt có nên đi vào Jira issue workflow hay không. Python
-vẫn parse issue key, kiểm tra fixture/tool và điều phối Deep; model không tự gọi
-tool và không sinh reply tự do.
+Nimble chỉ chọn một trong ba nhãn `use_jira_tool`, `ask_for_issue_key` hoặc
+`skip_jira`. Prompt có issue key rõ vẫn đi qua rule Python cho nhanh và chắc;
+prompt mơ hồ mới gửi recent turns vào model để nhận diện câu kiểu "ticket vừa
+nãy". Model không tự gọi tool, không mutate dữ liệu và không sinh reply tự do.
+
+Workflow gọi gate phải kiểm tra confidence, parse/validate issue key và quyết
+định fallback. Confidence thấp là tín hiệu quay về route bảo thủ, không phải lý
+do mở Jira tool.
 """
 
 from __future__ import annotations

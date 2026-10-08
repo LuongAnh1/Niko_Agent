@@ -3,7 +3,7 @@
 Ngày lập: 2026-10-07
 Tài liệu gốc: [Kế Hoạch Chat Memory Decision Model](2026-10-07-chat-memory-decision-model.md)
 Phạm vi: chat memory single-user trong `Niko_Agent`
-Checklist kiểm tra live: [Memory Live Verification](../harness/memory-live-verification.md)
+Checklist kiểm tra live: [Memory Live Verification](../../harness/memory-live-verification.md)
 Checklist live Phase 6/7: [Chat Memory Live Test Checklist](2026-10-07-chat-memory-live-test-checklist.md)
 
 Checklist này bám theo các phase trong kế hoạch gốc. Mỗi nhóm có mục đích để khi

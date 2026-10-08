@@ -15,6 +15,9 @@ Niko Agent là một harness local cho AI agent. Mục tiêu của repo là có 
 
 ## Kiến Trúc Tổng Quan
 
+Trang này mô tả ranh giới module và trạng thái baseline. Bản đồ theo từng lượt
+chat đang chạy nằm ở [Luồng runtime hiện tại](current-runtime-flow.md).
+
 ```text
 Telegram
   -> bots/telegram
@@ -46,10 +49,9 @@ Memory Gate -> Memory Records
 Reply/turn events -> Trace/Ops
 ```
 
-Trong đó `Tool Slot` mới là vị trí dự kiến cho vòng sau, chưa phải tool router hoàn chỉnh.
-Thiết kế Loop tổng quát nằm ở `docs/loop/architecture.md`; baseline hiện tại đã
-có Loop core V0 trong `niko/loop/` và một bridge correction default-off, nhưng
-chưa phải tool router hoàn chỉnh cho toàn bộ chat flow hoặc Jira domain.
+Trong đó `Tool Slot`/`Loop` hiện là cơ chế V0 cho memory correction và Jira
+issue flow, chưa phải tool router hoàn chỉnh cho toàn bộ chat flow hoặc Jira
+domain. Thiết kế Loop tổng quát nằm ở `docs/loop/architecture.md`.
 
 ## Bố Cục Repo
 

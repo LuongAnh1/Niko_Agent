@@ -1,4 +1,14 @@
-"""LoopRuntime V0: controller quyết định, Python gọi tool, observer ghi dấu."""
+"""LoopRuntime V0 cho các workflow cần observe, decide, act bằng tool.
+
+Controller chỉ trả `LoopDecision`: gọi tool hoặc kết thúc bằng final reply.
+Runtime mới là nơi gọi `ToolRegistry`, ghi observer events, gom tool calls và
+chặn vòng lặp bằng `max_iterations`. File này không biết Telegram, memory hay
+Jira policy; domain workflow bọc runtime và quyết định prompt, fallback, reply.
+
+Ba invariant cần giữ: controller không tự mutate state; lỗi tool thành
+`ToolResult`/`LoopResult` thay vì làm crash caller; lỗi observer bị nuốt để
+trace/dashboard không phá luồng chính.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +23,7 @@ DEFAULT_LOOP_FALLBACK_REPLY = "Dạ em chưa hoàn tất vòng xử lý tool, an
 
 
 class LoopRuntime:
-    """Chạy một workflow tool nhiều bước nhưng chưa phụ thuộc Telegram/Memory."""
+    """Điều khiển một vòng tool-use ngắn theo contract domain-agnostic."""
 
     def __init__(
         self,
@@ -155,4 +165,3 @@ class LoopRuntime:
             self.observer.event(kind, data or {})
         except Exception:
             pass
-
