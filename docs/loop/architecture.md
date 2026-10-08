@@ -1,7 +1,7 @@
 # Kiến Trúc Niko Loop
 
 Ngày cập nhật: 2026-10-08
-Phạm vi: kiến trúc Loop tổng quát cho Niko Agent, chưa phải code runtime đã hoàn chỉnh
+Phạm vi: kiến trúc Loop tổng quát cho Niko Agent; core V0 đã có, nhưng chưa phải tool router hoàn chỉnh
 
 Tài liệu này mô tả Loop như một slot xử lý tool có thể dùng chung cho chat
 memory, Jira/business data và các workflow cần nhiều bước về sau. Hiện tại Niko
@@ -53,15 +53,15 @@ flowchart LR
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class Gateway,Graph,Reply,Deep,Trace,RuntimeLog done;
-    class Loop,Controller,Registry,MemoryTools,JiraTools,OpsTools planned;
+    class Gateway,Graph,Reply,Deep,Trace,RuntimeLog,Loop,Controller,Registry,MemoryTools done;
+    class JiraTools,OpsTools planned;
 ```
 
 Ranh giới cần giữ:
 
 - `bots/telegram/` chỉ làm IO/auth/parsing/reply/sticker.
 - `ChatReplyGraph` chọn route và gọi Loop khi tác vụ cần tool workflow.
-- `niko/loop/` sẽ là nơi đặt loop core, tool registry, loop result và observer.
+- `niko/loop/` là nơi đặt loop core V0, tool registry, loop result và observer.
 - `niko/memory/` vẫn sở hữu SQLite memory và guardrail mutate memory.
 - Tool chỉ trả về kết quả cho loop; tool không tự reply Telegram.
 - Trace/runtime log nằm ở harness/ops, không tham gia reasoning.
@@ -105,10 +105,9 @@ class LoopResult:
 - bắt lỗi tool thành `ToolResult(ok=False, ...)` để loop không crash;
 - ghi rõ tool nào mutate state để observer/trace có thể đánh dấu.
 
-`LoopObserver` cần ghi event tới trace/runtime log:
+`LoopObserver` hiện ghi các event tối thiểu tới trace/runtime log:
 
 - `loop_started`
-- `loop_step_started`
 - `loop_decision`
 - `loop_tool_call_started`
 - `loop_tool_call_finished`

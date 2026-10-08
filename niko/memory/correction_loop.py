@@ -1,8 +1,10 @@
-"""Correction workflow thử nghiệm chạy qua Loop core V0.
+"""Bridge correction chạy qua Loop core V0.
 
-Module này là cầu nối default-off giữa luồng sửa/xóa fact V1 và LoopRuntime.
-Nó chưa thay thế pending workflow hiện tại, mà chỉ chứng minh memory fact tools
-có thể được điều phối qua loop với trace rõ ràng và fallback an toàn.
+Module này là đường thử nghiệm default-off giữa correction gate hiện tại và
+LoopRuntime. Nó xử lý prompt sửa/xóa fact trực tiếp bằng memory fact tools, còn
+pending follow-up kiểu `fact #...` và state bền vẫn do `MemoryCorrectionWorkflow`
+quản lý qua SQLite. Khi loop lỗi, caller fallback về workflow V1 để giữ hành vi
+chat đã live-test ổn định.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ class MemoryCorrectionLoopOutcome:
 
 
 class MemoryCorrectionLoopWorkflow:
-    """Chạy correction bằng Loop + fact tools, default-off ở caller."""
+    """Chạy direct correction prompt bằng Loop + fact tools khi caller bật cờ."""
 
     def __init__(self, store_provider=None, max_iterations: int = 3) -> None:
         self._store_provider = store_provider or default_memory_store
@@ -56,7 +58,7 @@ class MemoryCorrectionLoopWorkflow:
         trace_id: str,
         trace_logger,
     ) -> MemoryCorrectionLoopOutcome:
-        """Chạy một turn correction qua LoopRuntime, chưa giữ state bền."""
+        """Chạy một turn direct correction; pending bền được xử lý ở facade V1."""
         controller = MemoryCorrectionLoopController(prompt=prompt, gate=gate)
         registry = ToolRegistry(build_memory_fact_tools(store_provider=lambda: self.store))
         observer = TraceLoopObserver(trace_logger, trace_id=trace_id) if trace_logger is not None else None
@@ -75,7 +77,7 @@ class MemoryCorrectionLoopWorkflow:
 
 
 class MemoryCorrectionLoopController:
-    """Controller deterministic để Phase 4A dễ test trước khi dùng model tool-use."""
+    """Controller deterministic V0 để kiểm thử contract tool trước native tool-use."""
 
     def __init__(self, *, prompt: str, gate: dict[str, object]) -> None:
         self.prompt = prompt

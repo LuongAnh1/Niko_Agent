@@ -86,7 +86,7 @@ Việc cần làm:
 - Thêm route trong `ChatReplyGraph` hoặc `MemoryRuntime` để correction prompt có
   thể vào Loop memory workflow.
 - Reuse precheck hiện tại để neutral prompt không bị kéo sai context.
-- Chuyển ambiguous fact flow sang durable pending state thay vì pending RAM thuần.
+- Chuyển ambiguous fact flow sang durable pending state thay vì state chỉ sống trong process.
 - Giữ fallback về `MemoryCorrectionWorkflow` trong giai đoạn đầu nếu Loop lỗi.
 
 Trạng thái 2026-10-08:

@@ -8,8 +8,10 @@ và kiến trúc muốn xây theo kế hoạch trong `docs/plans/2026-10-07-chat
 Mục tiêu là nhìn vào đây để biết dữ liệu đi qua đâu, quyết định nào do model nhỏ
 phụ trách, phần nào đã có, phần nào còn là phase sau.
 
-Checklist live cho đợt test Phase 6/7 hiện nằm ở
-`docs/plans/2026-10-07-chat-memory-live-test-checklist.md`.
+Nhật ký live verification chính nằm ở `docs/harness/memory-live-verification.md`.
+Checklist Phase 6/7 ngày 2026-10-07 hiện được giữ như bản historical để đối chiếu
+expected/result cũ; checklist Loop hiện tại nằm ở
+`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`.
 
 ## Legend
 
@@ -345,7 +347,7 @@ flowchart LR
     Facts[(facts<br/>semantic memory)] --> Working
     Episodes[(episodes<br/>episodic memory)] --> Working
 
-    ChatLog[(chat_log<br/>operational log)] --> Consolidation[Consolidation<br/>manual done / auto planned]
+    ChatLog[(chat_log<br/>operational log)] --> Consolidation[Consolidation<br/>manual + auto default-off done]
     Consolidation --> Facts
     Consolidation --> Episodes
 

@@ -14,4 +14,7 @@ Roadmap dài hạn không đặt ở đây; dùng `docs/memory/` hoặc folder d
 
 - [Kế hoạch Chat Memory Decision Model](2026-10-07-chat-memory-decision-model.md)
 - [Checklist Chat Memory Decision Model](2026-10-07-chat-memory-decision-model-checklist.md)
-- [Checklist Live Test Chat Memory Phase 6/7](2026-10-07-chat-memory-live-test-checklist.md)
+- [Checklist Live Test Chat Memory Phase 6/7](2026-10-07-chat-memory-live-test-checklist.md) - historical, kết quả chính đã được gom vào `../harness/memory-live-verification.md`.
+- [Kế hoạch Niko Loop 2026-10-08](2026-10-08-niko-loop-implementation-plan.md)
+- [Checklist Niko Loop 2026-10-08](2026-10-08-niko-loop-implementation-checklist.md)
+- [Checklist đồng bộ docs/source commentary 2026-10-08](2026-10-08-docs-source-sync-checklist.md)

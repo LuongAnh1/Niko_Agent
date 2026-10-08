@@ -169,7 +169,7 @@ hay nội dung riêng tư dài vào tài liệu này.
 
 ### Ghi Chú UI
 
-- Trong tài liệu cũ gọi là `Preview consolidation`; trên dashboard hiện tại nút
+- Trong tài liệu cũ từng gọi là preview consolidation; trên dashboard hiện tại nút
   tương ứng là `Refresh batch`.
 - `Refresh batch` chỉ đọc batch/candidate, không ghi memory.
 - `Run once` mới gọi classifier, ghi fact/episode nếu được chọn, rồi mark đúng

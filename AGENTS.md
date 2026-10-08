@@ -260,6 +260,8 @@ bot process already owns that lock.
   for the generic Loop runtime.
 - `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
   for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
+- `docs/plans/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
+  keeping Markdown docs and source file comments aligned with the current repo state.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.

@@ -339,7 +339,7 @@ Mục đích: cho Niko hiểu các lệnh sửa/quên memory bằng Decision Mod
 - [x] State correction có `current_prompt`, `recent_turns`, `active_workflow`, `pending_action`, `pending_choices`, `pending_replacement`.
 - [x] Runtime bỏ chính incoming prompt hiện tại khỏi `recent_turns` để tránh lặp context.
 - [x] Pending workflow chỉ là metadata phụ để nối workflow/validate ID; fallback fact ID chỉ còn là guardrail cuối khi model vẫn trả `none` hoặc lỗi.
-- [x] Nâng pending choices từ RAM-only sang bảng `memory_correction_pending`; có trace `memory_correction_pending_created/resolved/expired`.
+- [x] Nâng pending choices từ state chỉ sống trong process sang bảng `memory_correction_pending`; có trace `memory_correction_pending_created/resolved/expired`.
 - [x] Unit test sau Decision Context: `tests/test_memory_store.py` pass `44 passed`; `tests/test_decision_model.py` pass `15 passed`; `tests/test_telegram_prompt.py` pass `43 passed`.
 - [x] Live retest phát hiện Nimble có context nhưng vẫn mislabel `fact #8 nhé` thành `correct_memory`; thêm guardrail cho reply chỉ chọn ID để dùng `pending_action` cũ và ghi `model_decision`.
 - [x] Unit test sau guardrail chọn ID: `tests/test_memory_store.py` pass `45 passed`.

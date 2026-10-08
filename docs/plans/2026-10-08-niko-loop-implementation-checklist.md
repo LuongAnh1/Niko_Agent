@@ -70,7 +70,7 @@ làm mất hành vi đã live-test ổn.
 - [x] Route correction prompt trực tiếp vào Loop memory workflow khi bật
       `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`.
 - [x] Giữ precheck để neutral prompt không inherit correction context cũ.
-- [x] Ambiguous fact follow-up dùng durable pending state thay vì pending RAM thuần.
+- [x] Ambiguous fact follow-up dùng durable pending state thay vì state chỉ sống trong process.
 - [x] Có fallback về `MemoryCorrectionWorkflow` khi Loop lỗi trong giai đoạn đầu.
 - [x] Thêm config dashboard cho `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0`.
 - [x] Unit test delete fact rõ target qua Loop.

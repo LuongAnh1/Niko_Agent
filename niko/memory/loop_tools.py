@@ -1,4 +1,10 @@
-"""Memory tool adapters cho Loop core V0."""
+"""Memory fact tool adapters cho Loop core V0.
+
+Các tool này là lớp mỏng trên `MemoryStore`: read-only tools dùng để search/list
+fact, còn mutate tools chỉ update/delete khi ID và nội dung đã hợp lệ. Correction
+loop default-off đang dùng chúng cho prompt sửa/xóa trực tiếp; tool router tổng
+quát cho chat/Jira vẫn là phase sau.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ MemoryStoreProvider = Callable[[], MemoryStore]
 
 
 def build_memory_fact_tools(store_provider: MemoryStoreProvider | None = None) -> list[Tool]:
-    """Tạo bộ fact tools cho Loop mà chưa nối vào chat flow."""
+    """Tạo bộ fact tools dùng chung cho correction loop và các workflow sau."""
     provider = store_provider or default_memory_store
     adapter = MemoryFactTools(provider)
     return [

@@ -150,8 +150,10 @@ Kỳ vọng:
 - Khi anh trả lời `fact #...`, trace có `memory_correction_applied`.
 - Runtime log có `memory_correction_decision` và có thể có `memory_correction_clarify`.
 
-Ý nghĩa demo: Phase 5 V1 cho phép sửa/quên memory có kiểm soát, nhưng đây vẫn là
-lớp tạm trước khi chuyển sang Loop/tool workflow có state bền hơn.
+Ý nghĩa demo: correction hiện vẫn đi qua facade Phase 5 V1 để giữ hành vi chat ổn
+định, nhưng pending fact-ID đã có state bền trong SQLite. Nếu bật
+`NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, prompt sửa/xóa trực tiếp có thể chạy qua
+LoopRuntime + fact tools; phần tool router tổng quát vẫn là hướng triển khai sau.
 
 ## Xem Dữ Liệu Sau Demo
 
