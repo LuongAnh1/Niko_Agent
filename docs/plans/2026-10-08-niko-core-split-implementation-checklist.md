@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
-Trạng thái: Phase 3 đã review theo Waku, bỏ bridge orchestrator chỉ-forward
+Trạng thái: Phase 4 đã tách Jira selection khỏi ChatReplyGraph, chờ full verification/commit
 
 ## Phase 0: Khóa Tài Liệu Triển Khai
 
@@ -90,21 +90,27 @@ Ghi chú review 2026-10-08:
 
 Mục đích: Jira issue workflow là workflow cấp turn, không còn nhánh trong chat graph.
 
-- [ ] Di chuyển Jira workflow selection sang app-level workflow selection hoặc graph boundary thật.
-- [ ] Xóa hoặc làm private-deprecated helper `_handle_jira_issue_prompt` trong chat graph.
-- [ ] Giữ `JiraIssueAnalysisWorkflow` độc lập với Telegram.
-- [ ] Giữ semantics `NIKO_JIRA_TOOLS_ENABLED`.
-- [ ] Giữ semantics `NIKO_JIRA_DECISION_GATE_ENABLED`.
-- [ ] Đảm bảo handoff Deep có Jira context vẫn ghi trace/runtime log.
-- [ ] Chạy Jira workflow/tools tests.
-- [ ] Chạy Telegram regression cho prompt Jira.
+- [x] Di chuyển Jira workflow selection sang app-level workflow selection trong `NikoApp`.
+- [x] Xóa helper `_handle_jira_issue_prompt` trong chat graph.
+- [x] Giữ `JiraIssueAnalysisWorkflow` độc lập với Telegram.
+- [x] Giữ semantics `NIKO_JIRA_TOOLS_ENABLED`.
+- [x] Giữ semantics `NIKO_JIRA_DECISION_GATE_ENABLED`.
+- [x] Đảm bảo handoff Deep có Jira context vẫn ghi trace/runtime log.
+- [x] Di chuyển call-site memory correction lên `NikoApp` để giữ thứ tự route/busy -> correction -> Jira -> normal chat.
+- [x] Chạy Jira workflow/tools tests.
+- [x] Chạy Telegram regression cho prompt Jira.
+
+Kết quả kiểm thử Phase 4, 2026-10-08:
+
+- `rtk proxy python -m pytest tests/test_niko_app.py tests/test_gateway_runner.py tests/test_telegram_prompt.py tests/test_jira_issue_workflow.py tests/test_jira_tools.py tests/test_memory_correction_loop.py -q`
+  pass `88 passed`.
 
 ## Phase 5: Tách Memory Correction Selection
 
 Mục đích: memory correction trở thành workflow cấp turn do app-level workflow
 selection chọn.
 
-- [ ] Di chuyển call `MemoryRuntime.handle_memory_correction(...)` ra lớp chọn workflow cấp turn.
+- [x] Di chuyển call `MemoryRuntime.handle_memory_correction(...)` ra lớp chọn workflow cấp turn.
 - [ ] Pending fact-ID follow-up vẫn qua durable pending facade hiện tại.
 - [ ] Correction loop default-off vẫn fallback về V1 khi lỗi.
 - [ ] `ChatReplyGraph` không còn chứa nhánh correction handled.
@@ -134,8 +140,8 @@ Mục đích: khóa từng phase bằng test và kiểm docs/source không lệc
 
 - [x] Sau mỗi phase: chạy `rtk proxy git diff --check`.
 - [x] Phase gateway/chat: chạy `tests/test_telegram_prompt.py`.
-- [ ] Phase Jira: chạy `tests/test_jira_issue_workflow.py` và `tests/test_jira_tools.py`.
-- [ ] Phase memory correction: chạy memory correction/store/eval tests liên quan.
+- [x] Phase Jira: chạy `tests/test_jira_issue_workflow.py` và `tests/test_jira_tools.py`.
+- [x] Phase memory correction: chạy memory correction/store/eval tests liên quan.
 - [x] Phase dashboard: chạy `tests/test_ops_dashboard.py`.
 - [x] Trước khi push phase lớn: chạy `rtk proxy python -m pytest -q`.
 - [ ] Rà `rtk rg` cho các cụm stale về `ChatReplyGraph`, `GatewayRunner`,

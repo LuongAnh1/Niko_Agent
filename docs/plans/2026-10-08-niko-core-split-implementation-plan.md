@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: Phase 3 đã review lại theo Waku và bỏ lớp orchestrator chỉ-forward
+Trạng thái: Phase 4 đã tách Jira selection khỏi ChatReplyGraph và đưa lên NikoApp
 Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
@@ -122,6 +122,12 @@ Tiêu chí hoàn thành:
 
 Mục đích: Jira không còn là nhánh nằm trong chat workflow.
 
+Trạng thái 2026-10-08: đã đưa turn-level workflow selection lên `NikoApp`.
+`NikoApp` mở turn, giữ route/busy guard, chạy memory correction trước, rồi chạy
+Jira issue workflow nếu bật. `ChatReplyGraph` không còn import Jira hay helper
+`_handle_jira_issue_prompt`; graph giữ normal local/Fast/Deep chat và deep job
+lifecycle.
+
 Thay đổi chính:
 
 - Di chuyển logic chọn/chạy `JiraIssueAnalysisWorkflow` sang app-level workflow
@@ -130,6 +136,8 @@ Thay đổi chính:
 - Jira workflow vẫn trả `JiraIssueAnalysisResult` và lớp chọn workflow quyết định
   reply ngay hoặc handoff Deep với context.
 - `NIKO_JIRA_TOOLS_ENABLED` và `NIKO_JIRA_DECISION_GATE_ENABLED` giữ semantics cũ.
+- Memory correction call-site cũng đã lên `NikoApp` để giữ thứ tự cũ: route/busy
+  trước, memory correction sau, Jira rồi mới normal chat.
 
 Tiêu chí hoàn thành:
 
@@ -204,6 +212,7 @@ Các test nhóm chính:
 
 ## Trạng Thái Hiện Tại
 
-Phase 3 đã review lại boundary theo Waku và gỡ `TurnOrchestrator` bridge mỏng.
-Chưa di chuyển Jira/memory selection ra khỏi `ChatReplyGraph`; việc này sẽ làm ở
-Phase 4/5 bằng một boundary có logic thật, không phải lớp forward.
+Phase 4 đã tách Jira selection khỏi `ChatReplyGraph` và đưa memory correction
+call-site lên `NikoApp` để giữ đúng thứ tự xử lý. Phase 5 vẫn còn cần dọn/khóa
+memory correction boundary sâu hơn nếu muốn `ChatReplyGraph` không còn helper
+workflow reply liên quan tới correction.

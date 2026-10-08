@@ -24,6 +24,7 @@ from bots.telegram.bot import (
 from bots.decision_model.sticker import StickerMoodDecision
 from bots.decision_model.jira import JIRA_ASK_FOR_ISSUE_KEY, JIRA_USE_TOOL, JiraGateDecision
 from bots.telegram.sticker_picker import choose_sticker_file_id
+from niko.app import NikoApp
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.graph import format_fast_triage_log
 from niko.graphs.jira_issue import (
@@ -743,6 +744,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -754,7 +756,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
@@ -773,6 +775,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -784,7 +787,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertNotEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
@@ -802,6 +805,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -813,7 +817,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-404 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-404 giup anh", message, delivered.append)
 
         self.assertEqual(route, ROUTE_JIRA_ISSUE_NOT_FOUND)
         self.assertIn("chưa có dữ liệu Jira fixture", delivered[0])
@@ -830,6 +834,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         agent.memory_store.log_chat("456", "user", "phan tich NIKO-101 giup anh", source="test")
         delivered = []
 
@@ -846,7 +851,7 @@ class TelegramPromptTests(unittest.TestCase):
             "niko.graphs.jira_issue.workflow.decide_jira_gate",
             return_value=JiraGateDecision(decision=JIRA_USE_TOOL, confidence=0.91),
         ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True):
-            route = agent.handle_message("xem ticket vua nay giup anh", message, delivered.append)
+            route = app.handle_message("xem ticket vua nay giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
@@ -864,6 +869,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -879,7 +885,7 @@ class TelegramPromptTests(unittest.TestCase):
             "niko.graphs.jira_issue.workflow.decide_jira_gate",
             return_value=JiraGateDecision(decision=JIRA_ASK_FOR_ISSUE_KEY, confidence=0.91),
         ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("xem ticket nay giup anh", message, delivered.append)
+            route = app.handle_message("xem ticket nay giup anh", message, delivered.append)
 
         self.assertEqual(route, ROUTE_JIRA_ISSUE_KEY_REQUIRED)
         self.assertIn("mã issue Jira", delivered[0])

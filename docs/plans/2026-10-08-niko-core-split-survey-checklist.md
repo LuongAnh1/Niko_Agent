@@ -35,6 +35,8 @@ kiến trúc cũ.
 - [x] Xác nhận `niko/graphs/jira_issue/` đã là workflow nghiệp vụ riêng.
 - [x] Ghi rõ `ChatReplyGraph` đang ôm route, correction, Jira slot, Deep job,
       trace/chat log và reply delivery callback.
+      Ghi chú sau triển khai: Phase 4 đã chuyển Jira selection và memory
+      correction call-site lên `NikoApp`.
 
 ## Phase 3: Chốt Target Boundary
 

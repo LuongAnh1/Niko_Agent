@@ -12,7 +12,7 @@ Niko tham khảo `waku-agent` để học cách tách trách nhiệm, không cop
 folder hay thêm lớp mới chỉ để giống cấu trúc bên đó. Điểm cần giữ là:
 
 - Gateway chỉ làm IO/auth/parsing/reply.
-- `NikoApp` là assembly root và turn entrypoint kiểu Waku `app.py`.
+- `NikoApp` là assembly root, turn entrypoint, và nơi chọn workflow cấp turn kiểu Waku `app.py`.
 - Workflow nghiệp vụ nằm dưới `niko/graphs/`.
 - Loop/tool runtime dùng chung nằm dưới `niko/loop/`.
 - Tool adapter theo domain nằm dưới `niko/tools/` và không tự gửi reply Telegram.
@@ -24,8 +24,9 @@ Telegram gateway -> GatewayRunner -> NikoApp -> ChatReplyGraph
 ```
 
 Không tạo thêm package orchestrator nếu nó chỉ forward sang `ChatReplyGraph`.
-Khi Jira/memory workflow selection thật sự được tách khỏi chat graph, lúc đó mới
-tạo boundary mới hoặc mở rộng `NikoApp` bằng logic có test và tài liệu rõ ràng.
+Hiện `NikoApp` đã chọn memory correction và Jira issue workflow trước khi chuyển
+normal local/Fast/Deep chat sang `ChatReplyGraph`. Chỉ tạo boundary mới nếu phần
+selection này lớn tới mức cần owner độc lập có test và tài liệu riêng.
 
 ## Niko Hiện Có Gì
 
@@ -188,7 +189,7 @@ Các kịch bản demo nhanh:
 - Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
 - Yêu cầu Niko quên/sửa fact test: correction gate hỏi lại khi mơ hồ và chỉ update/delete khi đã rõ ID.
-- Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: graph dùng Jira Loop
+- Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: `NikoApp` đưa turn qua Jira Loop
   tools đọc fixture, đưa context có evidence sang Deep và hiện Loop Steps trong Traces.
 - Bật thêm `NIKO_JIRA_DECISION_GATE_ENABLED=1` để Nimble xử lý prompt Jira mơ hồ
   như `xem ticket vừa nãy`; issue key rõ vẫn đi rule Python cho nhanh và chắc.
@@ -248,7 +249,7 @@ rtk python -m pytest
 
 - Telegram gateway chỉ nên là cổng vào/ra, không chứa logic memory/LLM.
 - Học Waku theo boundary và trách nhiệm, không thêm bridge/package chỉ để giống tên.
-- `NikoApp` hiện là assembly root; chỉ tách workflow selection ra lớp mới khi lớp đó có logic thật.
+- `NikoApp` hiện là assembly root và nơi chọn memory/Jira workflow; chỉ tách selection ra lớp mới khi lớp đó có logic thật.
 - Logic điều phối nằm trong `niko/graphs/chat_reply/`.
 - Runtime gọi LLM nằm trong `niko/runtime.py`.
 - Memory/trace/dashboard là harness baseline, không nên trộn vào gateway.

@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from niko.app import NikoApp, create_niko_app
 from niko.harness.trace import TraceLogger
@@ -18,6 +20,55 @@ class FakeChatGraph:
         if notify_working is not None:
             notify_working()
         return "fake_route"
+
+
+class FakeCorrectionResult:
+    handled = True
+    reply = "memory correction handled"
+    route = "memory_correction"
+
+
+class FakeMemoryRuntime:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def handle_memory_correction(self, conversation_id, prompt, gateway_message, trace_id, trace_logger):
+        self.calls.append((conversation_id, prompt, gateway_message, trace_id, trace_logger))
+        return FakeCorrectionResult()
+
+
+class FakeSelectableGraph:
+    def __init__(self) -> None:
+        self.memory_runtime = FakeMemoryRuntime()
+        self.trace_logger = object()
+        self.finished = []
+        self.normal_calls = []
+
+    def conversation_id_for(self, gateway_message):
+        return "chat-1"
+
+    def start_chat_turn(self, conversation_id, prompt, gateway_message):
+        return SimpleNamespace(turn_id="trace-1")
+
+    def decide_two_agent_route(self, prompt, conversation_id, trace_id):
+        return SimpleNamespace(kind="deep_agent", reason="test")
+
+    def handle_single_agent_message(self, prompt, gateway_message, deliver_reply, notify_working, trace_turn):
+        self.normal_calls.append(("single", prompt))
+        return "single"
+
+    def handle_busy_reply(self, conversation_id, prompt, gateway_message, deliver_reply, trace_turn, route):
+        self.normal_calls.append(("busy", prompt))
+        return "busy_reply"
+
+    def finish_workflow_reply(self, conversation_id, reply, gateway_message, deliver_reply, *, route, trace_id, meta=None):
+        self.finished.append((conversation_id, reply, route, trace_id, meta))
+        deliver_reply(reply)
+        return route
+
+    def handle_two_agent_message(self, prompt, gateway_message, deliver_reply, notify_working=None, trace_turn=None, route=None):
+        self.normal_calls.append(("two_agent", prompt))
+        return "normal_chat"
 
 
 class NikoAppTests(unittest.TestCase):
@@ -71,6 +122,23 @@ class NikoAppTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 NikoApp(chat_graph=FakeChatGraph(), memory_store=store)
+
+    def test_app_runs_memory_correction_before_jira_selection(self):
+        graph = FakeSelectableGraph()
+        app = NikoApp(chat_graph=graph)
+        message = object()
+        delivered = []
+
+        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "1"}, clear=False), patch(
+            "niko.app.JiraIssueAnalysisWorkflow"
+        ) as jira_workflow:
+            route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+
+        self.assertEqual(route, "memory_correction")
+        self.assertEqual(delivered, ["memory correction handled"])
+        self.assertEqual(len(graph.memory_runtime.calls), 1)
+        self.assertEqual(graph.normal_calls, [])
+        jira_workflow.assert_not_called()
 
 
 if __name__ == "__main__":

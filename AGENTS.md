@@ -46,9 +46,10 @@ Do not add a new package just because Waku has a nearby concept. Add a package
 only when it owns real behavior, state, policy, workflow selection, or reusable
 mechanics. Bridge-only layers that merely forward calls should be removed or
 kept inside the existing assembly/root layer. In the current Niko baseline,
-`NikoApp` is the Waku-style assembly and turn entrypoint; `niko/orchestration/`
-should not exist again until Jira/memory workflow selection genuinely moves out
-of `ChatReplyGraph` and needs an independently testable owner.
+`NikoApp` is the Waku-style assembly and turn entrypoint, and now owns memory
+correction plus Jira issue workflow selection. `niko/orchestration/` should not
+exist again unless the selection logic outgrows `NikoApp` and needs an
+independently testable owner.
 
 ## Architecture Map
 
@@ -69,9 +70,9 @@ of `ChatReplyGraph` and needs an independently testable owner.
 - `niko/gateway/`: Gateway runner. Owns the channel-agnostic handoff
   from normalized gateway messages/callbacks into the current chat workflow.
 - `niko/app.py`: Waku-style assembly root and current turn entrypoint. It owns
-  the current chat workflow wiring behind `NikoApp`/`create_niko_app()`,
-  including injection points for memory and trace. Do not add a separate
-  orchestration package while it only forwards to `ChatReplyGraph`.
+  workflow selection for memory correction and Jira issue flow, then delegates
+  normal local/Fast/Deep chat to `ChatReplyGraph`. Do not add a separate
+  orchestration package while `NikoApp` can own the behavior directly.
 - `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
   LoopRuntime, and observer mechanics. Keep it independent from Telegram and
   from any single domain workflow.
@@ -131,15 +132,16 @@ of `ChatReplyGraph` and needs an independently testable owner.
   documents.
 
 Important current boundary: Niko has a runnable baseline harness, not a generic
-agent framework core yet. `GatewayRunner` and `NikoApp` are thin
-behavior-preserving bridges into the existing chat graph. `ChatReplyGraph` is
-still a hand-written business graph for chat, not a reusable Node/Edge/Workflow
-engine like Waku's graph runtime. The target split for gateway runner, app
-assembly, graph workflows, Loop, and tools started with `niko/gateway/` and
-`niko/app.py`. The broader target is documented in
+agent framework core yet. `GatewayRunner` is still a thin gateway bridge.
+`NikoApp` is now the Waku-style assembly root and owns turn-level selection for
+memory correction and Jira issue workflow before normal chat. `ChatReplyGraph`
+is still a hand-written business graph for local/Fast/Deep chat, not a reusable
+Node/Edge/Workflow engine like Waku's graph runtime. The target split for
+gateway runner, app assembly, graph workflows, Loop, and tools started with
+`niko/gateway/` and `niko/app.py`. The broader target is documented in
 `docs/plans/2026-10-08-niko-core-split-survey.md`; do not add a separate
-orchestrator layer until Jira/memory workflow selection genuinely moves out of
-`ChatReplyGraph`. The phase-by-phase implementation direction now lives in
+orchestrator layer unless a future workflow owner needs real behavior beyond
+`NikoApp`. The phase-by-phase implementation direction now lives in
 `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
 tracking in `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
 
@@ -152,9 +154,9 @@ The Telegram gateway converts each accepted Telegram message into
 from niko.gateway import GatewayRunner
 ```
 
-`GatewayRunner` currently forwards the turn to `NikoApp`; `NikoApp` forwards to
-`ChatReplyGraph` without changing route labels, trace events, memory behavior,
-or Telegram callbacks.
+`GatewayRunner` currently forwards the turn to `NikoApp`. `NikoApp` opens the
+turn, preserves the route/busy order, handles memory correction and Jira issue
+workflow selection, then hands normal local/Fast/Deep chat to `ChatReplyGraph`.
 
 `ChatReplyGraph` runs either `single` or `two_agent` mode according to
 `NIKO_AGENT_MODE`.
@@ -171,13 +173,13 @@ In `two_agent` mode:
 - Nimble decision `send_to_deep` queues a Deep background job and sends a wait
   reply.
 - Deep receives memory context only when memory retrieval is enabled.
-- When `NIKO_JIRA_TOOLS_ENABLED=1`, prompts with Jira issue keys can run through
-  `niko/graphs/jira_issue/` before Deep. The workflow fetches fixture data with
-  Loop, adds evidence context to Deep, and returns a safe no-data reply when the
-  issue key is not in the fixture. Clear issue keys are handled by Python rule;
-  when `NIKO_JIRA_DECISION_GATE_ENABLED=1`, ambiguous prompts such as "ticket vừa
-  nãy" can ask Nimble to choose `use_jira_tool`, `ask_for_issue_key`, or
-  `skip_jira`.
+- When `NIKO_JIRA_TOOLS_ENABLED=1`, `NikoApp` can route prompts with Jira issue
+  keys through `niko/graphs/jira_issue/` before normal chat. The workflow fetches
+  fixture data with Loop, adds evidence context to Deep, and returns a safe
+  no-data reply when the issue key is not in the fixture. Clear issue keys are
+  handled by Python rule; when `NIKO_JIRA_DECISION_GATE_ENABLED=1`, ambiguous
+  prompts such as "ticket vừa nãy" can ask Nimble to choose `use_jira_tool`,
+  `ask_for_issue_key`, or `skip_jira`.
 - When Deep finishes, the result can pass through Fast final composition before
   being sent to the user.
 - If Deep is already busy in the same conversation, new messages are appended to
@@ -440,13 +442,14 @@ not relevant.
 ## Editing Rules For Future Sessions
 
 - Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
-- Keep `niko/gateway/` and `niko/app.py` behavior-preserving until Jira/memory
-  selection is explicitly moved out of `ChatReplyGraph`.
+- Keep `niko/gateway/` channel-agnostic. `niko/app.py` is allowed to own
+  turn-level workflow selection; keep route labels and trace events compatible
+  unless a plan explicitly changes them.
 - Avoid creating bridge-only packages such as a turn orchestrator that only
   delegates. Match Waku's spirit: `app.py` may coordinate a turn, while real
   workflows live under `niko/graphs/` and reusable loop mechanics live under
   `niko/loop/`.
-- Do not move Jira or memory correction workflow selection without following
+- Do not move additional workflow selection responsibilities without following
   `docs/plans/2026-10-08-niko-core-split-implementation-plan.md` and updating
   its checklist.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the

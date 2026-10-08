@@ -58,11 +58,11 @@ Niko đã có một số lớp đúng hướng:
 - `niko/graphs/jira_issue/` đã là workflow nghiệp vụ riêng cho Jira issue context.
 - `niko/memory/` vẫn sở hữu SQLite memory và guardrail mutate memory.
 
-Điểm còn nhập nhằng:
+Điểm còn nhập nhằng tại thời điểm khảo sát:
 
 - `ChatReplyGraph` vừa là chat workflow, vừa đang làm turn orchestrator.
-- Jira workflow selection hiện nằm trong `ChatReplyGraph` qua
-  `_handle_jira_issue_prompt`.
+- Jira workflow selection khi đó nằm trong `ChatReplyGraph` qua
+  `_handle_jira_issue_prompt`; Phase 4 triển khai sau khảo sát đã chuyển phần này lên `NikoApp`.
 - Memory correction selection cũng đang được gọi trực tiếp trong chat graph.
 - Deep job lifecycle và reply delivery callback khiến chat graph khó tái dùng
   cho gateway khác.
@@ -144,7 +144,8 @@ Kết quả triển khai sau đó cho thấy một package orchestrator chỉ-fo
 giống tinh thần Waku bằng việc để `NikoApp` làm turn entrypoint.
 
 - Không giữ package riêng nếu lớp đó chỉ forward.
-- Giữ `NikoApp -> ChatReplyGraph` cho tới khi có Jira/memory selection thật.
+- Giữ `NikoApp -> ChatReplyGraph` cho tới khi có Jira/memory selection thật; Phase 4
+  sau đó đã bắt đầu cho `NikoApp` sở hữu selection này.
 - Trace route phải giữ tên event hiện tại để dashboard không vỡ.
 
 ### Phase 4: Tách Jira Selection Khỏi Chat Graph
