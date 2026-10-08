@@ -1,4 +1,10 @@
-"""Observer cho Loop core, có thể ghi trace mà không kéo dashboard vào runtime."""
+"""Observer side-effect-only cho Loop core.
+
+Loop cần phát event để trace/dashboard nhìn được từng step, nhưng bản thân
+runtime không nên phụ thuộc vào dashboard hoặc bị hỏng vì lỗi ghi log. Vì vậy
+observer là interface nhỏ: nhận event, thử ghi trace/runtime log, và nuốt lỗi
+quan sát để workflow chính vẫn trả lời được.
+"""
 
 from __future__ import annotations
 

@@ -202,6 +202,7 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 ## Tài Liệu
 
 - [Kiến trúc](docs/harness/architecture.md)
+- [Luồng runtime hiện tại](docs/harness/current-runtime-flow.md)
 - [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
 - [Harness Memory & Ops](docs/harness/memory-ops.md)
 - [Chat Memory Eval Scenarios](docs/harness/memory-eval-scenarios.md)

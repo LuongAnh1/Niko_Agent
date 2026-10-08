@@ -319,6 +319,8 @@ bot process already owns that lock.
 
 - `README.md`: high-level setup and baseline explanation.
 - `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
+- `docs/harness/current-runtime-flow.md`: current turn-level runtime map from
+  Telegram gateway through NikoApp, chat graph, memory, Loop, Jira workflow, and ops.
 - `docs/harness/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
 - `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
 - `docs/harness/memory-eval-scenarios.md`: deterministic chat memory eval

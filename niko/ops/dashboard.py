@@ -5,8 +5,9 @@ runtime log, config và bot controls. Logic riêng của từng mảng nằm ở
 chuyên trách để dashboard không trở thành nơi chứa policy của agent.
 
 Các endpoint consolidation trong dashboard là thao tác vận hành thủ công:
-Refresh batch chỉ preview read-only, Run once mới xử lý một batch. Scheduler tự
-động theo N tin nhắn chưa nằm trong dashboard entrypoint hiện tại.
+Refresh batch chỉ preview read-only, Run once mới xử lý một batch. Auto
+consolidation được kích hoạt từ `MemoryRuntime` sau complete exchange khi bật
+config, còn dashboard chỉ expose config/API/log để quan sát và điều khiển.
 """
 
 from __future__ import annotations

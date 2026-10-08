@@ -37,6 +37,19 @@ Mục đích: chú thích đầu file phản ánh đúng vai trò code, không m
 - [x] `bots/decision_model/jira.py` nói rõ Nimble chỉ chọn gate label `use_jira_tool`/`ask_for_issue_key`/`skip_jira`, không tự gọi tool và không sinh reply tự do.
 - [x] Không thêm chú thích vào các hàm hiển nhiên; chỉ sửa các docstring dễ gây hiểu nhầm.
 
+## 3.1. Rà Soát Lần 2026-10-08 Sau Jira Live Test
+
+Mục đích: làm rõ thứ tự đọc tài liệu và đưa chú thích đầu file về gần phong cách
+Waku hơn: nói file sở hữu gì, không sở hữu gì, invariant nào cần giữ.
+
+- [x] Thêm `docs/harness/current-runtime-flow.md` làm bản đồ luồng hiện tại giữa
+  architecture tổng quan và docs thành phần.
+- [x] Cập nhật `README.md`, `docs/README.md`, `docs/harness/architecture.md` và
+  `AGENTS.md` để trỏ về tài liệu flow mới.
+- [x] Sửa link tương đối bị sai sau khi chia `docs/plans/` thành các thư mục con.
+- [x] Rà lại docstring đầu file nhóm `niko/loop/`, `niko/tools/`, `niko/runtime.py`,
+  `niko/ops/dashboard.py` và `bots/decision_model/jira.py` theo boundary hiện tại.
+
 ## 4. Chính Sách Xóa/Giữ
 
 Mục đích: dọn tài liệu cũ nhưng không làm mất lịch sử test có giá trị.

@@ -1,8 +1,13 @@
-"""Fact tools cho Niko Loop.
+"""Semantic fact tools cho Niko Loop.
 
-Memory store vẫn thuộc `niko.memory`; file này chỉ là adapter ToolRegistry để
-Loop gọi search/list/update/delete fact theo contract chung. Các tool mutate
-state được đánh dấu rõ để trace/dashboard nhìn được rủi ro cập nhật SQLite.
+Memory store vẫn thuộc `niko.memory`; file này chỉ chuyển các thao tác
+search/list/update/delete fact sang contract `ToolRegistry`. Nó không sở hữu
+policy correction, không tự quyết định fact nào được sửa/xóa, và không gửi reply
+Telegram. Những guardrail đó nằm ở workflow gọi tool.
+
+Các tool mutate state được đánh dấu `mutates_state=True` để trace/dashboard thấy
+rõ rủi ro cập nhật SQLite, nhưng flag này không thay thế bước xác nhận trong
+workflow.
 """
 
 from __future__ import annotations
@@ -76,7 +81,7 @@ def build_memory_fact_tools(store_provider: MemoryStoreProvider | None = None) -
 
 
 class MemoryFactTools:
-    """Adapter mỏng từ Loop Tool contract sang MemoryStore facts."""
+    """Adapter từ Loop Tool contract sang `MemoryStore` facts."""
 
     def __init__(self, store_provider: MemoryStoreProvider) -> None:
         self._store_provider = store_provider

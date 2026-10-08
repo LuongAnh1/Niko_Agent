@@ -1,8 +1,13 @@
 """Read-only Jira fixture tools cho Niko Loop.
 
-Phase đầu chỉ đọc fixture local để chứng minh tool lane Jira tách khỏi chat
-memory và lakehouse. Jira bot/gateway thật hoặc ingestion lakehouse là các lane
-khác; tool ở đây chỉ fetch/normalize dữ liệu issue cho graph/Deep dùng.
+File này là adapter runtime tool, không phải Jira bot, Jira Cloud client
+production, hay tầng lakehouse/KG. Phase hiện tại chỉ đọc fixture local để chứng
+minh Niko có thể lấy context issue/comment/changelog theo một tool contract
+riêng rồi đưa evidence sang Deep.
+
+Mỗi tool trả dữ liệu đã normalize kèm source để workflow format lại. Không có
+tool mutate Jira trong lane này; nếu sau này thêm create/update issue, workflow
+phải có guardrail và tài liệu riêng.
 """
 
 from __future__ import annotations
@@ -96,7 +101,7 @@ def build_jira_issue_tools(store_provider: JiraStoreProvider | None = None) -> l
 
 
 class JiraFixtureStore:
-    """Store read-only đọc issue từ fixture JSON local."""
+    """Store read-only đọc issue từ fixture JSON local và trả bản copy an toàn."""
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path) if path is not None else DEFAULT_FIXTURE_PATH
