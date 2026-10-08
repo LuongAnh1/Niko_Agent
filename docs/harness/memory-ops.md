@@ -16,6 +16,8 @@ Kịch bản eval deterministic nằm ở [Chat Memory Eval Scenarios](memory-ev
 - `niko/memory/correction_workflow.py`: workflow sửa/xóa fact qua chat, gồm pending choices, validate ID, update/delete và correction trace/log.
 - `niko/memory/correction_loop.py`: bridge correction default-off qua LoopRuntime
   và memory fact tools, có fallback về workflow V1 khi loop lỗi.
+- `niko/tools/memory/facts.py`: adapter search/list/update/delete fact cho Loop;
+  file cũ `niko/memory/loop_tools.py` đã xóa để tránh import nhầm.
 - `niko/memory/consolidation.py`: scaffold đọc batch `chat_log` chưa consolidated,
   tạo candidate, classify, ghi/mark có kiểm soát cho manual và auto path.
 - `niko/ops/dashboard.py`: HTTP server/entrypoint mỏng cho dashboard.

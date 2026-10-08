@@ -387,5 +387,5 @@ Kết quả live test: pass, có một chỉnh sửa guardrail nhỏ sau khi soi
 - Đã chỉnh `MemoryCorrectionLoopWorkflow` để runtime log của loop đi cùng
   thư mục state của `trace_logger`; test dùng trace tạm không ghi dữ liệu giả
   vào log dashboard thật.
-- Verification sau chỉnh sửa: targeted tests liên quan memory/loop/dashboard
-  pass `87 passed`; full suite pass `184 passed`.
+- Verification tại thời điểm khóa Phase 5: targeted tests liên quan
+  memory/loop/dashboard pass `87 passed`; full suite pass `184 passed`.

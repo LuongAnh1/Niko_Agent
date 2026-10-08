@@ -177,6 +177,16 @@ update/delete SQLite có trace. Pending choices được lưu trong SQLite với
 phút để lượt chọn fact có thể sống qua restart runtime. Episode vẫn read-only qua
 chat ở V1.
 
+Jira issue flow chạy sau memory correction và trước local/fast/deep route thông
+thường khi `NIKO_JIRA_TOOLS_ENABLED=1`. Nếu prompt có issue key dạng `NIKO-101`,
+`ChatReplyGraph` gọi `niko/graphs/jira_issue/`, workflow dùng Loop tools để fetch
+issue/comment/changelog từ fixture, format context có evidence và handoff sang
+Deep. Nếu issue key không có trong fixture, bot trả reply an toàn và không gọi Deep.
+Nếu prompt không có key rõ nhưng có tín hiệu Jira/task và
+`NIKO_JIRA_DECISION_GATE_ENABLED=1`, Nimble chỉ chọn gate:
+`use_jira_tool`, `ask_for_issue_key` hoặc `skip_jira`. Python vẫn parse/validate
+issue key trước khi gọi tool; confidence thấp hoặc gate lỗi thì quay về route chat cũ.
+
 Lưu ý: `chat_log` là log hội thoại, không đồng nghĩa với Semantic/Episodic Memory dùng để suy luận. Dashboard vì vậy không coi `memory_write_chat_log` là đường đi qua `Memory Records`.
 
 ## Trace Events Chính
@@ -193,6 +203,12 @@ Mỗi turn có thể có các event:
 - `memory_correction_decision`
 - `memory_correction_clarify`
 - `memory_correction_applied`
+- `loop_started`
+- `loop_tool_call_finished`
+- `jira_issue_workflow_finished`
+- `jira_gate_decision`
+- `jira_gate_error`
+- `deep_extra_context`
 - `deep_agent_call_started`
 - `deep_agent_call_finished`
 - `wait_reply_delivered`
@@ -217,6 +233,11 @@ User Telegram message
         -> decide route
         -> memory correction intent?
            -> clarify/apply correction and reply, stop
+        -> Jira issue key and NIKO_JIRA_TOOLS_ENABLED=1?
+           -> Loop fetch issue/comment/changelog
+           -> handoff Deep with Jira evidence context
+        -> ambiguous Jira/task prompt and Jira decision gate enabled?
+           -> ask issue key / skip Jira / use recent issue key and run Jira flow
 
 Route:
   local_reply

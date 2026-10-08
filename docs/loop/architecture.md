@@ -6,9 +6,10 @@ Phạm vi: kiến trúc Loop tổng quát cho Niko Agent; core V0 đã có, như
 Tài liệu này mô tả Loop như một slot xử lý tool có thể dùng chung cho chat
 memory, Jira/business data và các workflow cần nhiều bước về sau. Hiện tại Niko
 vẫn chạy bằng `ChatReplyGraph` viết tay; `niko/loop/` đã có core V0 độc lập,
-`niko/memory/loop_tools.py` đã có fact tools V0, và memory correction có bridge
-V0 default-off qua Loop. Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira
-workflow.
+`niko/tools/memory/facts.py` đã có fact tools V0, `niko/tools/jira/issues.py` đã
+có Jira fixture tools read-only V0, `niko/graphs/jira_issue/` đã có Jira issue
+context flow V0, và memory correction có bridge V0 default-off qua Loop. Đây
+chưa phải tool router hoàn chỉnh cho mọi chat/Jira workflow.
 
 ## 1. Vai Trò Của Loop
 
@@ -42,7 +43,7 @@ flowchart LR
     Loop --> Controller[Controller / Decision Step]
     Controller --> Registry[ToolRegistry]
     Registry --> MemoryTools[Memory tools]
-    Registry --> JiraTools[Jira tools future]
+    Registry --> JiraTools[Jira tools]
     Registry --> OpsTools[Ops tools future]
     Loop --> Deep[Deep Agent final answer]
     Deep --> Reply
@@ -167,8 +168,16 @@ Episode nên tiếp tục read-only trong V0 để tránh mất ngữ cảnh l�
 
 ## 6. Mở Rộng Jira Và Business Tools
 
-Jira/lakehouse là lane business memory riêng, không trộn vào chat memory SQLite
-mặc định. Khi Loop ổn định, có thể thêm tool:
+Jira có ba lane cần tách rõ:
+
+- Runtime Jira tools trong `niko/tools/jira/`: đọc Jira/mock Jira theo yêu cầu của
+  graph, hiện là fixture read-only V0.
+- Jira bot/gateway tương lai: chạy ở phía Jira để nhận/sync event hoặc thao tác
+  trên Jira.
+- Lakehouse/KG: tầng dữ liệu phân tích dài hạn ở repo riêng, không phải nơi tool
+  V0 bắt buộc ghi vào.
+
+Runtime Jira tools không trộn dữ liệu vào chat memory SQLite mặc định. Bộ V0 gồm:
 
 - `parse_issue_key`: xác định issue key từ prompt.
 - `fetch_jira_issue`: lấy issue summary/description/status/assignee.
@@ -177,6 +186,34 @@ mặc định. Khi Loop ổn định, có thể thêm tool:
 
 Luôn để Deep agent phân tích dựa trên context đã normalize và có evidence. Tool
 chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối cùng.
+
+Phase 6B đã nối bộ tool này vào chat graph khi `NIKO_JIRA_TOOLS_ENABLED=1`:
+
+```text
+prompt có issue key
+  -> ChatReplyGraph
+  -> JiraIssueAnalysisWorkflow
+  -> LoopRuntime gọi parse/fetch issue/comment/changelog
+  -> context có source/evidence
+  -> Deep agent phân tích
+```
+
+Nếu issue key không có trong fixture, graph trả reply an toàn và không gọi Deep.
+Fixture path có thể đổi bằng `NIKO_JIRA_FIXTURE_PATH`; loop tối thiểu dùng
+`NIKO_JIRA_LOOP_MAX_ITERATIONS=5`.
+
+Phase 6C thêm Jira Decision Gate default-off cho vùng mơ hồ:
+
+```text
+prompt không có issue key rõ nhưng có tín hiệu Jira/task
+  -> Decision Model chọn use_jira_tool / ask_for_issue_key / skip_jira
+  -> Python vẫn parse/validate issue key
+  -> có issue key hợp lệ thì chạy JiraIssueAnalysisWorkflow
+  -> thiếu key thì hỏi user gửi mã issue
+```
+
+Issue key rõ vẫn đi rule Python, không cần hỏi model. Nếu gate lỗi hoặc confidence
+thấp hơn `NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD`, graph fallback về route chat cũ.
 
 ## 7. Guardrails
 
@@ -199,7 +236,9 @@ chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối c
 | Tool slot trên dashboard | đã có về mặt hiển thị |
 | Loop core `niko/loop/` | done V0 |
 | ToolRegistry tổng quát | done V0 |
-| Memory fact tools qua Loop | done V0 adapter |
+| Memory fact tools qua Loop | done V0 adapter under `niko/tools/memory/` |
 | Memory correction qua Loop | V0 default-off, fallback về V1, pending follow-up bền trong SQLite nhưng facade vẫn V1 |
 | Loop dashboard observability | done V0: trace có Loop Steps theo turn, runtime log source `loop` có message từng decision/tool |
-| Jira tools qua Loop | planned |
+| Jira fixture tools qua Loop | done V0 adapter under `niko/tools/jira/` |
+| Jira issue context flow | done V0 under `niko/graphs/jira_issue/`, default-off by `NIKO_JIRA_TOOLS_ENABLED` |
+| Jira Decision Gate | done V0 default-off by `NIKO_JIRA_DECISION_GATE_ENABLED`; model only chooses gate labels |

@@ -58,9 +58,10 @@ Tiêu chí hoàn thành:
 
 Trạng thái 2026-10-08:
 
-- Đã thêm `niko/memory/loop_tools.py` với `build_memory_fact_tools(...)`.
+- Đã thêm `niko/tools/memory/facts.py` với `build_memory_fact_tools(...)`;
+  file cũ `niko/memory/loop_tools.py` đã xóa; import active dùng `niko/tools/memory/facts.py`.
 - Đã thêm `tests/test_memory_loop_tools.py` cho search/list/update/delete và LoopRuntime integration nhẹ.
-- Chưa nối các tools này vào `MemoryCorrectionWorkflow` hoặc `ChatReplyGraph`.
+- Memory correction loop đã dùng tools layer mới qua bridge default-off.
 
 ## Phase 4: Correction Flow Uses Loop
 
@@ -175,20 +176,48 @@ Trạng thái 2026-10-08:
 - Live verification Phase 5 đã pass ba smoke case: ambiguous delete, ambiguous
   update có replacement và no-match; dashboard hiển thị `Loop Steps`, tab `Bots`
   có runtime log source `loop`.
-- Verification mới nhất: targeted tests liên quan memory/loop/dashboard pass
-  `87 passed`; full suite pass `184 passed`.
+- Verification tại thời điểm khóa Phase 5: targeted tests liên quan
+  memory/loop/dashboard pass `87 passed`; full suite pass `184 passed`.
 
 ## Phase 6: Jira/Business Tool Lane
 
 Mục đích: chứng minh Loop là khung tổng quát, không chỉ phục vụ chat memory.
 
-- [ ] Thiết kế tool lane Jira/mock Jira.
-- [ ] Parse issue key từ prompt.
-- [ ] Fetch issue/comment/changelog từ source demo.
-- [ ] Normalize context có evidence cho Deep.
-- [ ] Test prompt hỏi issue key route qua Loop/tool.
+- [x] Tách tầng tool adapter chung dưới `niko/tools/`.
+- [x] Thiết kế tool lane Jira/mock Jira read-only, tách khỏi lakehouse và Jira bot.
+- [x] Parse issue key từ prompt bằng tool/utility.
+- [x] Fetch issue/comment/changelog từ fixture demo.
+- [x] Normalize context có evidence cho Deep.
+- [x] Test prompt hỏi issue key route qua Loop/tool.
+- [x] Thêm graph workflow `niko/graphs/jira_issue/` để bọc Loop tools trước khi gọi Deep.
+- [x] Thêm config dashboard `NIKO_JIRA_TOOLS_ENABLED`, `NIKO_JIRA_FIXTURE_PATH`,
+      `NIKO_JIRA_LOOP_MAX_ITERATIONS`.
+- [x] Thêm Jira Decision Gate default-off cho prompt mơ hồ.
+- [x] Test clear issue key không gọi Decision Model; prompt mơ hồ có thể ask key,
+      skip, hoặc dùng issue key từ recent chat.
 
 Tiêu chí hoàn thành:
 
 - Deep trả lời dựa trên dữ liệu issue đã fetch.
 - Chat memory SQLite không bị trộn thành nơi lưu Jira/business records.
+
+Trạng thái 2026-10-08:
+
+- Đã thêm `niko/tools/jira/issues.py` và fixture `demo_issues.json`.
+- Jira tools V0 gồm `parse_issue_key`, `fetch_jira_issue`, `fetch_jira_comments`,
+  `fetch_jira_changelog`; tất cả read-only và trả `ToolResult`.
+- Đã thêm `tests/test_jira_tools.py` cho parse/fetch/not-found/read-only và
+  LoopRuntime integration nhẹ.
+- Đã thêm `niko/graphs/jira_issue/` để parse issue key, fetch issue/comment/changelog,
+  format context có source/evidence, rồi đưa context bổ sung vào Deep qua `ChatReplyGraph`.
+- `NIKO_JIRA_TOOLS_ENABLED` mặc định tắt; khi bật, prompt có issue key như `NIKO-101`
+  route qua Jira Loop trước Fast/Deep mặc định. Issue không có trong fixture trả reply
+  an toàn và không gọi Deep.
+- Phase 6C đã thêm `bots/decision_model/jira.py` với labels `use_jira_tool`,
+  `ask_for_issue_key`, `skip_jira`. Gate chỉ chạy khi
+  `NIKO_JIRA_DECISION_GATE_ENABLED=1` và prompt không có issue key rõ nhưng có tín hiệu
+  Jira/task; lỗi hoặc confidence thấp fallback về route chat cũ.
+- Verification Phase 6B: targeted tests cho Jira tools/workflow, Telegram graph
+  và ops dashboard pass `65 passed`.
+- Verification Phase 6C sau khi thêm Jira Decision Gate: targeted
+  decision/Jira/Telegram/Ops pass `95 passed`; full suite pass `208 passed`.

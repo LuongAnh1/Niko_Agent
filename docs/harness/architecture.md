@@ -87,7 +87,9 @@ niko/
     correction_workflow.py # Workflow sửa/xóa fact qua chat
     correction_loop.py # Bridge correction default-off qua LoopRuntime + fact tools
     consolidation.py   # Scaffold đọc/mark batch chat_log chưa consolidated
-    loop_tools.py      # search/list/update/delete fact tools cho Loop core V0
+  tools/
+    memory/facts.py    # search/list/update/delete fact tools cho Loop core V0
+    jira/issues.py     # read-only Jira fixture tools V0
   ops/
     dashboard.py       # HTTP server/entrypoint mỏng cho Niko Ops dashboard
     bots.py            # Start/stop Telegram bot, warmup/stop Decision Model
@@ -100,6 +102,8 @@ niko/
       graph.py         # ChatReplyGraph điều phối flow chat
       router.py        # Rule router local/deep/fast/busy
       prompts.py       # Prompt task cho Fast Agent và final compose
+    jira_issue/
+      workflow.py      # Jira issue context flow V0 qua Loop tools
 ```
 
 ## Ranh Giới Trách Nhiệm
@@ -109,6 +113,13 @@ niko/
 `niko.chat_gateway` chuẩn hóa input từ gateway thành `ChatGatewayMessage`. Nếu sau này thêm Zalo/Discord/CLI, gateway mới nên convert message về cùng abstraction này.
 
 `niko.graphs.chat_reply` là graph nghiệp vụ chat. Nó quyết định route local/fast/deep/busy, quản lý deep job background, ghi trace, ghi chat log và episode sau deep job.
+
+`niko.graphs.jira_issue` là workflow nghiệp vụ Jira V0. Khi dashboard bật
+`NIKO_JIRA_TOOLS_ENABLED=1`, prompt có issue key được đưa qua Loop để fetch fixture
+issue/comment/changelog, format context có evidence, rồi mới handoff sang Deep.
+Workflow này không phải Jira bot/gateway và không ghi dữ liệu Jira vào chat memory
+SQLite mặc định. Khi bật thêm `NIKO_JIRA_DECISION_GATE_ENABLED=1`, Nimble chỉ
+phân loại prompt mơ hồ; Python vẫn parse/validate issue key và gọi tool thật.
 
 `niko.runtime` là lớp gọi Claude CLI. Nó đọc env command, resolve `CLAUDE_WORKDIR`, nạp `niko/HOOK.md`, chèn identity context, gọi `MemoryRuntime` để lấy memory context rồi gọi `fcc-claude`.
 
@@ -129,9 +140,11 @@ Consolidation có đường manual qua dashboard/API (`Refresh batch`, `Run once
 
 `niko.harness` và `niko.ops` là lớp quan sát/vận hành. Dashboard đọc memory/trace, không tham gia trực tiếp vào agent loop.
 
-Loop core V0 là lớp tool workflow độc lập với Telegram. Fact tool adapters đã có
-trong `niko/memory/loop_tools.py`; memory correction có đường thử nghiệm
-default-off để gọi Loop sau correction gate và trước nhánh V1 search/apply. Tool
+Loop core V0 là lớp tool workflow độc lập với Telegram. Tool adapters nằm dưới
+`niko/tools/`: fact tools ở `niko/tools/memory/facts.py`, Jira fixture tools ở
+`niko/tools/jira/issues.py`. Memory correction có đường thử nghiệm default-off
+để gọi Loop sau correction gate và trước nhánh V1 search/apply; Jira issue flow
+V0 dùng cùng LoopRuntime để đưa context business sang Deep. Tool
 không tự gửi reply Telegram và mọi mutate phải đi qua guardrail Python có trace.
 Phase đầu dùng Python-controlled loop vì runtime hiện gọi Claude qua
 `fcc-claude` CLI, chưa có native tool-use API ổn định trong application code.
@@ -163,6 +176,8 @@ Các nhóm config chính trong dashboard:
 - `Decision Model`: Ollama/Nimble base URL, model, triage/warmup/stop timeout, keep alive.
 - `Sticker`: bật/tắt sticker, sticker set/config/mode, timeout.
 - `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, trace, runtime log.
+- `Business Tools`: bật/tắt Jira tools, fixture path, max iteration cho Jira Loop
+  và Jira Decision Gate cho prompt mơ hồ.
 - `Replies`: suffix, wait/busy/error text.
 
 Tab Config trong dashboard ghi runtime override vào `niko/.runtime/config.json`.
@@ -203,6 +218,10 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
   với TTL 15 phút. Đây là lớp tạm trước khi có Loop/tool workflow đầy đủ.
 - Memory correction Loop V0 default-off: dùng LoopRuntime + fact tools cho prompt
   correction trực tiếp, fallback về V1 khi loop lỗi.
+- Jira issue context flow V0 default-off: prompt có issue key fetch fixture qua
+  Loop tools, format evidence context và đưa sang Deep khi bật `NIKO_JIRA_TOOLS_ENABLED=1`.
+- Jira Decision Gate V0 default-off: dùng Nimble cho prompt Jira mơ hồ, nhưng
+  fail-safe về route cũ khi lỗi hoặc confidence thấp.
 - Manual semantic facts qua dashboard.
 - Episodic record sau deep job và consolidation batch từ `chat_log`.
 - JSONL trace và Mini Ops dashboard.
@@ -211,7 +230,7 @@ Chưa có:
 
 - Tool router hoàn chỉnh nối vào chat flow.
 - Tool router hoàn chỉnh sở hữu toàn bộ ambiguous/pending correction workflow.
-- Jira tools thật chạy qua Loop.
+- Jira bot/gateway thật và kết nối Jira Cloud/API production.
 - Automatic semantic extraction đáng tin cậy từ mọi đoạn chat.
 - Embedding/rerank/graph reasoning.
 - Lakehouse/Knowledge Graph production layer cho Jira/business data.
@@ -221,7 +240,7 @@ Chưa có:
 - Thêm gateway mới: tạo folder trong `bots/`, parse message về `ChatGatewayMessage`, rồi gọi `ChatReplyGraph`.
 - Thêm nghiệp vụ mới: tạo graph mới trong `niko/graphs/`.
 - Thêm tool/loop: dùng `Tool Slot` hiện có như điểm mở rộng, nhưng giữ Telegram gateway mỏng.
-- Khi thêm tool mới cho Loop, giữ tool adapters gần domain sở hữu dữ liệu như
-  `niko/memory/` hoặc Jira lane.
+- Khi thêm tool mới cho Loop, đặt adapter dưới `niko/tools/<domain>/`; graph mới
+  vẫn đặt dưới `niko/graphs/`, còn store/runtime dữ liệu ở domain sở hữu thật.
 - Cải tiến chat memory: làm chắc retrieval/write gate, consolidation và correction trên SQLite local trước.
 - Cải tiến memory nghiệp vụ: nối sang lane lakehouse/Jira qua retrieval/tool slot khi cần dữ liệu issue/tài liệu, không trộn vào chat memory v1.

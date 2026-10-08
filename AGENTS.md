@@ -35,9 +35,9 @@ separate business backend lane that Niko can retrieve from later.
   Keep this layer thin. It should not own memory, routing, or LLM policy.
 - `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
   `/v1/systemone` client, route-label mapping, sticker mood, memory retrieval/write
-  decisions, memory candidate classification, and warmup script for keeping the
-  model loaded. This layer decides labels/modes only; it should not generate
-  free-form user replies.
+  decisions, memory candidate classification, Jira decision gate, and warmup
+  script for keeping the model loaded. This layer decides labels/modes only; it
+  should not generate free-form user replies.
 - `bots/decision_model/memory/`: Memory-specific Decision Model package. Keep
   retrieval, write, candidate, and correction prompts/normalizers in separate
   files here so each decision surface can be debugged independently. Public
@@ -46,10 +46,19 @@ separate business backend lane that Niko can retrieve from later.
   `ChatGatewayMessage` and identity context.
 - `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
   LoopRuntime, and observer mechanics. Keep it independent from Telegram and
-  from any single domain tool; domain adapters should live near their owners.
+  from any single domain workflow.
+- `niko/tools/`: Tool adapters for Loop. Keep adapters here, grouped by domain
+  such as `memory/` and `jira/`. Tools follow the `niko.loop.Tool` contract and
+  should fetch/normalize data or mutate only through explicit domain guardrails;
+  tools must not send Telegram/Jira replies or own workflow policy.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
   replies, Fast/Deep handoff, background deep jobs, busy replies, followups,
   final reply composition, memory writes, and trace events.
+- `niko/graphs/jira_issue/`: Phase 6B Jira issue analysis workflow. It wraps
+  Jira Loop tools, formats issue/comment/changelog context with evidence, and
+  hands the context to Deep. Phase 6C adds a default-off Decision Model gate for
+  ambiguous Jira/task prompts. It is not a Jira bot/gateway and does not write
+  Jira data into chat memory SQLite.
 - `niko/runtime.py`: Claude CLI runtime. Loads env, reads `niko/HOOK.md`,
   injects identity/memory context, resolves `CLAUDE_WORKDIR`, and calls
   `fcc-claude`.
@@ -75,10 +84,14 @@ separate business backend lane that Niko can retrieve from later.
   prompts to LoopRuntime + memory fact tools. It handles direct correction
   prompts when `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, and falls back to V1 on
   loop errors.
-- `niko/memory/loop_tools.py`: Memory fact tools for Loop core V0. Owns
+- `niko/tools/memory/facts.py`: Memory fact tools for Loop core V0. Owns
   `search_facts`, `list_facts`, `update_fact`, and `delete_fact` adapters over
   `MemoryStore`; direct correction prompts can use them through the default-off
-  correction loop bridge, but there is still no complete chat/Jira tool router.
+  correction loop bridge. The old `niko/memory/loop_tools.py` compatibility
+  shim has been removed; new imports should use `niko/tools/memory/facts.py`.
+- `niko/tools/jira/`: Read-only Jira fixture tools V0 for parsing issue keys and
+  fetching issue/comment/changelog data through Loop. This is a runtime tool lane,
+  not the lakehouse/KG ingestion layer and not a Jira bot yet.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
 - `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
 - `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
@@ -117,6 +130,13 @@ In `two_agent` mode:
 - Nimble decision `send_to_deep` queues a Deep background job and sends a wait
   reply.
 - Deep receives memory context only when memory retrieval is enabled.
+- When `NIKO_JIRA_TOOLS_ENABLED=1`, prompts with Jira issue keys can run through
+  `niko/graphs/jira_issue/` before Deep. The workflow fetches fixture data with
+  Loop, adds evidence context to Deep, and returns a safe no-data reply when the
+  issue key is not in the fixture. Clear issue keys are handled by Python rule;
+  when `NIKO_JIRA_DECISION_GATE_ENABLED=1`, ambiguous prompts such as "ticket vừa
+  nãy" can ask Nimble to choose `use_jira_tool`, `ask_for_issue_key`, or
+  `skip_jira`.
 - When Deep finishes, the result can pass through Fast final composition before
   being sent to the user.
 - If Deep is already busy in the same conversation, new messages are appended to
@@ -168,10 +188,11 @@ Important boundaries:
   Phase 4A/4B add a default-off loop bridge for direct correction prompts and
   durable pending state, but the pending follow-up facade remains V1 until the
   generic Loop/tool slot owns the whole correction workflow.
-- Loop core V0 exists in `niko/loop/`, and memory fact tool adapters exist in
-  `niko/memory/loop_tools.py`, with correction loop V0 behind
+- Loop core V0 exists in `niko/loop/`, memory fact tool adapters live in
+  `niko/tools/memory/facts.py`, and read-only Jira fixture tools live in
+  `niko/tools/jira/`. Correction loop V0 is still behind
   `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`. This does not make a complete tool
-  router. Jira domain tools are still planned.
+  router or Jira bot.
 
 ## Business Domains And Future Jira Gateway
 
@@ -181,6 +202,10 @@ Docs under `docs/business-domains/` describe the product/business framing:
 - Jira is the planned task/issue gateway for Phase 2.
 - Memory upgrade work should explain why reading scattered prompt text is not
   enough for task analysis.
+- Distinguish three Jira-related lanes: runtime Jira tools under `niko/tools/jira/`
+  plus `niko/graphs/jira_issue/` for direct issue analysis, a future Jira
+  bot/gateway that lives on Jira, and the separate lakehouse/KG repo that
+  ingests/processes Jira data for analysis.
 
 Expected Phase 2 story:
 
@@ -315,6 +340,12 @@ NIKO_MEMORY_TOP_K=4
 NIKO_MEMORY_RECENT_TURNS=6
 NIKO_MEMORY_RECENT_CHAR_BUDGET=2400
 NIKO_MEMORY_LONG_TERM_CHAR_BUDGET=3600
+NIKO_JIRA_TOOLS_ENABLED=0
+NIKO_JIRA_FIXTURE_PATH=
+NIKO_JIRA_LOOP_MAX_ITERATIONS=5
+NIKO_JIRA_DECISION_GATE_ENABLED=0
+NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD=0.75
+NIKO_JIRA_DECISION_RECENT_TURNS=4
 NIKO_OPS_HOST=127.0.0.1
 NIKO_OPS_PORT=7777
 ```
@@ -363,9 +394,9 @@ not relevant.
   Telegram gateway. Nimble is for route/label decisions, not free-form reply
   generation.
 - Put routing/agent-loop behavior in `niko/graphs/chat_reply/`.
-- When the generic Loop is implemented, put reusable loop mechanics in
-  `niko/loop/`; keep domain tools near their owners such as `niko/memory/` or the
-  future Jira lane.
+- When adding reusable Loop mechanics, put them in `niko/loop/`. Put ToolRegistry
+  adapters in `niko/tools/<domain>/`; keep actual persistence/runtime ownership
+  in the domain package, such as `niko/memory/` for SQLite memory.
 - Put CLI/LLM invocation details in `niko/runtime.py`.
 - Put memory persistence/retrieval in `niko/memory/`.
 - Put observability-only behavior in `niko/harness/` or `niko/ops/`.

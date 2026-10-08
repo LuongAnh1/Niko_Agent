@@ -311,7 +311,7 @@ flowchart TB
     Loop --> Controller[Controller<br/>Python V0 / Decision Model / future tool-use]
     Controller --> Registry[ToolRegistry]
     Registry --> MemoryTools[Memory tools<br/>search/list/update/delete facts]
-    Registry --> JiraTools[Jira/business tools future]
+    Registry --> JiraTools[Jira fixture tools<br/>read-only V0]
     MemoryTools --> Store[(SQLite memory)]
     JiraTools --> External[Jira/mock/public dataset]
     Loop --> Final[Final reply qua Graph]
@@ -321,22 +321,26 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Graph,Normal,Loop,Controller,Registry,MemoryTools,Store,Final,Trace done;
-    class JiraTools planned;
+    class Graph,Normal,Loop,Controller,Registry,MemoryTools,JiraTools,Store,Final,Trace done;
     class External boundary;
 ```
 
-Loop core V0 đã có trong `niko/loop/`, và fact tool adapters đã có trong
-`niko/memory/loop_tools.py`. Bridge correction V0 default-off đã nối các tool này
-vào correction prompt trực tiếp. Pending fact-ID follow-up hiện đã có state bền
-trong SQLite, nhưng phần điều phối vẫn là facade V1 chứ chưa phải tool router tổng
+Loop core V0 đã có trong `niko/loop/`, fact tool adapters đã có trong
+`niko/tools/memory/facts.py`, và Jira fixture tools đã có trong
+`niko/tools/jira/issues.py`. File cũ `niko/memory/loop_tools.py` đã được xóa để tránh nhập nhằng import. Bridge correction V0 default-off đã nối memory tools
+vào correction prompt trực tiếp. Phase 6B đã thêm `niko/graphs/jira_issue/` để
+fetch issue/comment/changelog qua Loop, format context có evidence và đưa sang
+Deep khi bật `NIKO_JIRA_TOOLS_ENABLED=1`. Phase 6C thêm Jira Decision Gate
+default-off để Nimble chỉ phân loại prompt Jira mơ hồ trước khi Python validate
+issue key và gọi tool. Pending fact-ID follow-up hiện đã có state bền
+trong SQLite, nhưng phần điều phối memory correction vẫn là facade V1 chứ chưa phải tool router tổng
 quát cho chat. Tài liệu triển khai nằm ở
 `docs/loop/architecture.md` và checklist ở
 `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
 thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow có
 state rõ contract hơn: controller chọn search/list/update/delete, Python validate
-target rồi mới mutate SQLite. Cùng runtime Loop đó sẽ mở sang Jira/business tools nhưng
-không trộn dữ liệu Jira vào chat memory SQLite mặc định.
+target rồi mới mutate SQLite. Jira/business tools hiện vẫn read-only và không trộn dữ liệu
+Jira vào chat memory SQLite mặc định.
 
 ## 7. Các Lớp Dữ Liệu
 

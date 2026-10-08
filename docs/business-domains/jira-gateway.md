@@ -111,8 +111,8 @@ agent.
 
 ## 7. Ranh Giới V1
 
-Trong `Niko_Agent` hiện tại, Jira Gateway mới là hướng nghiệp vụ dự kiến, chưa
-phải phần đã implement.
+Trong `Niko_Agent` hiện tại, Jira Gateway/bot thật vẫn là hướng nghiệp vụ dự kiến,
+nhưng đã có runtime Jira tools V0 và graph context flow V0 để demo bằng fixture local.
 
 V1 nên chỉ chốt về mặt thiết kế:
 
@@ -121,3 +121,27 @@ V1 nên chỉ chốt về mặt thiết kế:
 - dữ liệu cần được chuẩn hóa trước khi đưa vào LLM;
 - memory backend/lakehouse/graph là lớp nâng cấp sau baseline SQLite.
 
+Hiện trạng runtime V0:
+
+- `niko/tools/jira/` đọc fixture issue/comment/changelog read-only.
+- `niko/graphs/jira_issue/` dùng LoopRuntime để fetch dữ liệu, format context có
+  source/evidence và đưa sang Deep khi `NIKO_JIRA_TOOLS_ENABLED=1`.
+- Prompt có issue key như `NIKO-101` có thể route qua flow này; issue không có
+  trong fixture trả reply an toàn và không gọi Deep.
+- Nếu bật `NIKO_JIRA_DECISION_GATE_ENABLED=1`, prompt Jira mơ hồ như "ticket vừa
+  nãy" được Nimble phân loại thành `use_jira_tool`, `ask_for_issue_key` hoặc
+  `skip_jira`. Python vẫn là lớp parse/validate issue key và gọi tool thật.
+- Dữ liệu Jira không được ghi vào chat memory SQLite mặc định.
+
+## 8. Ranh Giới Jira Tool, Jira Bot Và Lakehouse
+
+Trong `Niko_Agent`, cần tách ba lớp:
+
+- Jira runtime tools: adapter read-only hoặc API wrapper để graph/Loop đọc issue,
+  comment, changelog khi user hỏi. V0 hiện dùng fixture local dưới
+  `niko/tools/jira/` và không ghi vào chat memory SQLite.
+- Jira bot/gateway: bot hoặc webhook chạy ở phía Jira để nhận event, sync dữ liệu
+  hoặc thao tác trên Jira. Đây là lane riêng, chưa nằm trong V0.
+- Lakehouse/KG: tầng thu thập, làm sạch, liên kết và khai phá dữ liệu Jira dài
+  hạn ở repo phân tích riêng. Tool runtime có thể đọc từ tầng này sau, nhưng không
+  đồng nghĩa với việc tool phải ghi vào lakehouse ngay.

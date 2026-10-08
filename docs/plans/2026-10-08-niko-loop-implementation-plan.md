@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Niko Loop Tổng Quát
 
 Ngày tạo: 2026-10-08
-Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correction loop default-off, Phase 4B durable pending correction và Phase 5 dashboard observability V0 đã triển khai, đã live-test
+Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correction loop default-off, Phase 4B durable pending correction, Phase 5 dashboard observability V0 đã live-test, Phase 6C Jira issue context flow + Decision Gate V0 đã triển khai
 
 ## Mục Tiêu
 
@@ -135,12 +135,23 @@ Trạng thái 2026-10-08:
 ## Phase 6: Jira/Business Tool Lane
 
 Mục đích: dùng cùng Loop runtime cho business data, tách khỏi chat memory local.
+Phase này cũng tách rõ `niko/tools/` là adapter layer, còn `niko/graphs/` là
+workflow/nghiệp vụ. Jira runtime tools khác với Jira bot/gateway và khác với
+lakehouse/KG.
 
 Việc cần làm:
 
-- Thiết kế tool đọc Jira/mock Jira/public fixture.
-- Normalize issue/comment/changelog thành context có evidence.
-- Deep agent phân tích dựa trên context, không để tool tự kết luận.
+- Thiết kế tool đọc Jira/mock Jira/public fixture. Done V0 với `niko/tools/jira/`.
+- Di chuyển memory fact tools sang `niko/tools/memory/`; file shim cũ đã xóa.
+- Normalize issue/comment/changelog thành context có evidence. Done V0 với
+  `niko/graphs/jira_issue/`.
+- Deep agent phân tích dựa trên context, không để tool tự kết luận. Done V0 khi
+  `NIKO_JIRA_TOOLS_ENABLED=1`.
+- Thêm config dashboard cho Jira tools: `NIKO_JIRA_TOOLS_ENABLED`,
+  `NIKO_JIRA_FIXTURE_PATH`, `NIKO_JIRA_LOOP_MAX_ITERATIONS`.
+- Thêm Jira Decision Gate default-off cho prompt không có key rõ:
+  `NIKO_JIRA_DECISION_GATE_ENABLED`, `NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD`,
+  `NIKO_JIRA_DECISION_RECENT_TURNS`.
 
 Tiêu chí hoàn thành:
 
