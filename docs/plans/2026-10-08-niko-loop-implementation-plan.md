@@ -7,9 +7,9 @@ Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correctio
 
 Tạo một Loop runtime tổng quát cho Niko theo hướng `observe -> reason -> act ->
 observe`, đủ để dùng cho memory correction trước, rồi mở sang Jira/business tool
-sau. Loop phải giữ đúng boundary hiện tại: Telegram gateway mỏng,
-`ChatReplyGraph` điều phối route lớn, memory/Jira tool tự quản dữ liệu của mình,
-trace/dashboard quan sát được từng bước.
+sau. Loop phải giữ đúng boundary hiện tại: Telegram gateway mỏng, `NikoApp`
+chọn workflow cấp turn, `ChatReplyGraph` giữ normal local/Fast/Deep chat,
+memory/Jira tool tự quản dữ liệu của mình, trace/dashboard quan sát được từng bước.
 
 ## Nguyên Tắc Thiết Kế
 

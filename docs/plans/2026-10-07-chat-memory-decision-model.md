@@ -567,6 +567,7 @@ Không triển khai trong bước đầu:
 - Không cần multi-user scoped memory ngay trong v1.
 - Không nên để model tự sửa memory tự do khi chưa có guardrail.
 
-Niko nên giữ Telegram gateway mỏng, ChatReplyGraph làm orchestration, decision
-tasks nằm trong `bots/decision_model/`, memory pipeline nằm trong `niko/memory/`,
-và dashboard chỉ quan sát/chỉnh sửa.
+Niko nên giữ Telegram gateway mỏng, `NikoApp` chọn workflow cấp turn,
+`ChatReplyGraph` giữ normal chat local/Fast/Deep, decision tasks nằm trong
+`bots/decision_model/`, memory pipeline nằm trong `niko/memory/`, và dashboard
+chỉ quan sát/chỉnh sửa.

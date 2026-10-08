@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
-Trạng thái: Phase 5 đã khóa boundary memory correction ở NikoApp, chờ Phase 6 cleanup/docs
+Trạng thái: Phase 6 đã hoàn tất dashboard/docs/runtime-log cleanup cho core split
 
 ## Phase 0: Khóa Tài Liệu Triển Khai
 
@@ -135,15 +135,26 @@ Kết quả kiểm thử Phase 5, 2026-10-08:
 Mục đích: quan sát và tài liệu phản ánh kiến trúc mới, không còn mô tả
 `ChatReplyGraph` như application core.
 
-- [ ] Cập nhật dashboard graph semantics nếu UI có sơ đồ flow.
-- [ ] Runtime log hiển thị workflow route khi cần.
-- [ ] Cập nhật `AGENTS.md`.
-- [ ] Cập nhật `README.md`.
-- [ ] Cập nhật `docs/harness/architecture.md`.
-- [ ] Cập nhật `docs/harness/telegram-chat-flow.md`.
-- [ ] Cập nhật `docs/loop/architecture.md`.
-- [ ] Cập nhật checklist này sau từng commit/phase.
-- [ ] Dọn compatibility helper cũ khi không còn caller.
+- [x] Cập nhật dashboard graph semantics nếu UI có sơ đồ flow.
+- [x] Runtime log hiển thị workflow route khi cần.
+- [x] Cập nhật `AGENTS.md`.
+- [x] Cập nhật `README.md`.
+- [x] Cập nhật `docs/harness/architecture.md`.
+- [x] Cập nhật `docs/harness/telegram-chat-flow.md`.
+- [x] Cập nhật `docs/loop/architecture.md`.
+- [x] Cập nhật checklist này sau từng commit/phase.
+- [x] Rà compatibility helper cũ; giữ lại helper còn caller và ghi rõ lý do.
+
+Kết quả triển khai Phase 6, 2026-10-08:
+
+- Dashboard live graph đổi sang `Gateway -> GatewayRunner -> NikoApp -> Workflow`;
+  test template khóa label `GatewayRunner`, `NikoApp`, `workflow_selected`.
+- `NikoApp` ghi runtime log source `niko_app`, event `workflow_selected`, với
+  `workflow`, `route`, `conversation_id`, `trace_id` và metadata Jira khi có.
+- `ChatReplyGraph.handle_message(...)` và `finish_workflow_reply(...)` được giữ có
+  chủ ý: entrypoint tương thích cho caller cũ và helper ghi reply/trace/log chung.
+- `rtk proxy powershell -NoProfile -Command "python -m pytest tests/test_niko_app.py tests/test_gateway_runner.py tests/test_telegram_prompt.py tests/test_ops_dashboard.py -q"`
+  pass `71 passed`.
 
 ## Verification Tổng
 
@@ -160,5 +171,13 @@ Mục đích: khóa từng phase bằng test và kiểm docs/source không lệc
 
 Kết quả rà stale 2026-10-08:
 
-- Không còn cụm stale kiểu `ChatReplyGraph detects` hoặc trạng thái Phase 4 chờ
+- Không còn cụm stale kiểu correction detection cũ hoặc trạng thái Phase 4 chờ
   verification. Các kết quả còn lại là ghi chú lịch sử/target boundary có chủ ý.
+
+Kết quả rà stale Phase 6, 2026-10-08:
+
+- Rà các cụm route cũ và mô tả gọi thẳng vào chat graph; kết quả còn lại chỉ là
+  assertion trong test dashboard để chống hồi quy.
+- `rtk proxy powershell -NoProfile -Command "git diff --check"` pass, chỉ có
+  warning CRLF do Git/Windows.
+- `rtk proxy powershell -NoProfile -Command "python -m pytest -q"` pass `222 passed`.

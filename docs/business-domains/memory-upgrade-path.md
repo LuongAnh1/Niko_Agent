@@ -90,10 +90,10 @@ Hạ tầng lưu trữ giúp:
 Trạng thái hiện tại:
 
 ```text
-Telegram -> ChatReplyGraph -> Deep Agent
-                  |
-                  v
-         SQLite memory + JSONL trace
+Telegram -> GatewayRunner -> NikoApp -> ChatReplyGraph/Deep Agent
+                              |
+                              v
+                     SQLite memory + JSONL trace
 ```
 
 Mục tiêu:
@@ -215,4 +215,3 @@ Có thể diễn đạt:
 > vấn đề. Vì vậy cần mở rộng harness bằng một Jira Gateway và một memory backend
 > có khả năng chuẩn hóa, cập nhật, liên kết dữ liệu thành Semantic/Episodic
 > Memory, từ đó hỗ trợ LLM phân tích dựa trên context có nguồn và có cấu trúc.
-

@@ -1,9 +1,9 @@
 """Assembly root và điểm chọn workflow cấp turn hiện tại của Niko.
 
 Theo tinh thần Waku, app là nơi ráp config/dependency và là entrypoint cấp turn
-cho gateway. Phase 4 bắt đầu đưa workflow selection thật ra khỏi
-`ChatReplyGraph`: memory correction và Jira issue flow được chọn ở đây, còn chat
-graph giữ phần local/Fast/Deep.
+cho gateway. Phase 4/5 đã đưa workflow selection thật ra khỏi `ChatReplyGraph`:
+memory correction và Jira issue flow được chọn ở đây, còn chat graph giữ phần
+local/Fast/Deep.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from niko.graphs.chat_reply import ROUTE_BUSY_REPLY, ChatReplyGraph, two_agent_mode_enabled
 from niko.graphs.jira_issue import JiraIssueAnalysisWorkflow, jira_tools_enabled
+from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
@@ -19,6 +20,11 @@ from niko.memory.store import MemoryStore
 
 ReplyCallback = Callable[[str], None]
 NotifyCallback = Callable[[], None]
+
+
+def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
+    """Ghi log cấp app để dashboard thấy workflow nào đã nhận turn."""
+    default_runtime_logger().event("niko_app", event, message, level=level, data=data or {})
 
 
 class NikoApp:
@@ -55,6 +61,12 @@ class NikoApp:
         trace_turn = self.chat_graph.start_chat_turn(conversation_id, prompt, gateway_message)
 
         if not two_agent_mode_enabled():
+            self._log_workflow_selected(
+                "single_agent",
+                "deep_agent",
+                conversation_id,
+                trace_turn.turn_id,
+            )
             return self.chat_graph.handle_single_agent_message(
                 prompt,
                 gateway_message,
@@ -65,6 +77,13 @@ class NikoApp:
 
         route = self.chat_graph.decide_two_agent_route(prompt, conversation_id, trace_turn.turn_id)
         if route.kind == ROUTE_BUSY_REPLY:
+            self._log_workflow_selected(
+                "busy_reply",
+                route.kind,
+                conversation_id,
+                trace_turn.turn_id,
+                {"reason": route.reason},
+            )
             return self.chat_graph.handle_busy_reply(
                 conversation_id,
                 prompt,
@@ -89,6 +108,13 @@ class NikoApp:
         if jira_route:
             return jira_route
 
+        self._log_workflow_selected(
+            "normal_chat",
+            route.kind,
+            conversation_id,
+            trace_turn.turn_id,
+            {"reason": route.reason},
+        )
         return self.chat_graph.handle_two_agent_message(
             prompt,
             gateway_message,
@@ -126,6 +152,12 @@ class NikoApp:
         )
         if not correction.handled:
             return ""
+        self._log_workflow_selected(
+            "memory_correction",
+            correction.route,
+            conversation_id,
+            trace_turn.turn_id,
+        )
         return self.chat_graph.finish_workflow_reply(
             conversation_id,
             correction.reply,
@@ -160,6 +192,18 @@ class NikoApp:
         if not result.handled:
             return ""
 
+        self._log_workflow_selected(
+            "jira_issue",
+            result.route,
+            conversation_id,
+            trace_id,
+            {
+                "issue_key": result.issue_key,
+                "issue_keys": result.issue_keys,
+                "has_deep_context": bool(result.deep_context),
+                "error": result.error,
+            },
+        )
         self.chat_graph.trace_logger.event(
             trace_id,
             "jira_issue_workflow_finished",
@@ -202,6 +246,28 @@ class NikoApp:
             return self.chat_graph.memory_store.chat_history(conversation_id, limit=8)
         except Exception:
             return []
+
+    def _log_workflow_selected(
+        self,
+        workflow: str,
+        route: str,
+        conversation_id: str,
+        trace_id: str,
+        data: dict | None = None,
+    ) -> None:
+        payload = {
+            "workflow": workflow,
+            "route": route,
+            "conversation_id": conversation_id,
+            "trace_id": trace_id,
+        }
+        if data:
+            payload.update(data)
+        runtime_log(
+            "workflow_selected",
+            f"NikoApp workflow: {workflow} route={route}",
+            data=payload,
+        )
 
 
 def create_niko_app(

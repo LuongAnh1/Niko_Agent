@@ -51,8 +51,12 @@ làm nơi lưu mặc định cho mọi tin nhắn Telegram.
 
 ```mermaid
 flowchart TB
-    Gateway[Gateway<br/>Telegram] --> ChatGraph[ChatReplyGraph<br/>route / correction / deep job / reply]
+    Gateway[Gateway<br/>Telegram] --> Runner[GatewayRunner]
+    Runner --> App[NikoApp<br/>workflow selection]
+    App --> ChatGraph[ChatReplyGraph<br/>local / Fast / Deep chat]
+    App --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
     ChatGraph --> MemoryRuntime[MemoryRuntime<br/>correction / write / retrieve facade]
+    CorrectionPath --> MemoryRuntime
     ChatGraph --> DeepRuntime[niko.runtime<br/>build Deep prompt]
     DeepRuntime --> MemoryRuntime
 
@@ -74,7 +78,6 @@ flowchart TB
     WriteGate -->|remember| Episode[(episodes)]
     WriteGate -->|error fail-open| Episode
 
-    MemoryRuntime --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
     CorrectionPath --> CorrectionPrecheck{Prompt có tín hiệu<br/>sửa/xóa/quên?}
     CorrectionPrecheck -->|no| NoCorrection[Luồng chat bình thường]
     CorrectionPrecheck -->|pending fact ID| CorrectionPending[Python pending action<br/>validate allowed IDs]
@@ -100,15 +103,16 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionPrecheck,CorrectionGate,CorrectionPending,CorrectionPendingMatch,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,RecentOnly,NoEpisode done;
+    class Gateway,Runner,App,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionPrecheck,CorrectionGate,CorrectionPending,CorrectionPendingMatch,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,RecentOnly,NoEpisode done;
 ```
 
 Điểm kiểm soát chính là `MemoryRuntime`. Graph và runtime không nên tự biết chi
 tiết gate/search/write/correction nữa; chúng chỉ gọi pipeline memory.
 
-Luồng hiện tại có hai điểm gọi chính vào `MemoryRuntime`: `ChatReplyGraph` gọi trực
-tiếp để xử lý correction/write và ghi `chat_log`; `niko.runtime` gọi khi cần dựng
-memory context cho Deep. Vì vậy correction gate không nằm bên trong Deep runtime.
+Luồng hiện tại có ba điểm gọi chính vào `MemoryRuntime`: `NikoApp` gọi correction
+workflow cấp turn, `ChatReplyGraph` gọi write path/ghi `chat_log`, và
+`niko.runtime` gọi khi cần dựng memory context cho Deep. Vì vậy correction gate
+không nằm bên trong Deep runtime.
 
 ## 3. Retrieval Flow Cho Deep
 
@@ -305,7 +309,7 @@ target, kết quả được coi là `no_fact_match` thay vì bắt user chọn 
 
 ```mermaid
 flowchart TB
-    Graph[ChatReplyGraph] --> NeedTool{Cần workflow nhiều bước?}
+    App[NikoApp] --> NeedTool{Cần workflow nhiều bước?}
     NeedTool -->|no| Normal[Fast/Deep/local flow hien tai]
     NeedTool -->|yes| Loop[Loop Runtime]
     Loop --> Controller[Controller<br/>Python V0 / Decision Model / future tool-use]
@@ -314,14 +318,14 @@ flowchart TB
     Registry --> JiraTools[Jira fixture tools<br/>read-only V0]
     MemoryTools --> Store[(SQLite memory)]
     JiraTools --> External[Jira/mock/public dataset]
-    Loop --> Final[Final reply qua Graph]
+    Loop --> Final[Final reply qua App/Graph helper]
     Loop --> Trace[Trace/runtime log]
 
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Graph,Normal,Loop,Controller,Registry,MemoryTools,JiraTools,Store,Final,Trace done;
+    class App,Normal,Loop,Controller,Registry,MemoryTools,JiraTools,Store,Final,Trace done;
     class External boundary;
 ```
 

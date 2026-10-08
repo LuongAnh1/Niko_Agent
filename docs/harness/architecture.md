@@ -39,8 +39,8 @@ Harness side effects:
 Dashboard đang biểu diễn các khối chính:
 
 ```text
-Gateway -> Router -> Fast Agent -> Reply
-                 \-> Memory Gate -> Loop/Deep Agent -> Reply
+Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply
+                              \-> Memory Gate -> Loop/Deep Agent -> Reply
 
 Memory Gate -> Memory Records
 Reply/turn events -> Trace/Ops
@@ -247,7 +247,8 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 Đã có:
 
 - Gateway Telegram chạy thật.
-- GatewayRunner/NikoApp bọc đường gọi Telegram -> ChatReplyGraph mà chưa đổi behavior.
+- GatewayRunner/NikoApp bọc đường gọi Telegram; `NikoApp` chọn memory correction/Jira
+  workflow trước khi đưa normal chat sang `ChatReplyGraph`.
 - Fast/Deep agent flow.
 - Memory retrieval cho Deep agent.
 - Recent working-memory window cho Deep prompt theo `conversation_id`.

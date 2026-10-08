@@ -185,8 +185,8 @@ khóa, dashboard vẫn hiển thị nhưng không ghi đè được.
 
 Các kịch bản demo nhanh:
 
-- Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> Router -> Reply` hoặc `Gateway -> Router -> Fast Agent -> Reply`.
-- Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
+- Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply` hoặc `NikoApp -> Fast Agent -> Reply`.
+- Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `NikoApp -> Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
 - Yêu cầu Niko quên/sửa fact test: correction gate hỏi lại khi mơ hồ và chỉ update/delete khi đã rõ ID.
 - Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: `NikoApp` đưa turn qua Jira Loop
@@ -195,7 +195,7 @@ Các kịch bản demo nhanh:
   như `xem ticket vừa nãy`; issue key rõ vẫn đi rule Python cho nhanh và chắc.
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`,
   `memory_gate_decision`, `memory_write_decision`, `memory_correction_decision`, `turn_end`.
-- Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
+- Mở tab Bots để xem runtime log như `workflow_selected`, `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
 Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 

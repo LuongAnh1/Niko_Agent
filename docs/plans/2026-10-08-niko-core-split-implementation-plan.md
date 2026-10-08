@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: Phase 5 đã khóa boundary memory correction ở NikoApp; chuẩn bị Phase 6 cleanup/docs
+Trạng thái: Phase 6 đã đồng bộ dashboard/docs/runtime log cho boundary NikoApp
 Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
@@ -174,6 +174,11 @@ Tiêu chí hoàn thành:
 
 Mục đích: làm observability và tài liệu khớp kiến trúc mới sau khi code đã tách.
 
+Trạng thái 2026-10-08: dashboard live graph đã đổi sang
+`Gateway -> GatewayRunner -> NikoApp -> Workflow`; runtime log source `niko_app`
+đã có event `workflow_selected`; docs/source comments đã được rà để không còn
+mô tả active theo tuyến router cũ hoặc gọi thẳng từ Telegram vào chat graph.
+
 Thay đổi chính:
 
 - Dashboard graph semantics đổi thành
@@ -217,9 +222,7 @@ Các test nhóm chính:
 
 ## Trạng Thái Hiện Tại
 
-Phase 5 đã khóa memory correction như workflow cấp turn ở `NikoApp`. Các invariant
-đã được test: busy route chặn correction, correction handled không rơi tiếp xuống
-Jira/normal chat, correction unhandled mới đi tiếp normal chat, durable pending và
-fallback V1 vẫn do `MemoryRuntime`/workflow hiện tại giữ. Phần tiếp theo là Phase 6:
-rà dashboard/docs/compatibility helper và dọn mô tả stale về `ChatReplyGraph` như
-application core.
+Phase 6 đã hoàn tất phần còn lại của core split ở mức harness baseline. `NikoApp`
+là turn entrypoint và nơi chọn workflow cấp turn; `ChatReplyGraph` giữ normal
+local/Fast/Deep chat và các helper tương thích còn được giữ có chủ ý. Dashboard,
+runtime log và docs hiện phản ánh luồng `GatewayRunner -> NikoApp -> Workflow`.

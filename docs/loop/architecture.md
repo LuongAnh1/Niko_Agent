@@ -43,9 +43,12 @@ lặp lại.
 
 ```mermaid
 flowchart LR
-    Gateway[Telegram Gateway] --> Graph[ChatReplyGraph]
+    Gateway[Telegram Gateway] --> Runner[GatewayRunner]
+    Runner --> App[NikoApp]
+    App --> Graph[ChatReplyGraph]
     Graph -->|reply nhanh| Reply[Reply]
-    Graph -->|cần tool/memory/Jira| Loop[Loop Runtime]
+    App -->|memory/Jira workflow| Loop[Loop Runtime]
+    Graph -->|normal chat cần tool/memory| Loop
     Loop --> Controller[Controller / Decision Step]
     Controller --> Registry[ToolRegistry]
     Registry --> MemoryTools[Memory tools]
@@ -60,14 +63,15 @@ flowchart LR
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
 
-    class Gateway,Graph,Reply,Deep,Trace,RuntimeLog,Loop,Controller,Registry,MemoryTools done;
+    class Gateway,Runner,App,Graph,Reply,Deep,Trace,RuntimeLog,Loop,Controller,Registry,MemoryTools done;
     class JiraTools,OpsTools planned;
 ```
 
 Ranh giới cần giữ:
 
 - `bots/telegram/` chỉ làm IO/auth/parsing/reply/sticker.
-- `ChatReplyGraph` chọn route và gọi Loop khi tác vụ cần tool workflow.
+- `NikoApp` chọn workflow cấp turn; `ChatReplyGraph` giữ normal local/Fast/Deep chat.
+- `ChatReplyGraph` vẫn có thể đi qua Loop/Deep trong normal chat khi tác vụ cần tool workflow.
 - `niko/loop/` là nơi đặt loop core V0, tool registry, loop result và observer.
 - `niko/memory/` vẫn sở hữu SQLite memory và guardrail mutate memory.
 - Tool chỉ trả về kết quả cho loop; tool không tự reply Telegram.
@@ -193,18 +197,18 @@ Runtime Jira tools không trộn dữ liệu vào chat memory SQLite mặc đị
 Luôn để Deep agent phân tích dựa trên context đã normalize và có evidence. Tool
 chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối cùng.
 
-Phase 6B đã nối bộ tool này vào chat graph khi `NIKO_JIRA_TOOLS_ENABLED=1`:
+Phase 6B đã nối bộ tool này vào `NikoApp`/Jira workflow khi `NIKO_JIRA_TOOLS_ENABLED=1`:
 
 ```text
 prompt có issue key
-  -> ChatReplyGraph
+  -> NikoApp
   -> JiraIssueAnalysisWorkflow
   -> LoopRuntime gọi parse/fetch issue/comment/changelog
   -> context có source/evidence
   -> Deep agent phân tích
 ```
 
-Nếu issue key không có trong fixture, graph trả reply an toàn và không gọi Deep.
+Nếu issue key không có trong fixture, workflow trả reply an toàn và không gọi Deep.
 Fixture path có thể đổi bằng `NIKO_JIRA_FIXTURE_PATH`; loop tối thiểu dùng
 `NIKO_JIRA_LOOP_MAX_ITERATIONS=5`.
 
@@ -219,7 +223,7 @@ prompt không có issue key rõ nhưng có tín hiệu Jira/task
 ```
 
 Issue key rõ vẫn đi rule Python, không cần hỏi model. Nếu gate lỗi hoặc confidence
-thấp hơn `NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD`, graph fallback về route chat cũ.
+thấp hơn `NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD`, app fallback về route chat cũ.
 
 ## 7. Guardrails
 

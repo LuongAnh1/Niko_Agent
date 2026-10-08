@@ -14,6 +14,7 @@ from niko.harness.runtime_log import RuntimeEventLogger
 from niko.harness.trace import TraceLogger
 from niko.memory.store import MemoryStore
 from niko.ops.dashboard import TelegramBotProcessManager, create_server
+from niko.ops.frontend import dashboard_html
 from bots.telegram.instance_guard import TelegramBotInstanceInfo
 from bots.decision_model.memory import MEMORY_SEMANTIC_FACT, MemoryCandidateDecision
 
@@ -21,6 +22,14 @@ TRANSIENT_LOCAL_HTTP_ERRORS = (ConnectionAbortedError, ConnectionResetError, Rem
 
 
 class OpsDashboardTests(unittest.TestCase):
+    def test_dashboard_graph_labels_app_level_flow(self):
+        html = dashboard_html()
+
+        self.assertIn("GatewayRunner", html)
+        self.assertIn("NikoApp", html)
+        self.assertIn("workflow_selected", html)
+        self.assertNotIn("Gateway -> Router", html)
+
     def test_telegram_manager_reports_external_instance_and_blocks_start(self):
         external = TelegramBotInstanceInfo(pid=4242, command="python -m bots.telegram.bot", lock_path="lock")
         manager = TelegramBotProcessManager(runtime_logger=RuntimeEventLogger(enabled=False))

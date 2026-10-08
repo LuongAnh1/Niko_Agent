@@ -49,7 +49,7 @@ Gửi Telegram:
 Kỳ vọng:
 
 - Bot trả lời nhanh.
-- Dashboard sáng tuyến `Gateway -> Router -> Reply`.
+- Dashboard sáng tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply`.
 - Không sáng `Memory Gate`, `Memory Records`, `Loop`.
 - Trace có `route_decision` route `local_reply`.
 
@@ -65,8 +65,8 @@ Gửi một câu nhẹ không cần phân tích sâu, ví dụ:
 
 Tùy cấu hình Fast Agent, có thể xảy ra:
 
-- Fast trả lời ngay: `Gateway -> Router -> Fast Agent -> Reply`.
-- Fast thấy cần Deep: đi tiếp qua `Memory Gate -> Loop`.
+- Fast trả lời ngay: `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`.
+- Fast thấy cần Deep: đi tiếp qua `NikoApp -> Memory Gate -> Loop`.
 
 Ý nghĩa demo: Fast Agent là lớp triage/compose, không phải memory engine.
 

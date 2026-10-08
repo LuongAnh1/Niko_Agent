@@ -80,10 +80,14 @@ Telegram message
 
 Trên dashboard:
 
-- `local_reply` đi tuyến `Gateway -> Router -> Reply`.
-- `fast_agent` với `reply_now` đi tuyến `Gateway -> Router -> Fast Agent -> Reply`.
-- `deep_agent` đi tuyến `Gateway -> Router -> Memory Gate -> Loop/Deep -> Reply`.
-- `busy_reply` đi tuyến `Gateway -> Router -> Reply`.
+- `local_reply` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply`.
+- `fast_agent` với `reply_now` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`.
+- `deep_agent` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep -> Reply`.
+- `busy_reply` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply`.
+
+Trong runtime log, source `niko_app` event `workflow_selected` cho biết turn đã
+được chọn vào `normal_chat`, `memory_correction`, `jira_issue`, `busy_reply`
+hay `single_agent`.
 
 ## Vai Trò Của Decision Model Và Fast Agent
 

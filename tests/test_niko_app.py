@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from niko.app import NikoApp, create_niko_app
+from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
@@ -139,9 +140,11 @@ class NikoAppTests(unittest.TestCase):
         message = object()
         delivered = []
 
-        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "1"}, clear=False), patch(
-            "niko.app.JiraIssueAnalysisWorkflow"
-        ) as jira_workflow:
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.JiraIssueAnalysisWorkflow") as jira_workflow:
             route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
 
         self.assertEqual(route, "memory_correction")
@@ -155,7 +158,7 @@ class NikoAppTests(unittest.TestCase):
         app = NikoApp(chat_graph=graph)
         delivered = []
 
-        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent"}, clear=False):
+        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent", "NIKO_RUNTIME_LOG_ENABLED": "0"}, clear=False):
             route = app.handle_message("fact #8 nhe", object(), delivered.append)
 
         self.assertEqual(route, "busy_reply")
@@ -166,13 +169,70 @@ class NikoAppTests(unittest.TestCase):
         graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
         app = NikoApp(chat_graph=graph)
 
-        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "0"}, clear=False):
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "0", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ):
             route = app.handle_message("hello", object(), lambda _reply: None)
 
         self.assertEqual(route, "normal_chat")
         self.assertEqual(len(graph.memory_runtime.calls), 1)
         self.assertEqual(graph.normal_calls, [("two_agent", "hello")])
         self.assertIsNotNone(graph.last_two_agent_route)
+
+    def test_app_logs_memory_correction_workflow_route(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            graph = FakeSelectableGraph()
+            app = NikoApp(chat_graph=graph)
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "NIKO_AGENT_MODE": "two_agent",
+                    "NIKO_JIRA_TOOLS_ENABLED": "0",
+                    "NIKO_RUNTIME_LOG_ENABLED": "1",
+                    "NIKO_STATE_DIR": temp_dir,
+                },
+                clear=False,
+            ):
+                route = app.handle_message("quen fact checklist", object(), lambda _reply: None)
+                events = default_runtime_logger().read_events(source="niko_app")
+
+        self.assertEqual(route, "memory_correction")
+        event = next(log for log in events if log["event"] == "workflow_selected")
+        self.assertEqual(event["data"]["workflow"], "memory_correction")
+        self.assertEqual(event["data"]["route"], "memory_correction")
+        self.assertEqual(event["data"]["conversation_id"], "chat-1")
+        self.assertEqual(event["data"]["trace_id"], "trace-1")
+
+    def test_app_logs_normal_chat_workflow_route(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            graph = FakeSelectableGraph(
+                correction_result=FakeCorrectionResult(handled=False, reply="", route=""),
+                route_kind="fast_agent",
+            )
+            app = NikoApp(chat_graph=graph)
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "NIKO_AGENT_MODE": "two_agent",
+                    "NIKO_JIRA_TOOLS_ENABLED": "0",
+                    "NIKO_RUNTIME_LOG_ENABLED": "1",
+                    "NIKO_STATE_DIR": temp_dir,
+                },
+                clear=False,
+            ):
+                route = app.handle_message("hello", object(), lambda _reply: None)
+                events = default_runtime_logger().read_events(source="niko_app")
+
+        self.assertEqual(route, "normal_chat")
+        event = next(log for log in events if log["event"] == "workflow_selected")
+        self.assertEqual(event["data"]["workflow"], "normal_chat")
+        self.assertEqual(event["data"]["route"], "fast_agent")
+        self.assertEqual(event["data"]["conversation_id"], "chat-1")
+        self.assertEqual(event["data"]["trace_id"], "trace-1")
 
 
 if __name__ == "__main__":

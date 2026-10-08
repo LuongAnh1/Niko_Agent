@@ -292,11 +292,13 @@ http://127.0.0.1:7777
 
 Dashboard graph semantics:
 
-- `Gateway -> Router -> Reply`: local or busy reply.
-- `Gateway -> Router -> Fast Agent -> Reply`: Fast reply path.
-- `Gateway -> Router -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep path.
+- `Gateway -> GatewayRunner -> NikoApp -> Reply`: local, busy, correction, or safe workflow reply.
+- `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`: Fast reply path.
+- `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep/tool path.
 - `Memory Gate -> Memory Records`: retrieval from facts/episodes.
 - `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
+- Runtime log source `niko_app` event `workflow_selected` shows which app-level
+  workflow handled a turn before normal chat continues.
 
 The dashboard `Bots` tab is the preferred place to start/stop Telegram Bot,
 warm up or stop/unload Decision Model, and inspect runtime logs. Terminal output

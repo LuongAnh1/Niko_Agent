@@ -213,11 +213,14 @@ Live graph không phải là graph mining. Đây là đồ thị quan sát harne
 
 Ý nghĩa tuyến chính:
 
-- `Gateway -> Router -> Reply`: local/busy reply.
-- `Gateway -> Router -> Fast Agent -> Reply`: Fast trả lời ngay.
-- `Gateway -> Router -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep path.
+- `Gateway -> GatewayRunner -> NikoApp -> Reply`: local/busy/correction/safe workflow reply.
+- `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`: Fast trả lời ngay.
+- `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep/tool path.
 - `Memory Gate -> Memory Records`: có retrieval từ facts/episodes.
 - `Reply/turn events -> Trace/Ops`: trace/dashboard quan sát.
+
+Tab Bots có runtime log source `niko_app`, event `workflow_selected`, để biết
+turn đã được app chọn vào memory correction, Jira issue, normal chat hay busy.
 
 Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để dễ quan sát đường đi.
 

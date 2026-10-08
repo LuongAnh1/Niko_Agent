@@ -1,7 +1,7 @@
-"""Lớp chuyển đổi giữa gateway cụ thể và graph nghiệp vụ.
+"""Lớp chuyển đổi giữa gateway cụ thể và app/core nghiệp vụ.
 
 Telegram có shape message riêng, sau này Jira/Zalo/CLI cũng sẽ có shape riêng.
-Graph chat không nên biết các chi tiết đó. File này tạo một ngôn ngữ chung:
+App và graph chat không nên biết các chi tiết đó. File này tạo một ngôn ngữ chung:
 `ChatGatewayMessage` + `ChatIdentity`, đủ để runtime build prompt, memory ghi
 log, trace gắn user/chat, nhưng vẫn giữ gateway mỏng.
 """
@@ -45,7 +45,7 @@ class ChatIdentity:
 
 @dataclass(frozen=True)
 class ChatGatewayMessage:
-    """Tin nhắn đã chuẩn hóa trước khi đi vào ChatReplyGraph."""
+    """Tin nhắn đã chuẩn hóa trước khi đi vào GatewayRunner/NikoApp."""
 
     platform: str
     chat_id: str

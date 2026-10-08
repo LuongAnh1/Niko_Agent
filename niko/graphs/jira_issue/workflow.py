@@ -1,9 +1,9 @@
 """Workflow phân tích Jira issue bằng Loop tools read-only.
 
-File này là lớp nghiệp vụ nằm giữa ChatReplyGraph và `niko/tools/jira/`: graph
-quyết định khi nào cần lấy dữ liệu Jira, LoopRuntime gọi tool theo từng bước,
-rồi workflow chuẩn hóa evidence thành context cho Deep agent. Tool chỉ đọc dữ
-liệu fixture/API; phần trả lời cuối cùng vẫn thuộc Deep.
+File này là workflow nghiệp vụ được `NikoApp` chọn trước normal chat:
+LoopRuntime gọi tool theo từng bước, rồi workflow chuẩn hóa evidence thành
+context cho Deep agent. Tool chỉ đọc dữ liệu fixture/API; phần trả lời cuối cùng
+vẫn thuộc Deep.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ DEFAULT_JIRA_DECISION_RECENT_TURNS = 4
 
 @dataclass(frozen=True)
 class JiraIssueAnalysisResult:
-    """Kết quả chuẩn hóa để ChatReplyGraph biết nên gọi Deep hay trả lỗi ngay."""
+    """Kết quả chuẩn hóa để NikoApp biết nên gọi Deep hay trả lỗi ngay."""
 
     handled: bool
     route: str = ""
