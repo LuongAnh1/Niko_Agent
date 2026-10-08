@@ -20,6 +20,7 @@ Telegram
   -> bots/telegram
   -> ChatGatewayMessage
   -> GatewayRunner
+  -> NikoApp
   -> ChatReplyGraph
      -> local rule
      -> Ollama/Nimble decision triage
@@ -71,8 +72,9 @@ niko/
   runtime.py           # Gọi Claude CLI, đọc hook, build prompt, inject memory context
   config.py            # Load bootstrap env, runtime config và resolve project path
   chat_gateway.py      # ChatGatewayMessage, identity, alias, allowed user parsing
+  app.py               # Assembly root mỏng, sở hữu ChatReplyGraph hiện tại
   gateway/
-    runner.py          # Runner mỏng nối gateway vào ChatReplyGraph hiện tại
+    runner.py          # Runner mỏng nối gateway vào NikoApp hiện tại
   HOOK.md              # Persona/hook nạp vào Niko
   harness/
     trace.py           # JSONL turn/event tracing
@@ -115,9 +117,14 @@ niko/
 
 `niko.chat_gateway` chuẩn hóa input từ gateway thành `ChatGatewayMessage`. Nếu sau này thêm Zalo/Discord/CLI, gateway mới nên convert message về cùng abstraction này.
 
-`niko.gateway` là runner chung cho gateway. Phase 1 hiện chỉ nhận message/callback
-đã chuẩn hóa rồi chuyển nguyên sang `ChatReplyGraph`, chưa chọn workflow và chưa
-thay đổi route/trace/log hiện có.
+`niko.gateway` là runner chung cho gateway. Runner nhận message/callback đã
+chuẩn hóa rồi chuyển nguyên sang `NikoApp`, chưa chọn workflow và chưa thay đổi
+route/trace/log hiện có.
+
+`niko.app` là assembly root Phase 2. `NikoApp` hiện sở hữu `ChatReplyGraph`, có
+chỗ inject `MemoryStore`/`MemoryRuntime`/`TraceLogger` và slot Jira workflow cho
+phase sau, nhưng `handle_message(...)` vẫn chỉ forward sang chat graph; nó chưa
+phải `TurnOrchestrator`.
 
 `niko.graphs.chat_reply` là graph nghiệp vụ chat. Nó quyết định route local/fast/deep/busy, quản lý deep job background, ghi trace, ghi chat log và episode sau deep job.
 
@@ -170,8 +177,9 @@ Phương hướng triển khai theo phase nằm ở
 từng phần nằm ở `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 Trạng thái hiện tại: Phase 1 đã có package `niko/gateway/` với `GatewayRunner`
-mỏng. Telegram gateway gọi runner này, còn runner vẫn ủy quyền trực tiếp sang
-`ChatReplyGraph`. Chưa có `NikoApp`/turn orchestrator chung.
+mỏng. Phase 2 đã có `niko/app.py` với `NikoApp` assembly root. Telegram gateway
+gọi runner, runner gọi app, còn app vẫn ủy quyền trực tiếp sang `ChatReplyGraph`.
+Chưa có turn orchestrator chung.
 
 ## Import Chính
 
@@ -232,7 +240,7 @@ Thư mục `niko/.runtime/` là dữ liệu local, không commit. Nếu cần re
 Đã có:
 
 - Gateway Telegram chạy thật.
-- GatewayRunner Phase 1 bọc đường gọi Telegram -> ChatReplyGraph mà chưa đổi behavior.
+- GatewayRunner/NikoApp bọc đường gọi Telegram -> ChatReplyGraph mà chưa đổi behavior.
 - Fast/Deep agent flow.
 - Memory retrieval cho Deep agent.
 - Recent working-memory window cho Deep prompt theo `conversation_id`.

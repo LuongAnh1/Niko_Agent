@@ -1,12 +1,13 @@
 # Luồng Xử Lý Chat Telegram
 
-Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; gateway gọi `GatewayRunner`, còn phần route, memory, trace và deep job hiện vẫn nằm trong `ChatReplyGraph`.
+Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; gateway gọi `GatewayRunner`, runner gọi `NikoApp`, còn phần route, memory, trace và deep job hiện vẫn nằm trong `ChatReplyGraph`.
 
 ## Thành Phần
 
 - `bots/telegram/bot.py`: Telegram gateway.
 - `niko.chat_gateway`: chuẩn hóa message Telegram thành `ChatGatewayMessage`.
-- `niko.gateway.GatewayRunner`: runner mỏng nhận message/callback từ gateway rồi ủy quyền sang chat graph hiện tại.
+- `niko.gateway.GatewayRunner`: runner mỏng nhận message/callback từ gateway rồi ủy quyền sang app hiện tại.
+- `niko.app.NikoApp`: assembly root mỏng, hiện sở hữu `ChatReplyGraph`.
 - `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối flow chat.
 - `niko.graphs.chat_reply.router`: rule router local/deep/fast/busy.
 - `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
@@ -47,7 +48,7 @@ route chính của chat.
 Nếu `NIKO_AGENT_MODE=single`:
 
 ```text
-Telegram -> GatewayRunner -> ChatReplyGraph -> Deep Agent -> Telegram
+Telegram -> GatewayRunner -> NikoApp -> ChatReplyGraph -> Deep Agent -> Telegram
 ```
 
 Graph gọi `runtime.call_deep_agent(...)` đồng bộ. Runtime nạp hook, identity context và memory context nếu bật.
@@ -60,6 +61,7 @@ Nếu `NIKO_AGENT_MODE=two_agent`:
 Telegram message
   -> Telegram gateway
   -> GatewayRunner.handle_message
+  -> NikoApp.handle_message
   -> ChatReplyGraph.handle_message
   -> router.decide_agent_route
   -> local reply | Fast triage | Deep background | busy reply
@@ -231,7 +233,8 @@ User Telegram message
      -> group mention filter
      -> chat/user auth
      -> GatewayRunner.handle_message
-        -> ChatReplyGraph.handle_message
+        -> NikoApp.handle_message
+           -> ChatReplyGraph.handle_message
         -> write turn_start + incoming chat log
         -> decide route
         -> memory correction intent?

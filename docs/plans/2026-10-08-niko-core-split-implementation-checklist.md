@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
-Trạng thái: đang triển khai Phase 1 Gateway Runner khung
+Trạng thái: Phase 2 NikoApp Assembly Root đã triển khai, chờ review/commit
 
 ## Phase 0: Khóa Tài Liệu Triển Khai
 
@@ -41,13 +41,20 @@ Kết quả kiểm thử 2026-10-08:
 
 Mục đích: gom wiring app vào một chỗ, không để gateway tự biết graph/runtime.
 
-- [ ] Tạo `NikoApp` hoặc `create_niko_app()`.
-- [ ] App quản lý MemoryStore/MemoryRuntime/TraceLogger/ChatReplyGraph.
-- [ ] App có chỗ inject Jira workflow và dependency sau này.
-- [ ] Gateway runner nhận app instance.
-- [ ] Dashboard/bot startup dùng app factory thống nhất.
-- [ ] Tests vẫn inject được store/logger tạm.
-- [ ] Chạy Telegram + ops dashboard tests.
+- [x] Tạo `NikoApp` hoặc `create_niko_app()`.
+- [x] App quản lý MemoryStore/MemoryRuntime/TraceLogger/ChatReplyGraph.
+- [x] App có chỗ inject Jira workflow và dependency sau này.
+- [x] Gateway runner nhận app instance.
+- [x] Dashboard/bot startup dùng app factory thống nhất.
+- [x] Tests vẫn inject được store/logger tạm.
+- [x] Chạy Telegram + ops dashboard tests.
+
+Kết quả kiểm thử Phase 2, 2026-10-08:
+
+- `rtk proxy python -m pytest tests/test_niko_app.py tests/test_gateway_runner.py tests/test_telegram_prompt.py tests/test_ops_dashboard.py -q`
+  pass `65 passed`.
+- `rtk proxy python -m pytest -q` pass `216 passed`.
+- `rtk proxy git diff --check` pass, chỉ có warning CRLF do cấu hình Git/Windows.
 
 ## Phase 3: TurnOrchestrator V0
 
@@ -106,11 +113,11 @@ Mục đích: quan sát và tài liệu phản ánh kiến trúc mới, không c
 
 Mục đích: khóa từng phase bằng test và kiểm docs/source không lệch nhau.
 
-- [ ] Sau mỗi phase: chạy `rtk proxy git diff --check`.
-- [ ] Phase gateway/chat: chạy `tests/test_telegram_prompt.py`.
+- [x] Sau mỗi phase: chạy `rtk proxy git diff --check`.
+- [x] Phase gateway/chat: chạy `tests/test_telegram_prompt.py`.
 - [ ] Phase Jira: chạy `tests/test_jira_issue_workflow.py` và `tests/test_jira_tools.py`.
 - [ ] Phase memory correction: chạy memory correction/store/eval tests liên quan.
-- [ ] Phase dashboard: chạy `tests/test_ops_dashboard.py`.
+- [x] Phase dashboard: chạy `tests/test_ops_dashboard.py`.
 - [x] Trước khi push phase lớn: chạy `rtk proxy python -m pytest -q`.
 - [ ] Rà `rtk rg` cho các cụm stale về `ChatReplyGraph`, `GatewayRunner`,
       `TurnOrchestrator`, `NikoApp`, `tool router`.

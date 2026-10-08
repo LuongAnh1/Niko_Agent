@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: Phase 1 Gateway Runner khung đã triển khai, đang chờ khóa bằng test
+Trạng thái: Phase 2 NikoApp assembly root đã triển khai, đang chờ khóa bằng test
 Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
@@ -76,6 +76,11 @@ Tiêu chí hoàn thành:
 ## Phase 2: NikoApp Assembly Root
 
 Mục đích: gom wiring vào một chỗ thay vì để gateway hoặc module global tự ráp graph.
+
+Trạng thái 2026-10-08: đã thêm `niko/app.py` với `NikoApp` và
+`create_niko_app()`. `GatewayRunner` gọi `NikoApp.handle_message(...)`; app có
+đường inject memory/trace và slot Jira workflow cho phase sau, nhưng vẫn forward
+nguyên sang `ChatReplyGraph`.
 
 Thay đổi chính:
 
@@ -195,6 +200,6 @@ Các test nhóm chính:
 
 ## Trạng Thái Hiện Tại
 
-Phase 1 đã bắt đầu bằng một lớp `GatewayRunner` mỏng để bọc đường gọi hiện tại.
-Chưa có `NikoApp`, chưa có `TurnOrchestrator`, và chưa di chuyển Jira/memory
-selection ra khỏi `ChatReplyGraph`.
+Phase 2 đã thêm `NikoApp` assembly root mỏng để bọc wiring hiện tại. Chưa có
+`TurnOrchestrator`, và chưa di chuyển Jira/memory selection ra khỏi
+`ChatReplyGraph`.
