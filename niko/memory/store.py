@@ -1,16 +1,17 @@
 """SQLite memory baseline của Niko.
 
 Đây là lớp persistence đơn giản cho demo/harness: `chat_log` là log vận hành,
-`facts` là semantic memory thủ công, `episodes` là episodic summary sau Deep.
-Search dùng FTS5 nếu SQLite hỗ trợ, còn không thì fallback LIKE/normalize để
-repo vẫn chạy được trên máy dev phổ thông.
+`facts` là semantic memory thủ công, `episodes` là episodic summary sau Deep, và
+`memory_correction_pending` giữ lựa chọn fact đang chờ user xác nhận. Search dùng
+FTS5 nếu SQLite hỗ trợ, còn không thì fallback LIKE/normalize để repo vẫn chạy
+được trên máy dev phổ thông.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -61,8 +62,12 @@ SEARCH_STOPWORDS = {
 }
 
 
+def _format_utc(value: datetime) -> str:
+    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _format_utc(datetime.now(timezone.utc))
 
 
 def default_state_dir() -> Path:
@@ -89,6 +94,27 @@ def _json_loads(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _json_int_list(value: str | None) -> list[int]:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+
+    result: list[int] = []
+    for item in data:
+        try:
+            normalized = int(item)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            result.append(normalized)
+    return result
 
 
 def _words(query: str, limit: int = 12) -> list[str]:
@@ -166,6 +192,32 @@ class Episode:
         }
 
 
+@dataclass(frozen=True)
+class PendingCorrectionRecord:
+    """Pending state bền vững cho lượt chọn fact ID sau câu hỏi ambiguous."""
+
+    conversation_id: str
+    decision: str
+    query: str
+    replacement: str
+    fact_ids: list[int]
+    trace_id: str
+    created_at: str
+    expires_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "conversation_id": self.conversation_id,
+            "decision": self.decision,
+            "query": self.query,
+            "replacement": self.replacement,
+            "fact_ids": self.fact_ids,
+            "trace_id": self.trace_id,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+
+
 class MemoryStore:
     """API SQLite thread-safe ở mức process cho chat log, facts và episodes."""
 
@@ -228,6 +280,20 @@ class MemoryStore:
                     meta_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS memory_correction_pending (
+                    conversation_id TEXT PRIMARY KEY,
+                    decision TEXT NOT NULL,
+                    query TEXT NOT NULL DEFAULT '',
+                    replacement TEXT NOT NULL DEFAULT '',
+                    fact_ids_json TEXT NOT NULL DEFAULT '[]',
+                    trace_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_memory_correction_pending_expires
+                    ON memory_correction_pending(expires_at);
                 """
             )
             self._ensure_chat_log_migrations(conn)
@@ -376,6 +442,12 @@ class MemoryStore:
                 (max(1, limit),),
             ).fetchall()
             return [self._row_to_fact(row) for row in rows]
+
+    def get_fact(self, fact_id: int) -> Fact | None:
+        """Lấy một fact theo ID để tool/correction có thể giữ provenance."""
+        with self._lock, self.connection() as conn:
+            row = conn.execute("SELECT * FROM facts WHERE id = ?", (fact_id,)).fetchone()
+            return self._row_to_fact(row) if row is not None else None
 
     def search_facts(self, query: str, top_k: int = 5) -> list[Fact]:
         """Tìm facts bằng FTS trước, rồi LIKE/normalize fallback."""
@@ -651,6 +723,96 @@ class MemoryStore:
             )
             return int(cursor.rowcount)
 
+    def set_memory_correction_pending(
+        self,
+        conversation_id: str,
+        decision: str,
+        query: str,
+        replacement: str,
+        fact_ids: list[int] | tuple[int, ...],
+        trace_id: str = "",
+        ttl_seconds: int = 900,
+    ) -> PendingCorrectionRecord:
+        """Lưu pending correction theo conversation để follow-up fact ID sống qua restart."""
+        conversation_id = str(conversation_id).strip()
+        if not conversation_id:
+            raise ValueError("conversation_id is required")
+
+        clean_fact_ids: list[int] = []
+        for fact_id in fact_ids:
+            try:
+                normalized = int(fact_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized > 0 and normalized not in clean_fact_ids:
+                clean_fact_ids.append(normalized)
+
+        created_at_dt = datetime.now(timezone.utc).replace(microsecond=0)
+        expires_at_dt = created_at_dt + timedelta(seconds=int(ttl_seconds))
+        record = PendingCorrectionRecord(
+            conversation_id=conversation_id,
+            decision=str(decision),
+            query=str(query or ""),
+            replacement=str(replacement or ""),
+            fact_ids=clean_fact_ids,
+            trace_id=str(trace_id or ""),
+            created_at=_format_utc(created_at_dt),
+            expires_at=_format_utc(expires_at_dt),
+        )
+        with self._lock, self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_correction_pending(
+                    conversation_id,
+                    decision,
+                    query,
+                    replacement,
+                    fact_ids_json,
+                    trace_id,
+                    created_at,
+                    expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    decision = excluded.decision,
+                    query = excluded.query,
+                    replacement = excluded.replacement,
+                    fact_ids_json = excluded.fact_ids_json,
+                    trace_id = excluded.trace_id,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    record.conversation_id,
+                    record.decision,
+                    record.query,
+                    record.replacement,
+                    json.dumps(record.fact_ids, ensure_ascii=False),
+                    record.trace_id,
+                    record.created_at,
+                    record.expires_at,
+                ),
+            )
+        return record
+
+    def get_memory_correction_pending(self, conversation_id: str) -> PendingCorrectionRecord | None:
+        """Đọc pending correction nếu conversation đang chờ user chọn fact ID."""
+        with self._lock, self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_correction_pending WHERE conversation_id = ?",
+                (str(conversation_id),),
+            ).fetchone()
+            return self._row_to_pending_correction(row) if row is not None else None
+
+    def clear_memory_correction_pending(self, conversation_id: str) -> int:
+        """Xóa pending correction sau khi resolve, hết hạn, hoặc target không còn tồn tại."""
+        with self._lock, self.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memory_correction_pending WHERE conversation_id = ?",
+                (str(conversation_id),),
+            )
+            return int(cursor.rowcount)
+
     def recent_chat(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock, self.connection() as conn:
             rows = conn.execute(
@@ -744,6 +906,18 @@ class MemoryStore:
             "meta": _json_loads(row["meta_json"]),
             "consolidated": bool(int(row["consolidated"])),
         }
+
+    def _row_to_pending_correction(self, row: sqlite3.Row) -> PendingCorrectionRecord:
+        return PendingCorrectionRecord(
+            conversation_id=str(row["conversation_id"]),
+            decision=str(row["decision"]),
+            query=str(row["query"]),
+            replacement=str(row["replacement"]),
+            fact_ids=_json_int_list(str(row["fact_ids_json"])),
+            trace_id=str(row["trace_id"]),
+            created_at=str(row["created_at"]),
+            expires_at=str(row["expires_at"]),
+        )
 
 
 _DEFAULT_MEMORY_STORE: MemoryStore | None = None

@@ -242,6 +242,13 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Bật Nimble để nhận diện yêu cầu sửa hoặc xóa chat memory qua Telegram; Python vẫn kiểm soát update/delete.",
             },
             {
+                "name": "NIKO_MEMORY_CORRECTION_LOOP_ENABLED",
+                "label": "Memory correction loop",
+                "default": "0",
+                "type": "bool",
+                "help": "Dùng LoopRuntime và memory fact tools cho correction workflow. Default tắt để giữ V1 ổn định; bật khi test Phase 4A.",
+            },
+            {
                 "name": "NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED",
                 "label": "Auto consolidation",
                 "type": "bool",

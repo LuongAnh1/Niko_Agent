@@ -39,13 +39,16 @@ class MemoryLoopToolsTests(unittest.TestCase):
             result = registry.execute(
                 "update_fact",
                 {"fact_id": fact_id, "subject": "Preference", "content": "anh thích checklist màu tím"},
-                ToolContext(),
+                ToolContext(trace_id="trace-1"),
             )
             facts = store.search_facts("màu tím", top_k=3)
 
         self.assertTrue(result.ok)
         self.assertEqual(result.data["fact_id"], fact_id)
         self.assertEqual(facts[0].content, "anh thích checklist màu tím")
+        self.assertEqual(facts[0].meta["previous_content"], "anh thích checklist màu xanh")
+        self.assertEqual(facts[0].meta["corrected_by"], "loop_tool")
+        self.assertEqual(facts[0].meta["correction_trace_id"], "trace-1")
 
     def test_delete_fact_removes_fact(self):
         with self._store() as store:
@@ -139,4 +142,3 @@ class MemoryLoopToolsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

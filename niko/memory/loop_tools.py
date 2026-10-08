@@ -111,7 +111,15 @@ class MemoryFactTools:
         if not subject or not content:
             return _error("fact_content_required", "subject and content are required")
 
-        updated = self.store.update_fact(fact_id, subject=subject, content=content)
+        old_fact = self.store.get_fact(fact_id)
+        if old_fact is None:
+            return _error("fact_not_found", f"Fact #{fact_id} was not found", data={"fact_id": fact_id})
+
+        meta = dict(old_fact.meta)
+        meta["corrected_by"] = "loop_tool"
+        meta["correction_trace_id"] = context.trace_id
+        meta["previous_content"] = old_fact.content
+        updated = self.store.update_fact(fact_id, subject=subject, content=content, meta=meta)
         if not updated:
             return _error("fact_not_found", f"Fact #{fact_id} was not found", data={"fact_id": fact_id})
 
@@ -164,4 +172,3 @@ def _error(error: str, text: str, data: dict[str, Any] | None = None) -> ToolRes
 
 
 __all__ = ["MemoryFactTools", "build_memory_fact_tools"]
-

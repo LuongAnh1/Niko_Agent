@@ -76,6 +76,32 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], 1)
         self.assertFalse(rows[0]["consolidated"])
 
+    def test_memory_correction_pending_state_can_be_saved_loaded_and_cleared(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+
+            saved = store.set_memory_correction_pending(
+                conversation_id="chat-1",
+                decision=MEMORY_FORGET_MEMORY,
+                query="checklist",
+                replacement="",
+                fact_ids=[3, "4", 0, "bad"],
+                trace_id="trace-1",
+                ttl_seconds=900,
+            )
+            loaded = store.get_memory_correction_pending("chat-1")
+            cleared = store.clear_memory_correction_pending("chat-1")
+            missing = store.get_memory_correction_pending("chat-1")
+
+        self.assertEqual(saved.fact_ids, [3, 4])
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.decision, MEMORY_FORGET_MEMORY)
+        self.assertEqual(loaded.query, "checklist")
+        self.assertEqual(loaded.fact_ids, [3, 4])
+        self.assertEqual(loaded.trace_id, "trace-1")
+        self.assertEqual(cleared, 1)
+        self.assertIsNone(missing)
+
     def test_unconsolidated_chat_batch_orders_and_filters_by_session(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
@@ -1213,6 +1239,8 @@ class MemoryStoreTests(unittest.TestCase):
                 {
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
+                    "NIKO_MEMORY_GATE_ENABLED": "0",
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",
                     "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
@@ -1250,6 +1278,7 @@ class MemoryStoreTests(unittest.TestCase):
                     "NIKO_MEMORY_ENABLED": "1",
                     "NIKO_MEMORY_RETRIEVAL_ENABLED": "1",
                     "NIKO_MEMORY_GATE_ENABLED": "1",
+                    "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_RUNTIME_LOG_ENABLED": "0",
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",

@@ -47,12 +47,15 @@ def decide_memory_correction_intent(
     )
     normalized = normalize_memory_correction_choice(decision.choice)
     normalized = apply_memory_correction_prompt_hint(prompt, normalized)
+    query = normalize_optional_text(decision.extra.get("query"))
+    if normalized != MEMORY_CORRECTION_NONE and not query:
+        query = extract_memory_correction_query_from_prompt(prompt)
     replacement = normalize_optional_text(decision.extra.get("replacement"))
     if normalized == MEMORY_CORRECT_MEMORY and not replacement:
         replacement = extract_memory_correction_replacement_from_prompt(prompt)
     return MemoryCorrectionDecision(
         decision=normalized,
-        query=normalize_optional_text(decision.extra.get("query")),
+        query=query,
         target_type=normalize_memory_target_type(decision.extra.get("target_type")),
         replacement=replacement,
         reason=normalize_optional_text(decision.extra.get("reason")),
@@ -276,6 +279,44 @@ def extract_memory_correction_replacement_from_prompt(prompt: str) -> str:
         if replacement:
             return replacement
     return ""
+
+
+def extract_memory_correction_query_from_prompt(prompt: str) -> str:
+    """Fallback query cho lệnh sửa/xóa khi model không trích `query`."""
+    raw = re.sub(r"\s+", " ", str(prompt)).strip()
+    if not raw:
+        return ""
+
+    text = re.sub(r"^\s*@\S+\s*", "", raw).strip()
+    text = re.sub(r"^\s*niko\b[\s,:：-]*", "", text, flags=re.IGNORECASE).strip()
+    prefix_patterns = (
+        r"^(?:hãy\s+)?(?:quên|x[oó]a|xoá|delete|remove|forget|đừng\s+nhớ|dừng\s+nhớ|không\s+cần\s+nhớ)\b",
+        r"^(?:hãy\s+)?(?:sửa|cập\s+nhật|cap\s+nhat|update|fix|correct|replace|đổi|doi)\b",
+    )
+    for pattern in prefix_patterns:
+        stripped = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+        if stripped != text:
+            text = stripped
+            break
+
+    text = re.sub(
+        r"^(?:cái\s+)?(?:fact|facts|memory|mem|bộ\s+nhớ|bo\s+nho)\b[\s,:：-]*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = re.sub(r"^(?:rằng|rang|là|la|về|ve)\b[\s,:：-]*", "", text, count=1, flags=re.IGNORECASE).strip()
+
+    replacement_split = re.split(
+        r"\b(?:thay\s+th[eế]\s+b[ằa]ng|thay\s+b[ằa]ng|thay\s+th[aà]nh|th[aà]nh|replace\s+with|change\s+to|update\s+to)\b",
+        text,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    text = replacement_split[0].strip()
+    text = re.sub(r"\s+(?:nhé|nhe|nha|đi|di|với|voi|ạ|a)$", "", text, flags=re.IGNORECASE).strip()
+    return text
 
 
 def is_memory_readonly_prompt(prompt: str) -> bool:

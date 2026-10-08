@@ -41,6 +41,7 @@ from bots.decision_model.memory import (
     apply_memory_retrieval_prompt_hint,
     decide_memory_correction_intent,
     decide_memory_retrieval,
+    extract_memory_correction_query_from_prompt,
     extract_memory_correction_replacement_from_prompt,
     is_memory_readonly_prompt,
     memory_inventory_prompt_target,
@@ -242,6 +243,19 @@ class DecisionModelTests(unittest.TestCase):
         self.assertEqual(decision.label, MEMORY_FORGET_MEMORY)
         self.assertEqual(decision.replacement, expected)
         self.assertEqual(extract_memory_correction_replacement_from_prompt(prompt), expected)
+
+    def test_memory_correction_extracts_query_when_model_omits_it(self):
+        prompt = "Niko, quên fact anh thích checklist màu xanh"
+
+        with patch(
+            "bots.decision_model.memory.systemone_choice",
+            return_value=ChoiceDecision(choice=MEMORY_FORGET_MEMORY),
+        ):
+            decision = decide_memory_correction_intent(prompt)
+
+        self.assertEqual(decision.decision, MEMORY_FORGET_MEMORY)
+        self.assertEqual(decision.query, "anh thích checklist màu xanh")
+        self.assertEqual(extract_memory_correction_query_from_prompt(prompt), "anh thích checklist màu xanh")
 
     def test_memory_retrieval_modes_aliases_and_invalid_choices(self):
         self.assertEqual(normalize_fact_retrieval_mode("", default=MEMORY_RETRIEVAL_SEARCH), MEMORY_RETRIEVAL_SEARCH)

@@ -106,6 +106,11 @@ def memory_correction_detection_enabled() -> bool:
     return memory_write_enabled() and env_flag("NIKO_MEMORY_CORRECTION_DETECTION_ENABLED", "0")
 
 
+def memory_correction_loop_enabled() -> bool:
+    """Đường correction qua Loop/tool workflow; default-off để V1 hiện tại ổn định."""
+    return memory_correction_detection_enabled() and env_flag("NIKO_MEMORY_CORRECTION_LOOP_ENABLED", "0")
+
+
 def memory_top_k() -> int:
     raw_value = env_value("NIKO_MEMORY_TOP_K", str(DEFAULT_MEMORY_TOP_K)).strip()
     try:
