@@ -187,6 +187,17 @@ class OpsDashboardTests(unittest.TestCase):
                         field for field in decision["fields"] if field["name"] == "NIKO_DECISION_MODEL_KEEP_ALIVE"
                     )
                     self.assertIn("RAM/VRAM", keep_alive["help"])
+                    business = next(section for section in updated["sections"] if section["id"] == "business")
+                    jira_enabled = next(
+                        field for field in business["fields"] if field["name"] == "NIKO_JIRA_TOOLS_ENABLED"
+                    )
+                    self.assertEqual(jira_enabled["default"], "0")
+                    self.assertIn("issue key", jira_enabled["help"])
+                    jira_gate = next(
+                        field for field in business["fields"] if field["name"] == "NIKO_JIRA_DECISION_GATE_ENABLED"
+                    )
+                    self.assertEqual(jira_gate["default"], "0")
+                    self.assertIn("Nimble", jira_gate["help"])
                 finally:
                     server.shutdown()
                     server.server_close()

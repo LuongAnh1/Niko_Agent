@@ -22,9 +22,15 @@ from bots.telegram.bot import (
     telegram_request,
 )
 from bots.decision_model.sticker import StickerMoodDecision
+from bots.decision_model.jira import JIRA_ASK_FOR_ISSUE_KEY, JIRA_USE_TOOL, JiraGateDecision
 from bots.telegram.sticker_picker import choose_sticker_file_id
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.graph import format_fast_triage_log
+from niko.graphs.jira_issue import (
+    ROUTE_JIRA_ISSUE_DEEP_AGENT,
+    ROUTE_JIRA_ISSUE_KEY_REQUIRED,
+    ROUTE_JIRA_ISSUE_NOT_FOUND,
+)
 from niko.graphs.chat_reply.prompts import (
     FAST_AGENT_TASK_FINAL,
     FAST_AGENT_TASK_REPLY,
@@ -692,6 +698,160 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
         start_deep.assert_called_once()
         decision_model.assert_called_once()
+
+    def test_jira_issue_prompt_fetches_context_before_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich NIKO-101 giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_JIRA_TOOLS_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
+            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+
+        job = agent.get_active_deep_job("456")
+        self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
+        self.assertEqual(delivered, ["Dạ anh đợi em chút, em đã lấy context Jira của NIKO-101 rồi, giờ em phân tích bằng Deep.\n\nMeow"])
+        self.assertIsNotNone(job)
+        self.assertIn("Jira issue context", job.deep_context)
+        self.assertIn("NIKO-101", job.deep_context)
+        start_deep.assert_called_once()
+
+    def test_jira_issue_prompt_uses_old_route_when_disabled(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich NIKO-101 giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_JIRA_TOOLS_ENABLED": "0",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
+            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+
+        job = agent.get_active_deep_job("456")
+        self.assertNotEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
+        self.assertIsNotNone(job)
+        self.assertEqual(job.deep_context, "")
+        start_deep.assert_called_once()
+
+    def test_jira_issue_missing_fixture_reply_does_not_start_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "phan tich NIKO-404 giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_JIRA_TOOLS_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
+            route = agent.handle_message("phan tich NIKO-404 giup anh", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_JIRA_ISSUE_NOT_FOUND)
+        self.assertIn("chưa có dữ liệu Jira fixture", delivered[0])
+        self.assertTrue(delivered[0].endswith("Meow"))
+        self.assertIsNone(agent.get_active_deep_job("456"))
+        start_deep.assert_not_called()
+
+    def test_jira_decision_gate_can_use_recent_issue_key_for_followup(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "xem ticket vua nay giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        agent.memory_store.log_chat("456", "user", "phan tich NIKO-101 giup anh", source="test")
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_JIRA_TOOLS_ENABLED": "1",
+                "NIKO_JIRA_DECISION_GATE_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch(
+            "niko.graphs.jira_issue.workflow.decide_jira_gate",
+            return_value=JiraGateDecision(decision=JIRA_USE_TOOL, confidence=0.91),
+        ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True):
+            route = agent.handle_message("xem ticket vua nay giup anh", message, delivered.append)
+
+        job = agent.get_active_deep_job("456")
+        self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
+        self.assertIsNotNone(job)
+        self.assertIn("NIKO-101", job.deep_context)
+        self.assertIn("Jira issue context", job.deep_context)
+        gate.assert_called_once()
+
+    def test_jira_decision_gate_can_ask_for_issue_key(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "xem ticket nay giup anh",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_JIRA_TOOLS_ENABLED": "1",
+                "NIKO_JIRA_DECISION_GATE_ENABLED": "1",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch(
+            "niko.graphs.jira_issue.workflow.decide_jira_gate",
+            return_value=JiraGateDecision(decision=JIRA_ASK_FOR_ISSUE_KEY, confidence=0.91),
+        ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
+            route = agent.handle_message("xem ticket nay giup anh", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_JIRA_ISSUE_KEY_REQUIRED)
+        self.assertIn("mã issue Jira", delivered[0])
+        self.assertTrue(delivered[0].endswith("Meow"))
+        self.assertIsNone(agent.get_active_deep_job("456"))
+        gate.assert_called_once()
+        start_deep.assert_not_called()
 
     def test_group_reply_can_use_html_mention_when_username_missing(self):
         message = telegram_message_to_gateway(
