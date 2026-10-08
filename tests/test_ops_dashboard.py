@@ -303,6 +303,40 @@ class OpsDashboardTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_traces_api_returns_loop_tool_payload_for_dashboard(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            turn = trace_logger.turn_start("chat-1", "telegram:1", "Niko, quên fact checklist")
+            trace_logger.event(
+                turn.turn_id,
+                "loop_tool_call_finished",
+                {
+                    "trace_id": turn.turn_id,
+                    "iteration": 1,
+                    "tool_name": "search_facts",
+                    "mutates_state": False,
+                    "ok": True,
+                    "error": "",
+                },
+            )
+            server = create_server("127.0.0.1", 0, memory_store=store, trace_logger=trace_logger)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            try:
+                traces = self._json_get(f"{base_url}/api/traces")["traces"]
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+        loop_event = next(event for event in traces if event.get("kind") == "loop_tool_call_finished")
+        self.assertEqual(loop_event["turn_id"], turn.turn_id)
+        self.assertEqual(loop_event["data"]["tool_name"], "search_facts")
+        self.assertFalse(loop_event["data"]["mutates_state"])
+        self.assertTrue(loop_event["data"]["ok"])
+
     def _json_get(self, url: str) -> dict:
         return self._json_request(url)
 

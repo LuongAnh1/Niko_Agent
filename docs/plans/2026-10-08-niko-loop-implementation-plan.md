@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Niko Loop Tổng Quát
 
 Ngày tạo: 2026-10-08
-Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correction loop default-off và Phase 4B durable pending correction đã triển khai
+Trạng thái: Phase 2 core V0, Phase 3 memory fact tools V0, Phase 4A correction loop default-off, Phase 4B durable pending correction và Phase 5 dashboard observability V0 đã triển khai, đã live-test
 
 ## Mục Tiêu
 
@@ -123,6 +123,14 @@ Tiêu chí hoàn thành:
 - Một turn dùng Loop có thể xem được từng step/tool/result.
 - Lỗi controller/tool hiển thị rõ nguồn lỗi.
 - Không cần đọc terminal để biết Loop đã quyết định gì.
+
+Trạng thái 2026-10-08:
+
+- Trace view có khối `Loop Steps` theo turn, tóm tắt decision/tool/result trước khi
+  xem raw JSONL.
+- Runtime log nhận source `loop` với message ngắn cho từng event quan trọng như
+  `loop_decision` và `loop_tool_call_finished`.
+- `/api/traces` vẫn giữ raw event để các kiểm thử/dashboard đọc chung.
 
 ## Phase 6: Jira/Business Tool Lane
 

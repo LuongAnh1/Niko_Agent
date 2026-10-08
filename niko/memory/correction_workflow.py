@@ -4,7 +4,9 @@ Module này tách Phase 5 V1 ra khỏi `MemoryRuntime`: Decision Model chỉ nh�
 intent và trích query/replacement, còn workflow Python giữ pending state, search
 fact, validate ID, update/delete SQLite và ghi trace/runtime log. Pending fact-ID
 đã có bản bền trong SQLite để user chọn tiếp sau restart, trong khi facade hiện
-tại vẫn giữ hành vi chat V1 và dần chuyển sang Loop/tool workflow.
+tại vẫn giữ hành vi chat V1 và dần chuyển sang Loop/tool workflow. Một yêu cầu
+sửa/xóa mới sẽ thay thế pending cũ; chỉ reply chọn ID thuần như `fact #... nhé`
+mới được nối vào pending trước đó.
 """
 
 from __future__ import annotations
@@ -95,11 +97,14 @@ class MemoryCorrectionWorkflow:
         trace_logger,
     ) -> MemoryCorrectionResult:
         """Xử lý yêu cầu sửa/xóa fact qua chat nếu correction gate nhận diện rõ."""
-        decision_context = self.build_decision_context(conversation_id, prompt)
         pending_result = self._handle_pending_choice_without_model(conversation_id, prompt, trace_id, trace_logger)
         if pending_result is not None:
             return pending_result
 
+        if self._has_explicit_correction_signal(prompt):
+            self._clear_pending(conversation_id)
+
+        decision_context = self.build_decision_context(conversation_id, prompt)
         if not self._should_run_decision_gate(prompt, decision_context):
             gate = self._build_skipped_gate(decision_context, reason="no_explicit_correction_signal")
             if gate["enabled"]:

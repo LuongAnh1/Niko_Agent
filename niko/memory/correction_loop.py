@@ -10,6 +10,7 @@ chat đã live-test ổn định.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 import re
 from typing import Any
 
@@ -61,7 +62,23 @@ class MemoryCorrectionLoopWorkflow:
         """Chạy một turn direct correction; pending bền được xử lý ở facade V1."""
         controller = MemoryCorrectionLoopController(prompt=prompt, gate=gate)
         registry = ToolRegistry(build_memory_fact_tools(store_provider=lambda: self.store))
-        observer = TraceLoopObserver(trace_logger, trace_id=trace_id) if trace_logger is not None else None
+        observer = None
+        if trace_logger is not None:
+            from niko.harness.runtime_log import RuntimeEventLogger, default_runtime_logger
+
+            trace_dir = getattr(trace_logger, "trace_dir", None)
+            runtime_logger = (
+                RuntimeEventLogger(log_dir=Path(trace_dir).parent / "logs")
+                if trace_dir is not None
+                else default_runtime_logger()
+            )
+
+            observer = TraceLoopObserver(
+                trace_logger,
+                trace_id=trace_id,
+                runtime_logger=runtime_logger,
+                runtime_source="loop",
+            )
         runtime = LoopRuntime(controller, registry, max_iterations=self.max_iterations, observer=observer)
         loop_result = runtime.run(
             prompt,

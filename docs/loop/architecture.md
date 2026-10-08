@@ -201,4 +201,5 @@ chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối c
 | ToolRegistry tổng quát | done V0 |
 | Memory fact tools qua Loop | done V0 adapter |
 | Memory correction qua Loop | V0 default-off, fallback về V1, pending follow-up bền trong SQLite nhưng facade vẫn V1 |
+| Loop dashboard observability | done V0: trace có Loop Steps theo turn, runtime log source `loop` có message từng decision/tool |
 | Jira tools qua Loop | planned |

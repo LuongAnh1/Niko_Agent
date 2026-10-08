@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from niko.harness.runtime_log import RuntimeEventLogger
 from niko.harness.trace import TraceLogger
 from niko.loop import (
     LoopDecision,
@@ -152,6 +153,33 @@ class LoopRuntimeTests(unittest.TestCase):
         self.assertIn("loop_started", kinds)
         self.assertIn("loop_final_answer", kinds)
 
+    def test_trace_observer_writes_runtime_log_with_step_context(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
+            runtime_logger = RuntimeEventLogger(Path(temp_dir) / "logs", enabled=True)
+            observer = TraceLoopObserver(
+                trace_logger,
+                trace_id="trace-1",
+                runtime_logger=runtime_logger,
+                runtime_source="loop",
+            )
+
+            def controller(prompt, context, history, tools):
+                if not history:
+                    return LoopDecision.tool("echo", {"value": "x"}, reason="need echo")
+                return LoopDecision.final("done", reason="tool observed")
+
+            runtime = LoopRuntime(controller, ToolRegistry([self._echo_tool()]), observer=observer)
+            runtime.run("hello", ToolContext(trace_id="trace-1", conversation_id="chat-1"))
+            logs = runtime_logger.read_events()
+
+        tool_log = next(log for log in logs if log["event"] == "loop_tool_call_finished")
+        self.assertEqual(tool_log["source"], "loop")
+        self.assertIn("tool=echo", tool_log["message"])
+        self.assertEqual(tool_log["data"]["trace_id"], "trace-1")
+        self.assertEqual(tool_log["data"]["tool_name"], "echo")
+        self.assertFalse(tool_log["data"]["mutates_state"])
+
     @staticmethod
     def _echo_tool():
         return Tool(
@@ -164,4 +192,3 @@ class LoopRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

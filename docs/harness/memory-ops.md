@@ -159,12 +159,25 @@ Các event trace liên quan:
 - `memory_consolidation_auto_finished`
 - `memory_consolidation_auto_skipped`
 - `memory_consolidation_auto_error`
+- `loop_started`
+- `loop_decision`
+- `loop_tool_call_started`
+- `loop_tool_call_finished`
+- `loop_final_answer`
+- `loop_limit_reached`
+- `loop_error`
 
 Với retrieval gate, trace/runtime log cần đọc cùng lúc `gate_decision`,
 `gate_label`, `gate_query`, `gate_fact_mode` và `gate_episode_mode`. Inventory
 chung có thể để `query` rỗng nhưng vẫn đúng nếu mode là `list` hoặc `recent`.
 Trace `memory_retrieval` cũng có `recent_turn_count` để biết Deep có nhận
 working memory gần đây không.
+
+Với Loop, tab `Traces` có khối `Loop Steps` gom các event loop theo `turn_id` và
+hiển thị iteration, decision, tool, trạng thái read-only/mutate, `ok` và `error`.
+Raw JSONL vẫn nằm bên dưới để debug sâu. Tab `Bots` cũng nhận runtime log source
+`loop`, nên có thể lọc event như `loop_tool_call_finished` mà không cần đọc
+terminal.
 
 ## Mini Niko Ops Dashboard
 
@@ -186,7 +199,7 @@ Dashboard có các tab:
 - Bots: start/stop/restart Telegram bot, chặn start trùng khi có instance external, warmup/stop Decision Model, xem runtime log dạng bảng.
 - Memory: thêm/xóa semantic facts, xem semantic facts và episodic events.
 - Chat: xem recent chat log.
-- Traces: xem JSONL trace event.
+- Traces: xem Loop steps theo turn và JSONL trace event thô.
 - Config: chỉnh runtime config theo nhóm, gồm Telegram token, agent commands, Nimble, sticker, memory và reply text.
 - Ops: xem endpoint và ranh giới baseline.
 

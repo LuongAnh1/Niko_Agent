@@ -151,16 +151,32 @@ Trạng thái 2026-10-08:
 
 Mục đích: debug Loop trên dashboard thay vì đọc terminal hoặc đoán từ output bot.
 
-- [ ] Chuẩn hóa event `loop_started`, `loop_decision`, `loop_tool_call_started`,
+- [x] Chuẩn hóa event `loop_started`, `loop_decision`, `loop_tool_call_started`,
       `loop_tool_call_finished`, `loop_final_answer`, `loop_error`.
-- [ ] Dashboard/trace view đọc được tool call/result theo turn.
-- [ ] Runtime log hiển thị source/event/message cho Loop.
-- [ ] Docs hướng dẫn cách xem Loop decision khi live test.
+- [x] Dashboard/trace view đọc được tool call/result theo turn.
+- [x] Runtime log hiển thị source/event/message cho Loop.
+- [x] Docs hướng dẫn cách xem Loop decision khi live test.
 
 Tiêu chí hoàn thành:
 
 - Một turn dùng Loop có bảng event đủ rõ.
 - Lỗi controller/tool nhìn được nguyên nhân và step lỗi.
+
+Trạng thái 2026-10-08:
+
+- Tab `Traces` có khối `Loop Steps`, gom event theo `turn_id` và hiển thị iteration,
+  decision, tool, `mutates_state`, `ok`, `error`.
+- `TraceLoopObserver` thêm `trace_id` vào payload và ghi runtime log source `loop`
+  khi caller truyền runtime logger; correction loop default-off tạo runtime logger
+  theo `trace_logger.trace_dir` để runtime thật vào dashboard state, còn test dùng
+  trace tạm không làm bẩn log dashboard thật.
+- Regression tests đã thêm cho runtime log của `TraceLoopObserver` và `/api/traces`
+  trả payload loop tool để dashboard đọc.
+- Live verification Phase 5 đã pass ba smoke case: ambiguous delete, ambiguous
+  update có replacement và no-match; dashboard hiển thị `Loop Steps`, tab `Bots`
+  có runtime log source `loop`.
+- Verification mới nhất: targeted tests liên quan memory/loop/dashboard pass
+  `87 passed`; full suite pass `184 passed`.
 
 ## Phase 6: Jira/Business Tool Lane
 

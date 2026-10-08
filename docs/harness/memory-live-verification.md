@@ -327,3 +327,65 @@ Kết quả live test: pass.
 - Không có `memory_correction_applied` trong turn expired.
 - Reply báo lựa chọn fact trước đó đã hết hạn và yêu cầu gửi lại yêu cầu sửa/xóa memory.
 - Kiểm tra SQLite sau test: fact #13 và fact #7 vẫn còn, `memory_correction_pending` đã clear.
+
+### Phase 5 Loop observability - checklist live sắp chạy
+
+Mục đích: xác nhận dashboard đọc được từng step của Loop mà không cần quay lại terminal.
+Phần này kiểm tra observability, không thay đổi lại hành vi correction đã pass ở Phase
+4B.
+
+Trước khi test:
+
+- Dashboard đang chạy bản code mới.
+- Telegram Bot đã restart từ tab `Bots` sau khi cập nhật dashboard/template.
+- `NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=1`.
+- `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`.
+- Decision Model đã warmup.
+
+Prompt smoke test đề xuất:
+
+- Ambiguous delete: `Niko, quên fact checklist`.
+- Update có replacement: `Niko, sửa fact checklist thành anh thích checklist có mục tiêu rõ ràng`.
+- No-match: `Niko, quên fact anh thích bánh màu cầu vồng`.
+
+Kỳ vọng cần nhìn trên dashboard:
+
+- Tab `Traces` có khối `Loop Steps` cho turn vừa test.
+- `Loop Steps` có các event chính: `loop_started`, `loop_decision`,
+  `loop_tool_call_started`, `loop_tool_call_finished`, `loop_final_answer`.
+- Tool step hiển thị được `tool_name`, `iteration`, `mutates_state`, `ok` và
+  `error` nếu có.
+- Tab `Bots` có runtime log source `loop`, ví dụ `loop_decision` hoặc
+  `loop_tool_call_finished`, message đọc được tool và trạng thái.
+- Raw JSON trace vẫn còn bên dưới để debug sâu.
+
+Kết quả tự động trước live test ban đầu:
+
+- Targeted tests cho loop/dashboard/correction đã pass.
+- Full suite đã pass.
+
+Kết quả live test: pass, có một chỉnh sửa guardrail nhỏ sau khi soi log.
+
+- Ba smoke case đã chạy đủ: ambiguous delete, update có replacement nhưng còn
+  nhiều fact khớp, và no-match.
+- Cả ba turn đều ghi được `loop_started`, `loop_decision`,
+  `loop_tool_call_started`, `loop_tool_call_finished` và `loop_final_answer`.
+- Dashboard đã hiện khối `Loop Steps`; tab `Bots` có runtime log `source=loop`
+  với message ngắn cho decision/tool/result.
+- Kết quả hành vi đúng kỳ vọng: ambiguous case chỉ hỏi chọn ID và tạo pending,
+  update ambiguous chưa mutate DB khi chưa có ID rõ, no-match không gọi
+  update/delete tool.
+- Khi soi trace phát hiện yêu cầu sửa/xóa mới vẫn mang pending metadata từ
+  pending trước đó. Đã sửa `MemoryCorrectionWorkflow` để pending cũ chỉ áp dụng
+  cho reply chọn ID thuần; yêu cầu sửa/xóa mới clear pending trước khi gọi
+  Decision Model.
+- Live retest sau restart: pass. Lượt ambiguous delete tạo pending xóa; lượt
+  sửa/xóa mới tiếp theo có `pending_choices=[]`, không mang workflow cũ, và tạo
+  pending sửa mới khi nhiều fact khớp. Follow-up chọn ID dùng
+  `memory_correction_context_fallback`, apply đúng `update_fact` và ghi
+  `memory_correction_pending_resolved`; không có `delete_fact` ở lượt resolve.
+- Đã chỉnh `MemoryCorrectionLoopWorkflow` để runtime log của loop đi cùng
+  thư mục state của `trace_logger`; test dùng trace tạm không ghi dữ liệu giả
+  vào log dashboard thật.
+- Verification sau chỉnh sửa: targeted tests liên quan memory/loop/dashboard
+  pass `87 passed`; full suite pass `184 passed`.

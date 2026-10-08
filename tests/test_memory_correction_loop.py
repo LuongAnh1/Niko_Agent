@@ -167,6 +167,45 @@ class MemoryCorrectionLoopWorkflowTests(unittest.TestCase):
         self.assertIn("loop_started", {event.get("kind") for event in events})
         self.assertIn("memory_correction_applied", {event.get("kind") for event in events})
 
+    def test_runtime_loop_logs_next_to_custom_trace_dir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Chat memory", "anh thích checklist rõ ràng", source="test")
+            trace_logger = self._trace(temp_dir)
+            runtime = MemoryRuntime(
+                store=store,
+                correction_decider=lambda _prompt, _gateway: MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist rõ ràng",
+                    target_type=MEMORY_TARGET_FACT,
+                ),
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_LOOP_ENABLED": "1",
+                    "NIKO_RUNTIME_LOG_ENABLED": "1",
+                },
+                clear=False,
+            ):
+                result = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist rõ ràng",
+                    self._message(),
+                    "trace-1",
+                    trace_logger,
+                )
+            runtime_log_files = list((Path(temp_dir) / "logs").glob("*.jsonl"))
+            runtime_log_text = "\n".join(path.read_text(encoding="utf-8") for path in runtime_log_files)
+
+        self.assertTrue(result.handled)
+        self.assertIn('"source": "loop"', runtime_log_text)
+        self.assertIn('"event": "loop_started"', runtime_log_text)
+
     def test_runtime_loop_refines_empty_query_and_deletes_specific_fact(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")

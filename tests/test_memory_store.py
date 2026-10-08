@@ -1595,6 +1595,69 @@ class MemoryCorrectionRuntimeTests(unittest.TestCase):
         self.assertEqual(applied.decision["decision"], MEMORY_FORGET_MEMORY)
         self.assertEqual(applied.decision["label"], "pending_followup")
 
+    def test_memory_correction_new_explicit_request_replaces_pending_context(self):
+        captured_contexts: list[dict] = []
+
+        def context_aware_decider(prompt, _gateway, decision_context=None):
+            captured_contexts.append(decision_context or {})
+            if "quên" in prompt:
+                return MemoryCorrectionDecision(
+                    decision=MEMORY_FORGET_MEMORY,
+                    query="checklist",
+                    target_type=MEMORY_TARGET_FACT,
+                    reason="explicit forget",
+                )
+            self.assertEqual((decision_context or {}).get("active_workflow"), "")
+            self.assertEqual((decision_context or {}).get("pending_choices"), [])
+            return MemoryCorrectionDecision(
+                decision=MEMORY_CORRECT_MEMORY,
+                query="checklist",
+                target_type=MEMORY_TARGET_FACT,
+                replacement="anh thích checklist có mục tiêu rõ ràng",
+                reason="new explicit correction",
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            store.add_fact("Test correction", "anh thích checklist màu xanh", source="test")
+            store.add_fact("Chat memory", "anh thích checklist theo phase", source="test")
+            runtime = MemoryRuntime(store=store, correction_decider=context_aware_decider)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "NIKO_MEMORY_ENABLED": "1",
+                    "NIKO_MEMORY_WRITE_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_DETECTION_ENABLED": "1",
+                    "NIKO_MEMORY_CORRECTION_LOOP_ENABLED": "0",
+                },
+                clear=False,
+            ):
+                clarify = runtime.handle_memory_correction(
+                    "456",
+                    "quên fact checklist",
+                    self._message(),
+                    "trace-1",
+                    self._trace(temp_dir),
+                )
+                first_pending = store.get_memory_correction_pending("456")
+                replace = runtime.handle_memory_correction(
+                    "456",
+                    "sửa fact checklist thành anh thích checklist có mục tiêu rõ ràng",
+                    self._message(),
+                    "trace-2",
+                    self._trace(temp_dir),
+                )
+                second_pending = store.get_memory_correction_pending("456")
+
+        self.assertTrue(clarify.handled)
+        self.assertEqual(first_pending.decision, MEMORY_FORGET_MEMORY)
+        self.assertTrue(replace.handled)
+        self.assertEqual(captured_contexts[1]["active_workflow"], "")
+        self.assertEqual(captured_contexts[1]["pending_choices"], [])
+        self.assertEqual(second_pending.decision, MEMORY_CORRECT_MEMORY)
+        self.assertEqual(second_pending.replacement, "anh thích checklist có mục tiêu rõ ràng")
+
     def test_memory_correction_decision_context_excludes_current_incoming_prompt(self):
         captured_contexts: list[dict] = []
 
