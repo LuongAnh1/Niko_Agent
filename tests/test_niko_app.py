@@ -23,26 +23,35 @@ class FakeChatGraph:
 
 
 class FakeCorrectionResult:
-    handled = True
-    reply = "memory correction handled"
-    route = "memory_correction"
+    def __init__(
+        self,
+        handled=True,
+        reply="memory correction handled",
+        route="memory_correction",
+    ) -> None:
+        self.handled = handled
+        self.reply = reply
+        self.route = route
 
 
 class FakeMemoryRuntime:
-    def __init__(self) -> None:
+    def __init__(self, result=None) -> None:
         self.calls = []
+        self.result = result if result is not None else FakeCorrectionResult()
 
     def handle_memory_correction(self, conversation_id, prompt, gateway_message, trace_id, trace_logger):
         self.calls.append((conversation_id, prompt, gateway_message, trace_id, trace_logger))
-        return FakeCorrectionResult()
+        return self.result
 
 
 class FakeSelectableGraph:
-    def __init__(self) -> None:
-        self.memory_runtime = FakeMemoryRuntime()
+    def __init__(self, correction_result=None, route_kind="deep_agent") -> None:
+        self.memory_runtime = FakeMemoryRuntime(correction_result)
         self.trace_logger = object()
+        self.route_kind = route_kind
         self.finished = []
         self.normal_calls = []
+        self.last_two_agent_route = None
 
     def conversation_id_for(self, gateway_message):
         return "chat-1"
@@ -51,7 +60,7 @@ class FakeSelectableGraph:
         return SimpleNamespace(turn_id="trace-1")
 
     def decide_two_agent_route(self, prompt, conversation_id, trace_id):
-        return SimpleNamespace(kind="deep_agent", reason="test")
+        return SimpleNamespace(kind=self.route_kind, reason="test")
 
     def handle_single_agent_message(self, prompt, gateway_message, deliver_reply, notify_working, trace_turn):
         self.normal_calls.append(("single", prompt))
@@ -67,6 +76,7 @@ class FakeSelectableGraph:
         return route
 
     def handle_two_agent_message(self, prompt, gateway_message, deliver_reply, notify_working=None, trace_turn=None, route=None):
+        self.last_two_agent_route = route
         self.normal_calls.append(("two_agent", prompt))
         return "normal_chat"
 
@@ -139,6 +149,30 @@ class NikoAppTests(unittest.TestCase):
         self.assertEqual(len(graph.memory_runtime.calls), 1)
         self.assertEqual(graph.normal_calls, [])
         jira_workflow.assert_not_called()
+
+    def test_app_busy_route_skips_memory_correction(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+
+        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent"}, clear=False):
+            route = app.handle_message("fact #8 nhe", object(), delivered.append)
+
+        self.assertEqual(route, "busy_reply")
+        self.assertEqual(graph.memory_runtime.calls, [])
+        self.assertEqual(graph.normal_calls, [("busy", "fact #8 nhe")])
+
+    def test_app_continues_to_normal_chat_when_memory_correction_is_not_handled(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+
+        with patch.dict("os.environ", {"NIKO_AGENT_MODE": "two_agent", "NIKO_JIRA_TOOLS_ENABLED": "0"}, clear=False):
+            route = app.handle_message("hello", object(), lambda _reply: None)
+
+        self.assertEqual(route, "normal_chat")
+        self.assertEqual(len(graph.memory_runtime.calls), 1)
+        self.assertEqual(graph.normal_calls, [("two_agent", "hello")])
+        self.assertIsNotNone(graph.last_two_agent_route)
 
 
 if __name__ == "__main__":

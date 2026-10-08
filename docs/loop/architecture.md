@@ -155,7 +155,7 @@ Hướng hoàn chỉnh hơn là chuyển correction thành workflow tool có sta
 
 ```text
 user prompt
-  -> ChatReplyGraph detects/asks Loop for memory correction workflow
+  -> NikoApp selects memory correction workflow before normal chat
   -> Loop controller chooses search_facts/list_facts
   -> tool result returns candidate fact IDs
   -> controller chooses clarify/update_fact/delete_fact/final reply

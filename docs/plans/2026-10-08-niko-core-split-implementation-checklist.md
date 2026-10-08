@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
-Trạng thái: Phase 4 đã tách Jira selection khỏi ChatReplyGraph, chờ full verification/commit
+Trạng thái: Phase 5 đã khóa boundary memory correction ở NikoApp, chờ Phase 6 cleanup/docs
 
 ## Phase 0: Khóa Tài Liệu Triển Khai
 
@@ -111,13 +111,24 @@ Mục đích: memory correction trở thành workflow cấp turn do app-level wo
 selection chọn.
 
 - [x] Di chuyển call `MemoryRuntime.handle_memory_correction(...)` ra lớp chọn workflow cấp turn.
-- [ ] Pending fact-ID follow-up vẫn qua durable pending facade hiện tại.
-- [ ] Correction loop default-off vẫn fallback về V1 khi lỗi.
-- [ ] `ChatReplyGraph` không còn chứa nhánh correction handled.
-- [ ] Giữ trace `memory_correction_decision`, `memory_correction_clarify`,
+- [x] Pending fact-ID follow-up vẫn qua durable pending facade hiện tại.
+- [x] Correction loop default-off vẫn fallback về V1 khi lỗi.
+- [x] `ChatReplyGraph` không còn chứa nhánh correction handled.
+- [x] Giữ trace `memory_correction_decision`, `memory_correction_clarify`,
       `memory_correction_applied`, `memory_correction_pending_*`.
-- [ ] Chạy memory correction loop/store tests.
-- [ ] Live-test lại delete/update/pending nếu thay đổi ảnh hưởng facade.
+- [x] Chạy memory correction loop/store tests.
+- [x] Live-test lại delete/update/pending nếu thay đổi ảnh hưởng facade.
+
+Kết quả kiểm thử Phase 5, 2026-10-08:
+
+- Thêm regression app-level: busy route bỏ qua correction; correction handled kết
+  thúc turn trước Jira/normal chat; correction unhandled mới đi tiếp normal chat.
+- `rtk proxy powershell -NoProfile -Command "python -m pytest tests/test_niko_app.py tests/test_memory_correction_loop.py tests/test_memory_store.py tests/test_memory_eval_scenarios.py -q"`
+  pass `83 passed`.
+- `rtk proxy powershell -NoProfile -Command "python -m pytest tests/test_telegram_prompt.py tests/test_gateway_runner.py -q"`
+  pass `52 passed`.
+- Không cần live-test mới vì không đổi facade runtime correction; thay đổi chỉ khóa
+  thứ tự xử lý ở app bằng regression tests.
 
 ## Phase 6: Dashboard, Docs Và Cleanup
 
@@ -144,5 +155,10 @@ Mục đích: khóa từng phase bằng test và kiểm docs/source không lệc
 - [x] Phase memory correction: chạy memory correction/store/eval tests liên quan.
 - [x] Phase dashboard: chạy `tests/test_ops_dashboard.py`.
 - [x] Trước khi push phase lớn: chạy `rtk proxy python -m pytest -q`.
-- [ ] Rà `rtk rg` cho các cụm stale về `ChatReplyGraph`, `GatewayRunner`,
+- [x] Rà `rtk rg` cho các cụm stale về `ChatReplyGraph`, `GatewayRunner`,
       `TurnOrchestrator`, `NikoApp`, `tool router`.
+
+Kết quả rà stale 2026-10-08:
+
+- Không còn cụm stale kiểu `ChatReplyGraph detects` hoặc trạng thái Phase 4 chờ
+  verification. Các kết quả còn lại là ghi chú lịch sử/target boundary có chủ ý.

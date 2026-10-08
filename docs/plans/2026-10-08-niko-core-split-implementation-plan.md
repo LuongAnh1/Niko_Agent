@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: Phase 4 đã tách Jira selection khỏi ChatReplyGraph và đưa lên NikoApp
+Trạng thái: Phase 5 đã khóa boundary memory correction ở NikoApp; chuẩn bị Phase 6 cleanup/docs
 Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
@@ -150,6 +150,11 @@ Tiêu chí hoàn thành:
 Mục đích: memory correction là workflow cấp turn, không còn là chi tiết của chat
 reply workflow.
 
+Trạng thái 2026-10-08: call-site đã nằm ở `NikoApp` và được khóa bằng regression
+test app-level. `NikoApp` giữ thứ tự route/busy -> memory correction -> Jira ->
+normal chat. `ChatReplyGraph` không còn nhánh correction handled; chỉ còn helper
+reply/log/trace dùng chung cho workflow ngoài graph.
+
 Thay đổi chính:
 
 - Lớp chọn workflow cấp turn gọi `MemoryRuntime.handle_memory_correction(...)`
@@ -212,7 +217,9 @@ Các test nhóm chính:
 
 ## Trạng Thái Hiện Tại
 
-Phase 4 đã tách Jira selection khỏi `ChatReplyGraph` và đưa memory correction
-call-site lên `NikoApp` để giữ đúng thứ tự xử lý. Phase 5 vẫn còn cần dọn/khóa
-memory correction boundary sâu hơn nếu muốn `ChatReplyGraph` không còn helper
-workflow reply liên quan tới correction.
+Phase 5 đã khóa memory correction như workflow cấp turn ở `NikoApp`. Các invariant
+đã được test: busy route chặn correction, correction handled không rơi tiếp xuống
+Jira/normal chat, correction unhandled mới đi tiếp normal chat, durable pending và
+fallback V1 vẫn do `MemoryRuntime`/workflow hiện tại giữ. Phần tiếp theo là Phase 6:
+rà dashboard/docs/compatibility helper và dọn mô tả stale về `ChatReplyGraph` như
+application core.
