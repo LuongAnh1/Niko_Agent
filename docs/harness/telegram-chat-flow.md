@@ -1,12 +1,14 @@
 # Luồng Xử Lý Chat Telegram
 
-Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; phần route, memory, trace và deep job nằm trong `ChatReplyGraph`.
+Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại của Niko Agent. Gateway Telegram chỉ là cổng vào/ra; gateway gọi `GatewayRunner`, runner gọi `NikoApp`; `NikoApp` mở turn, chọn memory/Jira workflow cấp turn, rồi chuyển normal chat sang `ChatReplyGraph`.
 
 ## Thành Phần
 
 - `bots/telegram/bot.py`: Telegram gateway.
 - `niko.chat_gateway`: chuẩn hóa message Telegram thành `ChatGatewayMessage`.
-- `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối flow chat.
+- `niko.gateway.GatewayRunner`: runner mỏng nhận message/callback từ gateway rồi ủy quyền sang app hiện tại.
+- `niko.app.NikoApp`: assembly root và nơi chọn memory/Jira workflow cấp turn.
+- `niko.graphs.chat_reply.graph.ChatReplyGraph`: điều phối normal chat local/Fast/Deep và deep job.
 - `niko.graphs.chat_reply.router`: rule router local/deep/fast/busy.
 - `niko.graphs.chat_reply.prompts`: prompt task cho Fast Agent.
 - `niko.runtime`: gọi Claude CLI cho Deep agent và inject memory context.
@@ -26,7 +28,7 @@ Tài liệu này mô tả luồng xử lý tin nhắn Telegram hiện tại củ
 5. Nếu là group và `TELEGRAM_GROUP_MODE=mentions`, chỉ xử lý message có tag bot.
 6. Kiểm tra `TELEGRAM_ALLOWED_CHAT_IDS` và `CHAT_ALLOWED_USER_KEYS`.
 7. Tạo callback `deliver_reply` và `notify_working`.
-8. Gọi `CHAT_REPLY_GRAPH.handle_message(...)`.
+8. Gọi `GATEWAY_RUNNER.handle_message(...)`.
 9. Khi graph trả lời, gateway gửi message trước.
 10. Nếu bật sticker, gateway chạy worker nền: hỏi Nimble local chọn mood sticker,
     rồi map mood đó sang file_id Telegram. Nếu Nimble chọn `no_sticker` hoặc lỗi,
@@ -46,7 +48,7 @@ route chính của chat.
 Nếu `NIKO_AGENT_MODE=single`:
 
 ```text
-Telegram -> ChatReplyGraph -> Deep Agent -> Telegram
+Telegram -> GatewayRunner -> NikoApp -> ChatReplyGraph -> Deep Agent -> Telegram
 ```
 
 Graph gọi `runtime.call_deep_agent(...)` đồng bộ. Runtime nạp hook, identity context và memory context nếu bật.
@@ -58,9 +60,11 @@ Nếu `NIKO_AGENT_MODE=two_agent`:
 ```text
 Telegram message
   -> Telegram gateway
-  -> ChatReplyGraph.handle_message
-  -> router.decide_agent_route
-  -> local reply | Fast triage | Deep background | busy reply
+  -> GatewayRunner.handle_message
+  -> NikoApp.handle_message
+  -> route/busy guard
+  -> memory correction | Jira issue workflow | ChatReplyGraph normal chat
+  -> local reply | Fast triage | Deep background | busy reply | workflow reply
   -> Telegram reply
 ```
 
@@ -76,10 +80,14 @@ Telegram message
 
 Trên dashboard:
 
-- `local_reply` đi tuyến `Gateway -> Router -> Reply`.
-- `fast_agent` với `reply_now` đi tuyến `Gateway -> Router -> Fast Agent -> Reply`.
-- `deep_agent` đi tuyến `Gateway -> Router -> Memory Gate -> Loop/Deep -> Reply`.
-- `busy_reply` đi tuyến `Gateway -> Router -> Reply`.
+- `local_reply` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply`.
+- `fast_agent` với `reply_now` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`.
+- `deep_agent` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep -> Reply`.
+- `busy_reply` đi tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply`.
+
+Trong runtime log, source `niko_app` event `workflow_selected` cho biết turn đã
+được chọn vào `normal_chat`, `memory_correction`, `jira_issue`, `busy_reply`
+hay `single_agent`.
 
 ## Vai Trò Của Decision Model Và Fast Agent
 
@@ -97,7 +105,7 @@ Ollama giữ model loaded cho tới khi bấm `Bots -> Decision Model -> Stop`, 
 `ollama stop nimble`, hoặc restart Ollama.
 
 Decision model không thay Deep agent và không tự ghi/sửa memory tùy ý. Nó chỉ trả
-label/query/metadata để `ChatReplyGraph` hoặc memory pipeline quyết định bước kế
+label/query/metadata để `NikoApp`, `ChatReplyGraph` hoặc memory pipeline quyết định bước kế
 tiếp.
 
 Fast Agent dùng `NIKO_FAST_AGENT_COMMAND` để sinh ngôn ngữ khi cần. Fast nên dùng model nhẹ/nhanh và có các task:
@@ -142,7 +150,14 @@ Nếu người dùng nhắn thêm khi Deep đang chạy, graph trả `busy_reply
 
 ## Memory Trong Flow
 
-Fast triage không nhận memory context để tránh làm hỏng JSON.
+Fast triage và Fast reply hiện nhận một working memory ngắn từ `chat_log`
+(`recent_turns`) để hiểu các câu nối ngữ cảnh như "cái vừa rồi". Phần này chỉ là
+vài lượt chat gần nhất trong cùng conversation, đã truncate, và không phải
+long-term semantic/episodic memory. Fast vẫn không tự search facts/episodes; nếu
+recent context không đủ chắc, triage phải chọn `send_to_deep`. Nếu Nimble vẫn
+chọn `reply_now` nhưng confidence thấp hơn
+`NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, `ChatReplyGraph` override sang
+Deep để tránh Fast trả lời thiếu dữ kiện.
 
 Deep agent nhận memory context khi:
 
@@ -179,7 +194,7 @@ chat ở V1.
 
 Jira issue flow chạy sau memory correction và trước local/fast/deep route thông
 thường khi `NIKO_JIRA_TOOLS_ENABLED=1`. Nếu prompt có issue key dạng `NIKO-101`,
-`ChatReplyGraph` gọi `niko/graphs/jira_issue/`, workflow dùng Loop tools để fetch
+`NikoApp` gọi `niko/graphs/jira_issue/`, workflow dùng Loop tools để fetch
 issue/comment/changelog từ fixture, format context có evidence và handoff sang
 Deep. Nếu issue key không có trong fixture, bot trả reply an toàn và không gọi Deep.
 Nếu prompt không có key rõ nhưng có tín hiệu Jira/task và
@@ -228,7 +243,8 @@ User Telegram message
         -> reply identity, stop
      -> group mention filter
      -> chat/user auth
-     -> ChatReplyGraph.handle_message
+     -> GatewayRunner.handle_message
+        -> NikoApp.handle_message
         -> write turn_start + incoming chat log
         -> decide route
         -> memory correction intent?

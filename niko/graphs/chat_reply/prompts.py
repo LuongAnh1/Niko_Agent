@@ -34,6 +34,7 @@ DEFAULT_NIKO_DEEP_BUSY_REPLY = (
     "Da anh doi em chut, em van dang xu ly cau truoc. Khi co ket qua em se gui lai anh."
 )
 DEFAULT_NIKO_UNCERTAIN_DELAY_SECONDS = 3.0
+DEFAULT_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD = 0.65
 
 
 def runtime_log(event: str, message: str, *, level: str = "info", data: dict[str, Any] | None = None) -> None:
@@ -151,6 +152,27 @@ def decision_model_enabled() -> bool:
     return env_flag("NIKO_DECISION_MODEL_ENABLED", "0")
 
 
+def fast_triage_reply_confidence_threshold() -> float:
+    """Ngưỡng tin cậy tối thiểu để Fast được trả ngay khi Nimble chọn reply_now."""
+    raw_value = env_value(
+        "NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD",
+        str(DEFAULT_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD),
+    ).strip()
+    try:
+        return max(0.0, min(1.0, float(raw_value)))
+    except ValueError:
+        return DEFAULT_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD
+
+
+def fast_triage_reply_confidence_too_low(decision: FastAgentDecision) -> bool:
+    """Fail-safe: reply_now mà confidence thấp thì đưa Deep thay vì trả lời mù."""
+    return (
+        decision.route == FAST_DECISION_REPLY_NOW
+        and decision.confidence is not None
+        and decision.confidence < fast_triage_reply_confidence_threshold()
+    )
+
+
 def fast_triage_available() -> bool:
     """Vùng xám chỉ đi fast route khi có Nimble decision hoặc legacy Fast triage."""
     return decision_model_enabled() or bool(fast_agent_command())
@@ -207,6 +229,26 @@ def truncate_text(text: str, limit: int = 4000) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 20].rstrip() + "\n...[truncated]"
+
+
+def format_recent_turns_context(recent_turns: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> str:
+    """Format working memory ngắn để Fast không trả lời mù ngữ cảnh."""
+    turns = list(recent_turns or [])[-6:]
+    if not turns:
+        return ""
+
+    lines = [
+        "Working memory gan day trong cung cuoc tro chuyen.",
+        "Chi dung nhu ngu canh tam thoi; neu van khong du chac thi chuyen sang Deep.",
+    ]
+    for turn in turns:
+        role = str(turn.get("role") or "unknown").strip()[:30]
+        route = str(turn.get("route") or "").strip()[:60]
+        label = f"{role} ({route})" if route else role
+        content = truncate_text(str(turn.get("content") or ""), 500)
+        if content:
+            lines.append(f"- {label}: {content}")
+    return "\n".join(lines)
 
 
 def strip_json_code_fence(text: str) -> str:
@@ -343,6 +385,7 @@ def call_fast_agent(
     task: str = FAST_AGENT_TASK_REPLY,
     deep_answer: str | None = None,
     active_job: Any | None = None,
+    recent_turns: list[dict[str, Any]] | None = None,
 ) -> str:
     """Gọi Fable/Fast qua CLI; triage task không nạp HOOK để JSON sạch hơn."""
     command = fast_agent_command()
@@ -355,6 +398,7 @@ def call_fast_agent(
         gateway_message,
         include_prompt_hook=task != FAST_AGENT_TASK_TRIAGE,
         prompt_label="Nhiem vu cua Niko Fast",
+        memory_context=format_recent_turns_context(recent_turns or []),
     )
     return runtime.run_cli(command, fast_prompt, timeout_seconds=fast_agent_timeout_seconds()) or "(Khong co noi dung tra ve.)"
 
@@ -365,13 +409,21 @@ def try_call_fast_agent(
     task: str = FAST_AGENT_TASK_REPLY,
     deep_answer: str | None = None,
     active_job: Any | None = None,
+    recent_turns: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Wrapper mềm: lỗi Fast không được làm gãy luồng chính."""
     if not fast_agent_command():
         return None
 
     try:
-        return call_fast_agent(prompt, gateway_message, task=task, deep_answer=deep_answer, active_job=active_job)
+        return call_fast_agent(
+            prompt,
+            gateway_message,
+            task=task,
+            deep_answer=deep_answer,
+            active_job=active_job,
+            recent_turns=recent_turns,
+        )
     except Exception as exc:
         runtime_log(
             "fast_agent_error",
@@ -382,20 +434,28 @@ def try_call_fast_agent(
         return None
 
 
-def call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecision:
+def call_fast_agent_decision(
+    prompt: str,
+    gateway_message,
+    recent_turns: list[dict[str, Any]] | None = None,
+) -> FastAgentDecision:
     """Ưu tiên Nimble local; fallback legacy là Fable trả JSON."""
     if decision_model_enabled():
-        return call_decision_model(prompt, gateway_message)
+        return call_decision_model(prompt, gateway_message, recent_turns=recent_turns)
 
-    answer = call_fast_agent(prompt, gateway_message, task=FAST_AGENT_TASK_TRIAGE)
+    answer = call_fast_agent(prompt, gateway_message, task=FAST_AGENT_TASK_TRIAGE, recent_turns=recent_turns)
     return parse_fast_agent_decision(answer)
 
 
-def call_decision_model(prompt: str, gateway_message) -> FastAgentDecision:
+def call_decision_model(
+    prompt: str,
+    gateway_message,
+    recent_turns: list[dict[str, Any]] | None = None,
+) -> FastAgentDecision:
     """Adapter để graph không import trực tiếp package decision_model."""
     from bots.decision_model.triage import decide_fast_route
 
-    decision = decide_fast_route(prompt, gateway_message)
+    decision = decide_fast_route(prompt, gateway_message, recent_turns=recent_turns or [])
     return FastAgentDecision(
         route=decision.route,
         reply=decision.reply,
@@ -408,13 +468,17 @@ def call_decision_model(prompt: str, gateway_message) -> FastAgentDecision:
     )
 
 
-def try_call_fast_agent_decision(prompt: str, gateway_message) -> FastAgentDecision | None:
+def try_call_fast_agent_decision(
+    prompt: str,
+    gateway_message,
+    recent_turns: list[dict[str, Any]] | None = None,
+) -> FastAgentDecision | None:
     """Triage lỗi thì trả None để graph tự handoff Deep."""
     if not fast_triage_available():
         return None
 
     try:
-        return call_fast_agent_decision(prompt, gateway_message)
+        return call_fast_agent_decision(prompt, gateway_message, recent_turns=recent_turns)
     except Exception as exc:
         runtime_log(
             "fast_triage_error",

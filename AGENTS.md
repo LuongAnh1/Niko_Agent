@@ -28,6 +28,29 @@ Keep chat memory and business/lakehouse memory separate in docs and design:
 Telegram chat memory is local interaction memory; Jira/lakehouse memory is a
 separate business backend lane that Niko can retrieve from later.
 
+## Waku Reference Principle
+
+Use `D:\Dự án cá nhân\Do_an_II\waku-agent` as a reference for responsibility
+boundaries, not as a folder-name template to copy mechanically.
+
+What Niko should learn from Waku:
+
+- Gateway code stays thin: platform IO, auth, parsing, send/reply only.
+- App/root code assembles settings, runtime dependencies, memory, tools, graphs,
+  and owns the stable turn entrypoint.
+- Graph/workflow code owns business flow and route topology.
+- Loop code owns reusable tool-call mechanics, not application routing.
+- Tool adapters are grouped by domain and never send platform replies directly.
+
+Do not add a new package just because Waku has a nearby concept. Add a package
+only when it owns real behavior, state, policy, workflow selection, or reusable
+mechanics. Bridge-only layers that merely forward calls should be removed or
+kept inside the existing assembly/root layer. In the current Niko baseline,
+`NikoApp` is the Waku-style assembly and turn entrypoint, and now owns memory
+correction plus Jira issue workflow selection. `niko/orchestration/` should not
+exist again unless the selection logic outgrows `NikoApp` and needs an
+independently testable owner.
+
 ## Architecture Map
 
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
@@ -44,6 +67,12 @@ separate business backend lane that Niko can retrieve from later.
   imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
+- `niko/gateway/`: Gateway runner. Owns the channel-agnostic handoff
+  from normalized gateway messages/callbacks into the current chat workflow.
+- `niko/app.py`: Waku-style assembly root and current turn entrypoint. It owns
+  workflow selection for memory correction and Jira issue flow, then delegates
+  normal local/Fast/Deep chat to `ChatReplyGraph`. Do not add a separate
+  orchestration package while `NikoApp` can own the behavior directly.
 - `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
   LoopRuntime, and observer mechanics. Keep it independent from Telegram and
   from any single domain workflow.
@@ -103,8 +132,18 @@ separate business backend lane that Niko can retrieve from later.
   documents.
 
 Important current boundary: Niko has a runnable baseline harness, not a generic
-agent framework core yet. `ChatReplyGraph` is still a hand-written business graph
-for chat, not a reusable Node/Edge/Workflow engine like Waku's graph runtime.
+agent framework core yet. `GatewayRunner` is still a thin gateway bridge.
+`NikoApp` is now the Waku-style assembly root and owns turn-level selection for
+memory correction and Jira issue workflow before normal chat. `ChatReplyGraph`
+is still a hand-written business graph for local/Fast/Deep chat, not a reusable
+Node/Edge/Workflow engine like Waku's graph runtime. The target split for
+gateway runner, app assembly, graph workflows, Loop, and tools started with
+`niko/gateway/` and `niko/app.py`. The broader target is documented in
+`docs/plans/core-split/2026-10-08-niko-core-split-survey.md`; do not add a separate
+orchestrator layer unless a future workflow owner needs real behavior beyond
+`NikoApp`. The phase-by-phase implementation direction now lives in
+`docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
+tracking in `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 ## Chat Flow
 
@@ -112,8 +151,12 @@ The Telegram gateway converts each accepted Telegram message into
 `ChatGatewayMessage`, then calls:
 
 ```python
-from niko.graphs.chat_reply import ChatReplyGraph
+from niko.gateway import GatewayRunner
 ```
+
+`GatewayRunner` currently forwards the turn to `NikoApp`. `NikoApp` opens the
+turn, preserves the route/busy order, handles memory correction and Jira issue
+workflow selection, then hands normal local/Fast/Deep chat to `ChatReplyGraph`.
 
 `ChatReplyGraph` runs either `single` or `two_agent` mode according to
 `NIKO_AGENT_MODE`.
@@ -129,21 +172,29 @@ In `two_agent` mode:
   `NIKO_FAST_AGENT_COMMAND` to generate the quick reply.
 - Nimble decision `send_to_deep` queues a Deep background job and sends a wait
   reply.
-- Deep receives memory context only when memory retrieval is enabled.
-- When `NIKO_JIRA_TOOLS_ENABLED=1`, prompts with Jira issue keys can run through
-  `niko/graphs/jira_issue/` before Deep. The workflow fetches fixture data with
-  Loop, adds evidence context to Deep, and returns a safe no-data reply when the
-  issue key is not in the fixture. Clear issue keys are handled by Python rule;
-  when `NIKO_JIRA_DECISION_GATE_ENABLED=1`, ambiguous prompts such as "ticket vừa
-  nãy" can ask Nimble to choose `use_jira_tool`, `ask_for_issue_key`, or
-  `skip_jira`.
+- Fast triage/Fast reply receive a short recent `chat_log` window as working
+  memory so context-dependent follow-ups are not answered blindly. This is not
+  long-term facts/episodes retrieval.
+- Deep receives working memory plus long-term memory context according to memory
+  retrieval settings.
+- When `NIKO_JIRA_TOOLS_ENABLED=1`, `NikoApp` can route prompts with Jira issue
+  keys through `niko/graphs/jira_issue/` before normal chat. The workflow fetches
+  fixture data with Loop, adds evidence context to Deep, and returns a safe
+  no-data reply when the issue key is not in the fixture. Clear issue keys are
+  handled by Python rule; when `NIKO_JIRA_DECISION_GATE_ENABLED=1`, ambiguous
+  prompts such as "ticket vừa nãy" can ask Nimble to choose `use_jira_tool`,
+  `ask_for_issue_key`, or `skip_jira`.
 - When Deep finishes, the result can pass through Fast final composition before
   being sent to the user.
 - If Deep is already busy in the same conversation, new messages are appended to
   the active job followups and the bot returns `busy_reply`.
 
-Nimble triage intentionally receives only prompt and light gateway metadata, not
-memory context. This keeps route decisions clean and fast. Legacy Fable JSON
+Nimble triage receives the current prompt, light gateway metadata, and a short
+`recent_turns` working-memory window. It should choose `send_to_deep` when the
+turn depends on missing/uncertain context, tools, Jira, code, memory, or careful
+analysis. If Nimble still chooses `reply_now` with confidence below
+`NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, `ChatReplyGraph` overrides that
+choice to `send_to_deep` so Fast does not answer blindly. Legacy Fable JSON
 triage still exists as a fallback path when the decision model is disabled, but
 new triage work should prefer `bots/decision_model/`.
 
@@ -160,9 +211,9 @@ Important boundaries:
 
 - `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
   operational log that can later feed analysis.
-- Working memory is ephemeral: Deep can receive a short recent conversation
-  window rebuilt from `chat_log` for the current turn, but that window is not
-  Semantic/Episodic long-term memory.
+- Working memory is ephemeral: Fast triage/reply and Deep can receive a short
+  recent conversation window rebuilt from `chat_log` for the current turn, but
+  that window is not Semantic/Episodic long-term memory.
 - Semantic extraction is not mature yet. Facts are mainly added through Ops/API
   and explicit consolidation, either manual `Run once` or default-off auto; free-form
   summarizer extraction is not built yet.
@@ -249,11 +300,13 @@ http://127.0.0.1:7777
 
 Dashboard graph semantics:
 
-- `Gateway -> Router -> Reply`: local or busy reply.
-- `Gateway -> Router -> Fast Agent -> Reply`: Fast reply path.
-- `Gateway -> Router -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep path.
+- `Gateway -> GatewayRunner -> NikoApp -> Reply`: local, busy, correction, or safe workflow reply.
+- `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`: Fast reply path.
+- `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep/tool path.
 - `Memory Gate -> Memory Records`: retrieval from facts/episodes.
 - `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
+- Runtime log source `niko_app` event `workflow_selected` shows which app-level
+  workflow handled a turn before normal chat continues.
 
 The dashboard `Bots` tab is the preferred place to start/stop Telegram Bot,
 warm up or stop/unload Decision Model, and inspect runtime logs. Terminal output
@@ -275,18 +328,32 @@ bot process already owns that lock.
 - `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
   memory upgrade business context.
 - `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
-- `docs/plans/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
+- `docs/plans/README.md`: grouped index for short-term implementation plans and
+  checklists under memory, loop, Jira, core split, and maintenance.
+- `docs/plans/memory/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
   implementation plan using the local Decision Model.
-- `docs/plans/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
+- `docs/plans/memory/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
   checklist and live verification status for chat memory work.
-- `docs/plans/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
+- `docs/plans/memory/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
   checklist for current Phase 6/7 memory flow verification.
-- `docs/plans/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
+- `docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
   for the generic Loop runtime.
-- `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
+- `docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
   for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
-- `docs/plans/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
+- `docs/plans/jira/2026-10-08-jira-live-test-checklist.md`: live Telegram/dashboard
+  checklist for Jira runtime tools, fixture no-data behavior, gate prompts, and
+  read-only boundary.
+- `docs/plans/maintenance/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
   keeping Markdown docs and source file comments aligned with the current repo state.
+- `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`: survey plan for separating
+  gateway runner, app assembly, graph workflow selection, Loop, and tools.
+- `docs/plans/core-split/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
+  the core/gateway/graph split survey and docs sync.
+- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
+  implementation direction for actually refactoring gateway runner, app assembly,
+  graph workflow selection, Jira workflow selection, and memory correction selection.
+- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
+  to tick after each core/gateway/graph split phase is implemented and verified.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
@@ -323,6 +390,7 @@ NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
 NIKO_DECISION_MODEL_NAME=nimble
 NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
 NIKO_DECISION_MODEL_KEEP_ALIVE=-1
+NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD=0.65
 NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
 NIKO_STATE_DIR=niko/.runtime
 NIKO_TRACE_ENABLED=1
@@ -390,6 +458,16 @@ not relevant.
 ## Editing Rules For Future Sessions
 
 - Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
+- Keep `niko/gateway/` channel-agnostic. `niko/app.py` is allowed to own
+  turn-level workflow selection; keep route labels and trace events compatible
+  unless a plan explicitly changes them.
+- Avoid creating bridge-only packages such as a turn orchestrator that only
+  delegates. Match Waku's spirit: `app.py` may coordinate a turn, while real
+  workflows live under `niko/graphs/` and reusable loop mechanics live under
+  `niko/loop/`.
+- Do not move additional workflow selection responsibilities without following
+  `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md` and updating
+  its checklist.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the
   Telegram gateway. Nimble is for route/label decisions, not free-form reply
   generation.

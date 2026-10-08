@@ -1,7 +1,7 @@
 # Checklist Triển Khai Niko Loop Tổng Quát
 
 Ngày tạo: 2026-10-08
-Tài liệu gốc: `docs/plans/2026-10-08-niko-loop-implementation-plan.md`
+Tài liệu gốc: `docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md`
 
 ## Phase 1: Documentation And Interface Contract
 
@@ -195,6 +195,8 @@ Mục đích: chứng minh Loop là khung tổng quát, không chỉ phục vụ
 - [x] Thêm Jira Decision Gate default-off cho prompt mơ hồ.
 - [x] Test clear issue key không gọi Decision Model; prompt mơ hồ có thể ask key,
       skip, hoặc dùng issue key từ recent chat.
+- [ ] Live test Jira runtime tools qua Telegram/dashboard theo
+      [Checklist Live Test Jira Runtime Tools](../jira/2026-10-08-jira-live-test-checklist.md).
 
 Tiêu chí hoàn thành:
 
@@ -221,3 +223,5 @@ Trạng thái 2026-10-08:
   và ops dashboard pass `65 passed`.
 - Verification Phase 6C sau khi thêm Jira Decision Gate: targeted
   decision/Jira/Telegram/Ops pass `95 passed`; full suite pass `208 passed`.
+- Live test riêng cho Jira qua Telegram/dashboard mới được tách thành checklist
+  riêng; chưa tick pass cho tới khi anh chạy và em đối chiếu trace/runtime log.

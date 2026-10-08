@@ -19,7 +19,9 @@ nên là gateway vào/ra.
 Telegram message
   -> bots/telegram
   -> ChatGatewayMessage
-  -> ChatReplyGraph
+  -> GatewayRunner
+  -> NikoApp
+  -> ChatReplyGraph normal chat hoặc workflow cấp turn
   -> Reply
 ```
 
@@ -90,4 +92,3 @@ Telegram tạo ra dữ liệu runtime cho harness:
 Nhưng dữ liệu Telegram chưa đủ để đại diện cho nghiệp vụ doanh nghiệp. Nó cần
 được kết hợp với gateway nghiệp vụ như Jira để agent có thể hiểu task, issue,
 comment, component và lịch sử xử lý thật.
-

@@ -4,7 +4,7 @@ Ngày lập: 2026-10-07
 Trạng thái 2026-10-08: historical. Checklist này ghi expected/result của đợt test
 Phase 6/7 đã hoàn thành; nhật ký verification canonical hiện nằm ở
 `docs/harness/memory-live-verification.md`, còn công việc tiếp theo của Loop nằm ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`.
+`docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`.
 
 Phạm vi: kiểm tra live luồng chat memory sau khi đã siết `correction gate` và tách
 working memory cho Deep khỏi context quyết định sửa/xóa memory.

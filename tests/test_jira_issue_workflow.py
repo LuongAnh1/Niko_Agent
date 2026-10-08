@@ -129,6 +129,25 @@ class JiraIssueAnalysisWorkflowTests(unittest.TestCase):
         self.assertEqual(result.issue_key, "NIKO-101")
         self.assertIn("Jira issue context", result.deep_context)
 
+    def test_recent_issue_reference_uses_python_rule_before_model(self):
+        with patch.dict("os.environ", {"NIKO_JIRA_DECISION_GATE_ENABLED": "1"}, clear=False), patch(
+            "niko.graphs.jira_issue.workflow.decide_jira_gate"
+        ) as gate:
+            result = JiraIssueAnalysisWorkflow().handle(
+                prompt="xem ticket vừa nãy giúp anh",
+                conversation_id="chat-1",
+                user_key="telegram:1",
+                trace_id="trace-1",
+                recent_turns=[{"role": "user", "content": "phân tích NIKO-101"}],
+            )
+
+        self.assertTrue(result.handled)
+        self.assertEqual(result.route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
+        self.assertEqual(result.issue_key, "NIKO-101")
+        self.assertEqual(result.gate["provider"], "python_rule")
+        self.assertEqual(result.gate["reason"], "recent_issue_reference")
+        gate.assert_not_called()
+
     def test_low_confidence_gate_falls_back_to_old_route(self):
         with patch.dict(
             "os.environ",

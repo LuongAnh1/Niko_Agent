@@ -91,7 +91,12 @@ SQLite store. Runtime có một guardrail hẹp sau model: nếu model đã mở
 ràng, retrieval layer ép mode thực thi về `fact_mode=list` hoặc
 `episode_mode=recent` để tránh search rỗng kiểu `search_facts("fact")`.
 
-Fast triage không nhận memory context để giữ JSON sạch.
+Fast triage/Fast reply nhận một working memory ngắn (`recent_turns`) lấy từ
+`chat_log` để xử lý follow-up gần như "cái vừa rồi". Phần này không phải
+long-term facts/episodes và không tự search store; nếu recent context không đủ
+chắc, triage phải chọn `send_to_deep`. Reply nhanh còn có guardrail confidence:
+`reply_now` dưới `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD` sẽ bị đẩy sang
+Deep.
 
 Recent conversation là working memory ngắn hạn, không phải long-term facts/episodes.
 Nó được dựng lại từ `chat_log` theo `conversation_id`, bỏ chính incoming prompt
@@ -213,11 +218,14 @@ Live graph không phải là graph mining. Đây là đồ thị quan sát harne
 
 Ý nghĩa tuyến chính:
 
-- `Gateway -> Router -> Reply`: local/busy reply.
-- `Gateway -> Router -> Fast Agent -> Reply`: Fast trả lời ngay.
-- `Gateway -> Router -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep path.
+- `Gateway -> GatewayRunner -> NikoApp -> Reply`: local/busy/correction/safe workflow reply.
+- `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`: Fast trả lời ngay.
+- `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep/tool path.
 - `Memory Gate -> Memory Records`: có retrieval từ facts/episodes.
 - `Reply/turn events -> Trace/Ops`: trace/dashboard quan sát.
+
+Tab Bots có runtime log source `niko_app`, event `workflow_selected`, để biết
+turn đã được app chọn vào memory correction, Jira issue, normal chat hay busy.
 
 Turn vừa kết thúc được giữ sáng thêm một khoảng ngắn để dễ quan sát đường đi.
 

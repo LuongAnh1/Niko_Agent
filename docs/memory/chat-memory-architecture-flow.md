@@ -4,14 +4,14 @@ Ngày cập nhật: 2026-10-08
 Phạm vi: chat memory local của Niko Agent, single-user v1
 
 Tài liệu này là bản sơ đồ kiểm soát luồng memory. Nó gom lại trạng thái hiện tại
-và kiến trúc muốn xây theo kế hoạch trong `docs/plans/2026-10-07-chat-memory-decision-model.md`.
+và kiến trúc muốn xây theo kế hoạch trong `docs/plans/memory/2026-10-07-chat-memory-decision-model.md`.
 Mục tiêu là nhìn vào đây để biết dữ liệu đi qua đâu, quyết định nào do model nhỏ
 phụ trách, phần nào đã có, phần nào còn là phase sau.
 
 Nhật ký live verification chính nằm ở `docs/harness/memory-live-verification.md`.
 Checklist Phase 6/7 ngày 2026-10-07 hiện được giữ như bản historical để đối chiếu
 expected/result cũ; checklist Loop hiện tại nằm ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`.
+`docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`.
 
 ## Legend
 
@@ -51,8 +51,12 @@ làm nơi lưu mặc định cho mọi tin nhắn Telegram.
 
 ```mermaid
 flowchart TB
-    Gateway[Gateway<br/>Telegram] --> ChatGraph[ChatReplyGraph<br/>route / correction / deep job / reply]
+    Gateway[Gateway<br/>Telegram] --> Runner[GatewayRunner]
+    Runner --> App[NikoApp<br/>workflow selection]
+    App --> ChatGraph[ChatReplyGraph<br/>local / Fast / Deep chat]
+    App --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
     ChatGraph --> MemoryRuntime[MemoryRuntime<br/>correction / write / retrieve facade]
+    CorrectionPath --> MemoryRuntime
     ChatGraph --> DeepRuntime[niko.runtime<br/>build Deep prompt]
     DeepRuntime --> MemoryRuntime
 
@@ -74,7 +78,6 @@ flowchart TB
     WriteGate -->|remember| Episode[(episodes)]
     WriteGate -->|error fail-open| Episode
 
-    MemoryRuntime --> CorrectionPath[Correction path<br/>Phase 5 V1 temporary]
     CorrectionPath --> CorrectionPrecheck{Prompt có tín hiệu<br/>sửa/xóa/quên?}
     CorrectionPrecheck -->|no| NoCorrection[Luồng chat bình thường]
     CorrectionPrecheck -->|pending fact ID| CorrectionPending[Python pending action<br/>validate allowed IDs]
@@ -100,15 +103,16 @@ flowchart TB
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Gateway,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionPrecheck,CorrectionGate,CorrectionPending,CorrectionPendingMatch,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,RecentOnly,NoEpisode done;
+    class Gateway,Runner,App,ChatGraph,DeepRuntime,MemoryRuntime,RetrievalGate,Retriever,Store,Formatter,DeepPrompt,WritePath,ChatLog,WorkingWindow,WriteGate,Episode,CorrectionPath,CorrectionPrecheck,CorrectionGate,CorrectionPending,CorrectionPendingMatch,NoCorrection,CorrectionSearch,CorrectionMatch,CorrectionApply,CorrectionClarify,Trace,RuntimeLog,RecentOnly,NoEpisode done;
 ```
 
 Điểm kiểm soát chính là `MemoryRuntime`. Graph và runtime không nên tự biết chi
 tiết gate/search/write/correction nữa; chúng chỉ gọi pipeline memory.
 
-Luồng hiện tại có hai điểm gọi chính vào `MemoryRuntime`: `ChatReplyGraph` gọi trực
-tiếp để xử lý correction/write và ghi `chat_log`; `niko.runtime` gọi khi cần dựng
-memory context cho Deep. Vì vậy correction gate không nằm bên trong Deep runtime.
+Luồng hiện tại có ba điểm gọi chính vào `MemoryRuntime`: `NikoApp` gọi correction
+workflow cấp turn, `ChatReplyGraph` gọi write path/ghi `chat_log`, và
+`niko.runtime` gọi khi cần dựng memory context cho Deep. Vì vậy correction gate
+không nằm bên trong Deep runtime.
 
 ## 3. Retrieval Flow Cho Deep
 
@@ -158,7 +162,11 @@ sequenceDiagram
 Nguyên tắc: retrieval gate lỗi thì fail-open, vì bỏ lỡ memory cần thiết thường tệ
 hơn việc retrieve hơi dư. Khi gate trả `skip`, runtime chỉ bỏ qua long-term
 `facts/episodes`; recent conversation window vẫn có thể được inject như working memory
-ngắn hạn cho Deep. Fast triage không nhận memory context để giữ route JSON sạch.
+ngắn hạn cho Deep. Fast triage/Fast reply cũng nhận một `recent_turns` ngắn để
+không trả lời mù ngữ cảnh, nhưng phần này chỉ là chat window tạm thời, không phải
+long-term facts/episodes và không tự search store. Khi Fast triage chọn
+`reply_now` với confidence thấp hơn `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`,
+graph ép sang Deep.
 
 Inventory không còn bypass gate bằng keyword Python. Câu kiểu "đang lưu fact nào"
 vẫn đi qua Decision Model; model chọn `list_facts`, `recent_episodes`, hoặc trả
@@ -305,7 +313,7 @@ target, kết quả được coi là `no_fact_match` thay vì bắt user chọn 
 
 ```mermaid
 flowchart TB
-    Graph[ChatReplyGraph] --> NeedTool{Cần workflow nhiều bước?}
+    App[NikoApp] --> NeedTool{Cần workflow nhiều bước?}
     NeedTool -->|no| Normal[Fast/Deep/local flow hien tai]
     NeedTool -->|yes| Loop[Loop Runtime]
     Loop --> Controller[Controller<br/>Python V0 / Decision Model / future tool-use]
@@ -314,14 +322,14 @@ flowchart TB
     Registry --> JiraTools[Jira fixture tools<br/>read-only V0]
     MemoryTools --> Store[(SQLite memory)]
     JiraTools --> External[Jira/mock/public dataset]
-    Loop --> Final[Final reply qua Graph]
+    Loop --> Final[Final reply qua App/Graph helper]
     Loop --> Trace[Trace/runtime log]
 
     classDef done fill:#dff5e1,stroke:#2e7d32,color:#111;
     classDef planned fill:#fff4cc,stroke:#b7791f,color:#111;
     classDef boundary fill:#f3f4f6,stroke:#6b7280,color:#111;
 
-    class Graph,Normal,Loop,Controller,Registry,MemoryTools,JiraTools,Store,Final,Trace done;
+    class App,Normal,Loop,Controller,Registry,MemoryTools,JiraTools,Store,Final,Trace done;
     class External boundary;
 ```
 
@@ -336,7 +344,7 @@ issue key và gọi tool. Pending fact-ID follow-up hiện đã có state bền
 trong SQLite, nhưng phần điều phối memory correction vẫn là facade V1 chứ chưa phải tool router tổng
 quát cho chat. Tài liệu triển khai nằm ở
 `docs/loop/architecture.md` và checklist ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
+`docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
 thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow có
 state rõ contract hơn: controller chọn search/list/update/delete, Python validate
 target rồi mới mutate SQLite. Jira/business tools hiện vẫn read-only và không trộn dữ liệu

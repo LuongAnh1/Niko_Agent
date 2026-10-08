@@ -24,6 +24,7 @@ from bots.telegram.bot import (
 from bots.decision_model.sticker import StickerMoodDecision
 from bots.decision_model.jira import JIRA_ASK_FOR_ISSUE_KEY, JIRA_USE_TOOL, JiraGateDecision
 from bots.telegram.sticker_picker import choose_sticker_file_id
+from niko.app import NikoApp
 from niko.graphs.chat_reply import ChatReplyGraph, DeepAgentJob
 from niko.graphs.chat_reply.graph import format_fast_triage_log
 from niko.graphs.jira_issue import (
@@ -204,6 +205,41 @@ class TelegramPromptTests(unittest.TestCase):
             handle_message("token", message, set(), set(), {}, "NikoBot")
 
         self.assertTrue(send_message.call_args.args[2].startswith("@anhluong "))
+
+    def test_telegram_message_uses_gateway_runner(self):
+        message = {
+            "text": "alo",
+            "from": {"id": 123, "username": "anhluong", "first_name": "Luong"},
+            "chat": {"id": 456, "type": "private"},
+        }
+
+        class FakeGatewayRunner:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def handle_message(self, prompt, gateway_message, deliver_reply, notify_working=None):
+                self.calls.append((prompt, gateway_message, deliver_reply, notify_working))
+                deliver_reply("runner reply")
+                return "runner_route"
+
+        runner = FakeGatewayRunner()
+
+        with patch.dict(os.environ, {"TELEGRAM_STICKERS_ENABLED": "0"}, clear=False), patch(
+            "bots.telegram.bot.GATEWAY_RUNNER", runner
+        ), patch("bots.telegram.bot.send_message") as send_message, patch(
+            "bots.telegram.bot.maybe_send_sticker_async"
+        ) as sticker:
+            handle_message("token", message, set(), set(), {}, "NikoBot")
+
+        self.assertEqual(len(runner.calls), 1)
+        prompt, gateway_message, deliver_reply, notify_working = runner.calls[0]
+        self.assertEqual(prompt, "alo")
+        self.assertEqual(gateway_message.chat_id, "456")
+        self.assertIsNotNone(deliver_reply)
+        self.assertIsNotNone(notify_working)
+        send_message.assert_called_once()
+        self.assertEqual(send_message.call_args.args[2], "runner reply")
+        sticker.assert_called_once()
 
     def test_deep_agent_result_is_composed_by_fast_agent(self):
         message = telegram_message_to_gateway(
@@ -485,6 +521,100 @@ class TelegramPromptTests(unittest.TestCase):
         fast_agent.assert_called_once()
         self.assertEqual(fast_agent.call_args.kwargs["task"], FAST_AGENT_TASK_REPLY)
 
+    def test_decision_model_fast_triage_receives_recent_turns(self):
+        self.memory_store.log_chat(
+            "456",
+            "user",
+            "phân tích NIKO-101 giúp anh",
+            source="telegram",
+            meta={"route": "incoming"},
+        )
+        message = telegram_message_to_gateway(
+            {
+                "text": "cái vừa rồi có đang bị block không em?",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+        captured: dict[str, object] = {}
+
+        def decide(prompt, gateway_message, recent_turns=None):
+            captured["recent_turns"] = recent_turns
+            return FastAgentDecision(route="reply_now", provider="ollama_nimble", confidence=0.9, label="reply_now")
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+            }),
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_decision_model",
+            side_effect=decide,
+        ) as decision_model, patch(
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
+            return_value="Da em xem lai ngu canh gan day roi anh.",
+        ) as fast_agent:
+            route = agent.handle_message("cái vừa rồi có đang bị block không em?", message, delivered.append)
+
+        recent_turns = captured["recent_turns"]
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, ["Da em xem lai ngu canh gan day roi anh.\n\nMeow"])
+        self.assertTrue(any("NIKO-101" in turn["content"] for turn in recent_turns))
+        decision_model.assert_called_once()
+        fast_agent.assert_called_once()
+        self.assertTrue(any("NIKO-101" in turn["content"] for turn in fast_agent.call_args.kwargs["recent_turns"]))
+
+    def test_low_confidence_reply_now_handoffs_to_deep(self):
+        message = telegram_message_to_gateway(
+            {
+                "text": "cai vua roi co dang bi block khong em?",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        agent = self.make_agent()
+        delivered = []
+
+        with patch.dict(
+            os.environ,
+            self.isolated_env({
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_DECISION_MODEL_ENABLED": "1",
+                "NIKO_FAST_AGENT_COMMAND": "fast -p",
+                "NIKO_REPLY_SUFFIX": "Meow",
+                "NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD": "0.65",
+            }),
+            clear=True,
+        ), patch(
+            "niko.graphs.chat_reply.prompts.call_decision_model",
+            return_value=FastAgentDecision(
+                route="reply_now",
+                provider="ollama_nimble",
+                confidence=0.1,
+                label="reply_now",
+            ),
+        ) as decision_model, patch(
+            "niko.graphs.chat_reply.prompts.call_fast_agent",
+            return_value="Em chua du ngu canh anh.",
+        ) as fast_agent, patch.object(
+            agent,
+            "_start_deep_agent_thread",
+            return_value=True,
+        ) as start_deep:
+            route = agent.handle_message("cai vua roi co dang bi block khong em?", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_FAST_AGENT)
+        self.assertEqual(delivered, [ensure_reply_suffix(build_deep_wait_reply())])
+        decision_model.assert_called_once()
+        fast_agent.assert_not_called()
+        start_deep.assert_called_once()
+
     def test_decision_model_can_handoff_to_deep_without_fable(self):
         message = telegram_message_to_gateway(
             {
@@ -708,6 +838,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -719,7 +850,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
@@ -738,6 +869,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -749,7 +881,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-101 giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertNotEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
@@ -767,6 +899,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -778,7 +911,7 @@ class TelegramPromptTests(unittest.TestCase):
             }),
             clear=True,
         ), patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("phan tich NIKO-404 giup anh", message, delivered.append)
+            route = app.handle_message("phan tich NIKO-404 giup anh", message, delivered.append)
 
         self.assertEqual(route, ROUTE_JIRA_ISSUE_NOT_FOUND)
         self.assertIn("chưa có dữ liệu Jira fixture", delivered[0])
@@ -786,7 +919,7 @@ class TelegramPromptTests(unittest.TestCase):
         self.assertIsNone(agent.get_active_deep_job("456"))
         start_deep.assert_not_called()
 
-    def test_jira_decision_gate_can_use_recent_issue_key_for_followup(self):
+    def test_jira_recent_issue_reference_uses_rule_before_model(self):
         message = telegram_message_to_gateway(
             {
                 "text": "xem ticket vua nay giup anh",
@@ -795,6 +928,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         agent.memory_store.log_chat("456", "user", "phan tich NIKO-101 giup anh", source="test")
         delivered = []
 
@@ -811,14 +945,14 @@ class TelegramPromptTests(unittest.TestCase):
             "niko.graphs.jira_issue.workflow.decide_jira_gate",
             return_value=JiraGateDecision(decision=JIRA_USE_TOOL, confidence=0.91),
         ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True):
-            route = agent.handle_message("xem ticket vua nay giup anh", message, delivered.append)
+            route = app.handle_message("xem ticket vua nay giup anh", message, delivered.append)
 
         job = agent.get_active_deep_job("456")
         self.assertEqual(route, ROUTE_JIRA_ISSUE_DEEP_AGENT)
         self.assertIsNotNone(job)
         self.assertIn("NIKO-101", job.deep_context)
         self.assertIn("Jira issue context", job.deep_context)
-        gate.assert_called_once()
+        gate.assert_not_called()
 
     def test_jira_decision_gate_can_ask_for_issue_key(self):
         message = telegram_message_to_gateway(
@@ -829,6 +963,7 @@ class TelegramPromptTests(unittest.TestCase):
             }
         )
         agent = self.make_agent()
+        app = NikoApp(chat_graph=agent)
         delivered = []
 
         with patch.dict(
@@ -844,7 +979,7 @@ class TelegramPromptTests(unittest.TestCase):
             "niko.graphs.jira_issue.workflow.decide_jira_gate",
             return_value=JiraGateDecision(decision=JIRA_ASK_FOR_ISSUE_KEY, confidence=0.91),
         ) as gate, patch.object(agent, "_start_deep_agent_thread", return_value=True) as start_deep:
-            route = agent.handle_message("xem ticket nay giup anh", message, delivered.append)
+            route = app.handle_message("xem ticket nay giup anh", message, delivered.append)
 
         self.assertEqual(route, ROUTE_JIRA_ISSUE_KEY_REQUIRED)
         self.assertIn("mã issue Jira", delivered[0])

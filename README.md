@@ -6,6 +6,28 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 
 Điểm quan trọng: Niko không gọi trực tiếp API LLM trong code. Runtime hiện tại gọi Claude CLI/FCC qua `fcc-claude` trên máy local.
 
+## Tinh Thần Học Từ Waku
+
+Niko tham khảo `waku-agent` để học cách tách trách nhiệm, không copy nguyên xi tên
+folder hay thêm lớp mới chỉ để giống cấu trúc bên đó. Điểm cần giữ là:
+
+- Gateway chỉ làm IO/auth/parsing/reply.
+- `NikoApp` là assembly root, turn entrypoint, và nơi chọn workflow cấp turn kiểu Waku `app.py`.
+- Workflow nghiệp vụ nằm dưới `niko/graphs/`.
+- Loop/tool runtime dùng chung nằm dưới `niko/loop/`.
+- Tool adapter theo domain nằm dưới `niko/tools/` và không tự gửi reply Telegram.
+
+Vì vậy luồng active hiện tại là:
+
+```text
+Telegram gateway -> GatewayRunner -> NikoApp -> ChatReplyGraph
+```
+
+Không tạo thêm package orchestrator nếu nó chỉ forward sang `ChatReplyGraph`.
+Hiện `NikoApp` đã chọn memory correction và Jira issue workflow trước khi chuyển
+normal local/Fast/Deep chat sang `ChatReplyGraph`. Chỉ tạo boundary mới nếu phần
+selection này lớn tới mức cần owner độc lập có test và tài liệu riêng.
+
 ## Niko Hiện Có Gì
 
 - Telegram gateway: nhận/gửi tin qua Telegram, hỗ trợ group mention, `/id`, `/whoami`, allowlist, sticker.
@@ -26,7 +48,9 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 ```text
 bots/telegram/                  # Telegram gateway
 bots/decision_model/            # Ollama/Nimble decision scripts cho triage, sticker, memory/Jira gates
+niko/app.py                     # Assembly root/turn entrypoint kiểu Waku
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
+niko/gateway/                    # GatewayRunner chung cho các platform gateway
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/graphs/jira_issue/          # Jira issue context flow V0 qua Loop tools
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
@@ -161,17 +185,17 @@ khóa, dashboard vẫn hiển thị nhưng không ghi đè được.
 
 Các kịch bản demo nhanh:
 
-- Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> Router -> Reply` hoặc `Gateway -> Router -> Fast Agent -> Reply`.
-- Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `Memory Gate -> Loop -> Reply`.
+- Gửi `@Niko2_Bot em ơi`: route local/fast, dashboard sáng tuyến `Gateway -> GatewayRunner -> NikoApp -> Reply` hoặc `NikoApp -> Fast Agent -> Reply`.
+- Gửi câu có `fact`, `memory`, `phân tích`, `debug`: route deep, dashboard sáng `NikoApp -> Memory Gate -> Loop -> Reply`.
 - Thêm một fact trong dashboard, hỏi câu liên quan: Deep agent nhận memory context từ SQLite.
 - Yêu cầu Niko quên/sửa fact test: correction gate hỏi lại khi mơ hồ và chỉ update/delete khi đã rõ ID.
-- Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: graph dùng Jira Loop
+- Bật `NIKO_JIRA_TOOLS_ENABLED=1`, hỏi `phân tích NIKO-101`: `NikoApp` đưa turn qua Jira Loop
   tools đọc fixture, đưa context có evidence sang Deep và hiện Loop Steps trong Traces.
 - Bật thêm `NIKO_JIRA_DECISION_GATE_ENABLED=1` để Nimble xử lý prompt Jira mơ hồ
   như `xem ticket vừa nãy`; issue key rõ vẫn đi rule Python cho nhanh và chắc.
 - Mở tab Traces để xem `turn_start`, `route_decision`, `memory_retrieval`,
   `memory_gate_decision`, `memory_write_decision`, `memory_correction_decision`, `turn_end`.
-- Mở tab Bots để xem runtime log như `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
+- Mở tab Bots để xem runtime log như `workflow_selected`, `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
 Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 
@@ -184,8 +208,10 @@ Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
 - [Niko Loop Architecture](docs/loop/architecture.md)
 - [Nghiệp vụ harness](docs/business-domains/README.md)
 - [Demo Guide](docs/demo/demo-guide.md)
-- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/2026-10-07-chat-memory-decision-model.md)
-- [Kế hoạch Niko Loop 2026-10-08](docs/plans/2026-10-08-niko-loop-implementation-plan.md)
+- [Mục lục kế hoạch triển khai](docs/plans/README.md)
+- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/memory/2026-10-07-chat-memory-decision-model.md)
+- [Kế hoạch Niko Loop 2026-10-08](docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md)
+- [Checklist Live Test Jira Runtime Tools 2026-10-08](docs/plans/jira/2026-10-08-jira-live-test-checklist.md)
 - [Memory Roadmap](docs/memory/roadmap.md)
 
 ## Ranh Giới Baseline
@@ -204,7 +230,11 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
   và Jira issue context flow default-off trong `niko/graphs/jira_issue/`.
   Jira Decision Gate cũng default-off và chỉ chọn gate/route, không tự gọi tool.
   Đây chưa phải tool router hoàn chỉnh cho mọi chat/Jira flow.
-- Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
+- Deep prompt đã có recent working memory ngắn hạn. Fast triage/Fast reply cũng
+  nhận recent chat window để hiểu follow-up gần, nhưng không tự search long-term
+  facts/episodes. Nếu Fast triage chọn `reply_now` với confidence thấp hơn
+  `NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD`, graph sẽ đẩy sang Deep. Retrieval
+  dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.
 - Lakehouse/Knowledge Graph là lane memory backend nghiệp vụ riêng cho Jira/tài liệu; nó không phải nơi lưu mặc định chat Telegram, và Niko chỉ nên nối vào khi cần context business.
@@ -224,6 +254,8 @@ rtk python -m pytest
 ## Ghi Chú Phát Triển
 
 - Telegram gateway chỉ nên là cổng vào/ra, không chứa logic memory/LLM.
+- Học Waku theo boundary và trách nhiệm, không thêm bridge/package chỉ để giống tên.
+- `NikoApp` hiện là assembly root và nơi chọn memory/Jira workflow; chỉ tách selection ra lớp mới khi lớp đó có logic thật.
 - Logic điều phối nằm trong `niko/graphs/chat_reply/`.
 - Runtime gọi LLM nằm trong `niko/runtime.py`.
 - Memory/trace/dashboard là harness baseline, không nên trộn vào gateway.

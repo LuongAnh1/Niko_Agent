@@ -844,49 +844,83 @@
         active
       };
     }
-    function replyFlowsForRoute(route, fallback = "router-reply") {
+    function replyFlowsForRoute(route, fallback = "app-reply") {
       const normalized = String(route || "").toLowerCase();
       if (normalized.includes("fast")) return ["fast-reply", "reply-trace"];
       if (normalized.includes("deep") || normalized.includes("delayed")) return ["loop-reply", "reply-trace"];
-      if (normalized.includes("local") || normalized.includes("busy")) return ["router-reply", "reply-trace"];
+      if (normalized.includes("local") || normalized.includes("busy") || normalized.includes("correction") || normalized.includes("not_found") || normalized.includes("key_required")) return ["app-reply", "reply-trace"];
       return [fallback, "reply-trace"];
+    }
+    function appSelectionParts(workflow, route, event) {
+      const normalizedWorkflow = String(workflow || "").toLowerCase();
+      const normalizedRoute = String(route || "").toLowerCase();
+      const flows = ["gateway-runner", "runner-app"];
+      const nodes = ["app"];
+      if (normalizedWorkflow === "memory_correction") {
+        flows.push("app-memory", "memory-read", "app-reply");
+        nodes.push("memory_gate", "memory_records", "reply");
+      } else if (normalizedWorkflow === "jira_issue" && (event.data?.has_deep_context || normalizedRoute.includes("deep"))) {
+        flows.push("app-memory", "memory-loop");
+        nodes.push("memory_gate", "loop", "deep");
+      } else if (normalizedWorkflow === "normal_chat") {
+        if (normalizedRoute.includes("local") || normalizedRoute.includes("busy")) {
+          flows.push("app-reply");
+          nodes.push("reply");
+        } else if (normalizedRoute.includes("fast")) {
+          flows.push("app-fast");
+          nodes.push("fast");
+        } else {
+          flows.push("app-memory");
+          nodes.push("memory_gate");
+        }
+      } else if (normalizedWorkflow === "single_agent") {
+        flows.push("app-memory");
+        nodes.push("memory_gate", "deep");
+      } else {
+        flows.push("app-reply");
+        nodes.push("reply");
+      }
+      return graphParts(nodes, flows, `workflow: ${workflow || route || "selected"}`);
     }
     function eventGraphParts(event) {
       const kind = traceKind(event);
       const route = routeText(event);
       if (event.type === "turn_start") {
-        return graphParts(["gateway"], ["gateway-router"], "message in");
+        return graphParts(["gateway", "runner"], ["gateway-runner"], "message in");
+      }
+      if (kind === "workflow_selected") {
+        return appSelectionParts(event.data?.workflow, route, event);
       }
       if (kind === "route_decision") {
-        const flows = ["gateway-router"];
-        if (route.includes("local") || route.includes("busy")) flows.push("router-reply");
-        else if (route.includes("fast")) flows.push("router-fast");
-        else flows.push("router-memory");
-        return graphParts(["router"], flows, `route: ${route || "deep"}`);
+        const flows = ["gateway-runner", "runner-app"];
+        if (route.includes("local") || route.includes("busy")) flows.push("app-reply");
+        else if (route.includes("fast")) flows.push("app-fast");
+        else flows.push("app-memory");
+        return graphParts(["app"], flows, `route: ${route || "deep"}`);
       }
       if (kind === "fast_triage_started") {
-        return graphParts(["fast"], ["router-fast"], "fast triage");
+        return graphParts(["fast"], ["app-fast"], "fast triage");
       }
       if (kind === "fast_triage_finished") {
         const decision = route || "reply_now";
-        const flows = ["router-fast"];
+        const flows = ["app-fast"];
         if (decision.includes("deep")) flows.push("fast-memory");
         else flows.push("fast-reply");
         return graphParts(["fast"], flows, `fast: ${decision}`);
       }
       if (kind === "fast_triage_fallback_to_deep") {
-        return graphParts(["fast", "memory_gate"], ["router-fast", "fast-memory"], "fast fallback");
+        return graphParts(["fast", "memory_gate"], ["app-fast", "fast-memory"], "fast fallback");
       }
       if (kind === "deep_job_queued") {
-        return graphParts(["memory_gate", "loop"], ["router-memory"], "deep queued");
+        return graphParts(["memory_gate", "loop"], ["app-memory"], "deep queued");
       }
       if (kind === "deep_job_started" || kind === "deep_agent_call_started") {
-        return graphParts(["memory_gate", "loop", "deep"], ["router-memory", "memory-loop"], "loop running");
+        return graphParts(["memory_gate", "loop", "deep"], ["app-memory", "memory-loop"], "loop running");
       }
       if (kind === "memory_retrieval") {
         return graphParts(
           ["memory_gate", "memory_records", "loop", "deep"],
-          ["router-memory", "memory-read", "memory-loop"],
+          ["app-memory", "memory-read", "memory-loop"],
           "memory context"
         );
       }
@@ -897,7 +931,7 @@
         return graphParts(["loop", "deep", "reply"], ["memory-loop", "loop-reply"], "deep finished");
       }
       if (kind === "wait_reply_delivered") {
-        return graphParts(["reply"], ["router-reply"], "wait reply");
+        return graphParts(["reply"], ["app-reply"], "wait reply");
       }
       if (kind === "memory_write_chat_log") {
         return graphParts(["trace"], ["reply-trace"], "chat log write", false);
@@ -913,7 +947,7 @@
         return graphParts(["reply", "trace"], flows, event.type === "turn_end" ? "turn end" : kind);
       }
       if (/error|fail/i.test(kind) || event.status === "error") {
-        const fallback = kind.includes("deep") ? "loop-reply" : "router-reply";
+        const fallback = kind.includes("deep") ? "loop-reply" : "app-reply";
         return graphParts(["reply", "trace"], replyFlowsForRoute(route, fallback), "error");
       }
       return graphParts([], [], kind, false);
@@ -938,7 +972,7 @@
       }
       if (deepRunning) {
         const nodes = ["memory_gate", "loop", "deep"];
-        const flows = ["router-memory", "memory-loop"];
+        const flows = ["app-memory", "memory-loop"];
         if (memorySeen) {
           nodes.push("memory_records");
           flows.push("memory-read");
@@ -959,8 +993,8 @@
         ? "deep loop path"
         : flows.has("fast-reply")
           ? "fast reply path"
-          : flows.has("router-reply")
-            ? "router reply path"
+          : flows.has("app-reply")
+            ? "app reply path"
             : "turn path";
       return { nodes, flows, label, active: true };
     }
@@ -1058,19 +1092,20 @@
             </marker>
           </defs>
           <rect class="zone" x="12" y="14" width="1016" height="436" rx="14"></rect>
-          <text class="zone-label" x="28" y="38">NIKO HARNESS - clean turn flow, memory gate, loop, ops observer</text>
+          <text class="zone-label" x="28" y="38">NIKO HARNESS - gateway runner, app workflow selection, memory gate, loop, ops observer</text>
 
           <rect class="${zoneClass(graph, "loop")}" x="604" y="214" width="224" height="180" rx="12"></rect>
           <text class="zone-label" x="622" y="238">LOOP</text>
           <rect class="zone" x="272" y="334" width="280" height="112" rx="12"></rect>
           <text class="zone-label" x="290" y="358">MEMORY</text>
 
-          <path class="${flowClass(graph, "gateway-router")}" d="M176 128 L222 128"></path>
-          <path class="${flowClass(graph, "router-fast")}" d="M354 128 L400 128"></path>
-          <path class="${flowClass(graph, "fast-reply")}" d="M532 128 L840 128"></path>
-          <path class="${flowClass(graph, "router-reply", "dash")}" d="M354 164 L840 164"></path>
+          <path class="${flowClass(graph, "gateway-runner")}" d="M176 128 L206 128"></path>
+          <path class="${flowClass(graph, "runner-app")}" d="M338 128 L370 128"></path>
+          <path class="${flowClass(graph, "app-fast")}" d="M502 128 L548 128"></path>
+          <path class="${flowClass(graph, "fast-reply")}" d="M680 128 L840 128"></path>
+          <path class="${flowClass(graph, "app-reply", "dash")}" d="M436 164 L840 164"></path>
 
-          <path class="${flowClass(graph, "router-memory")}" d="M288 160 L288 260 L322 260"></path>
+          <path class="${flowClass(graph, "app-memory")}" d="M436 160 L436 214 L454 232"></path>
           <path class="${flowClass(graph, "fast-memory", "dash")}" d="M466 160 L466 214 L454 232"></path>
           <path class="${flowClass(graph, "memory-read", "dash")}" d="M412 304 L412 374"></path>
           <path class="${flowClass(graph, "memory-loop")}" d="M490 260 L604 286"></path>
@@ -1079,8 +1114,9 @@
           <path class="${flowClass(graph, "reply-trace", "dash")}" d="M906 160 L906 340"></path>
 
           ${graphNode(graph, "gateway", 44, 96, "Gateway", "Telegram in/out")}
-          ${graphNode(graph, "router", 222, 96, "Router", "local / fast / deep")}
-          ${graphNode(graph, "fast", 400, 96, "Fast Agent", "triage / quick reply")}
+          ${graphNode(graph, "runner", 206, 96, "GatewayRunner", "platform bridge")}
+          ${graphNode(graph, "app", 370, 96, "NikoApp", "workflow selection")}
+          ${graphNode(graph, "fast", 548, 96, "Fast Agent", "triage / quick reply")}
           ${graphGateNode(graph, "memory_gate", 412, 260, "Memory Gate", "retrieve context")}
           ${graphNode(graph, "deep", 650, 256, "Deep Agent", "fcc-claude local")}
           ${graphNode(graph, "tools", 650, 326, "Tool Slot", "next iteration", {cls: "future"})}
