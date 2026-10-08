@@ -31,12 +31,14 @@ niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
+niko/loop/                       # Loop core V0: ToolRegistry, LoopRuntime, observer
 niko/memory/store.py             # SQLite memory store
 niko/memory/runtime.py           # Khung điều phối retrieval/write/correction/consolidation
 niko/memory/context.py           # Dataclass, formatter và wrapper tương thích
 niko/memory/working_memory.py    # Recent conversation window cho Deep/correction
 niko/memory/correction_workflow.py # Workflow sửa/xóa fact qua chat
 niko/memory/consolidation.py     # Scaffold gom chat_log thành batch consolidation
+niko/memory/loop_tools.py        # Fact tool adapters cho Loop core V0
 niko/ops/                       # Mini Niko Ops dashboard
   dashboard.py                   # HTTP server/entrypoint mỏng
   bots.py                        # Start/stop Telegram Bot, warmup/stop Decision Model
@@ -186,7 +188,8 @@ Repo này chưa phải hệ thống memory hoàn chỉnh. Baseline hiện tại 
 - Semantic facts chủ yếu thêm thủ công qua dashboard hoặc từ explicit consolidation, gồm manual `Run once` và auto default-off.
 - Auto consolidation default-off; khi bật, nó chỉ chạy sau complete exchange và vẫn dùng guardrail lỗi classifier thì không mark rows.
 - Memory correction qua chat đang là V1 tạm thời; về sau nên chuyển thành Loop/tool workflow có state bền hơn.
-- Loop tổng quát hiện mới ở mức tài liệu triển khai; code runtime `niko/loop/` chưa được tạo trong baseline này.
+- Loop tổng quát đã có core V0 độc lập trong `niko/loop/` và fact tool adapters
+  trong `niko/memory/loop_tools.py`, nhưng chưa nối vào chat flow/correction flow.
 - Deep prompt đã có recent working memory ngắn hạn, nhưng retrieval dài hạn vẫn là FTS/LIKE text search, chưa có embedding/rerank/graph reasoning.
 - Episodic memory mới tóm tắt deep job, chưa tự trích xuất sự kiện giàu ngữ nghĩa.
 - Tool/Loop slot đã có trên dashboard nhưng chưa phải tool router hoàn chỉnh.

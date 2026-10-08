@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Niko Loop Tổng Quát
 
 Ngày tạo: 2026-10-08
-Trạng thái: planning, chưa triển khai code
+Trạng thái: Phase 2 core V0 và Phase 3 memory fact tools V0 đã triển khai, chưa nối vào chat flow
 
 ## Mục Tiêu
 
@@ -53,9 +53,9 @@ Việc cần làm:
 
 Tiêu chí hoàn thành:
 
-- Unit test chứng minh Loop gọi read-only tool, nhận result, rồi final.
-- Unit test chứng minh tool lỗi không crash loop.
-- Unit test chứng minh max iteration dừng đúng và trả fallback.
+- Unit test chứng minh Loop gọi read-only tool, nhận result, rồi final. Done V0.
+- Unit test chứng minh tool lỗi không crash loop. Done V0.
+- Unit test chứng minh max iteration dừng đúng và trả fallback. Done V0.
 
 ## Phase 3: Memory Tool Adapters
 
@@ -71,9 +71,10 @@ Việc cần làm:
 
 Tiêu chí hoàn thành:
 
-- Tool search/list trả đúng fact ID/subject/content.
-- Tool update/delete không mutate khi input thiếu hoặc ID không tồn tại.
-- Trace/runtime log có đủ tool call/result cho dashboard đọc.
+- Tool search/list trả đúng fact ID/subject/content. Done V0.
+- Tool update/delete không mutate khi input thiếu hoặc ID không tồn tại. Done V0.
+- LoopResult ghi `mutates_state` cho update/delete tool calls. Done V0.
+- Trace/runtime log chi tiết khi nối chat flow vẫn là Phase 5.
 
 ## Phase 4: Correction Flow Uses Loop
 
@@ -141,4 +142,3 @@ Tiêu chí hoàn thành:
 - Mutating tools fail-closed.
 - Read-only retrieval tools có thể fail-open bằng fallback text nếu an toàn.
 - Episode vẫn read-only trong memory correction V0.
-

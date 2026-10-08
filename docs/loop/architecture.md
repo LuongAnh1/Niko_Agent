@@ -5,8 +5,9 @@ Phạm vi: kiến trúc Loop tổng quát cho Niko Agent, chưa phải code runt
 
 Tài liệu này mô tả Loop như một slot xử lý tool có thể dùng chung cho chat
 memory, Jira/business data và các workflow cần nhiều bước về sau. Hiện tại Niko
-vẫn chạy bằng `ChatReplyGraph` viết tay; Loop trong tài liệu này là target
-architecture để triển khai dần, không phải một module production đã tồn tại.
+vẫn chạy bằng `ChatReplyGraph` viết tay; `niko/loop/` đã có core V0 độc lập và
+`niko/memory/loop_tools.py` đã có fact tools V0, nhưng chưa được nối vào chat
+flow hoặc correction workflow thật.
 
 ## 1. Vai Trò Của Loop
 
@@ -66,7 +67,7 @@ Ranh giới cần giữ:
 
 ## 3. Interface Mục Tiêu
 
-Đây là interface mục tiêu để triển khai, không phải public API đã có sẵn.
+Đây là interface V0 hiện có trong `niko/loop/`.
 
 ```python
 @dataclass(frozen=True)
@@ -150,10 +151,10 @@ user prompt
 
 Tool V0 nên gồm:
 
-- `search_facts`: tìm fact theo query, trả về ID/subject/content/source.
-- `list_facts`: liệt kê fact gần đây hoặc theo user/session scope.
-- `update_fact`: chỉ mutate khi ID hợp lệ và replacement không rỗng.
-- `delete_fact`: chỉ mutate khi ID hợp lệ và action đã rõ.
+- `search_facts`: đã có adapter, tìm fact theo query và trả ID/subject/content/source/meta.
+- `list_facts`: đã có adapter, liệt kê fact gần đây theo limit.
+- `update_fact`: đã có adapter, chỉ mutate khi ID hợp lệ và subject/content không rỗng.
+- `delete_fact`: đã có adapter, chỉ mutate khi ID hợp lệ.
 
 Episode nên tiếp tục read-only trong V0 để tránh mất ngữ cảnh lịch sử.
 
@@ -189,7 +190,7 @@ chỉ fetch/normalize dữ liệu; tool không tự sinh nhận định cuối c
 | MemoryRuntime retrieval/write/correction facade | đã có |
 | Memory correction V1 tạm thời | đã có |
 | Tool slot trên dashboard | đã có về mặt hiển thị |
-| Loop core `niko/loop/` | planned |
-| ToolRegistry tổng quát | planned |
-| Memory tools qua Loop | planned |
+| Loop core `niko/loop/` | done V0 |
+| ToolRegistry tổng quát | done V0 |
+| Memory fact tools qua Loop | done V0 adapter, chưa nối chat flow |
 | Jira tools qua Loop | planned |

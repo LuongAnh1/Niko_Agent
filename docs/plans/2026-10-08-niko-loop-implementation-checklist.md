@@ -25,12 +25,12 @@ Tiêu chí hoàn thành:
 
 Mục đích: tạo runtime loop tối thiểu, độc lập với Telegram và workflow cụ thể.
 
-- [ ] Tạo package `niko/loop/`.
-- [ ] Định nghĩa `Tool`, `ToolContext`, `ToolResult`, `LoopResult`.
-- [ ] Tạo `ToolRegistry` với register/schema/execute.
-- [ ] Tạo `LoopRuntime` có max iteration và final fallback.
-- [ ] Tạo observer ghi trace/runtime log.
-- [ ] Viết unit test cho read-only tool, tool error và max iteration.
+- [x] Tạo package `niko/loop/`.
+- [x] Định nghĩa `Tool`, `ToolContext`, `ToolResult`, `LoopDecision`, `LoopResult`.
+- [x] Tạo `ToolRegistry` với register/schema/execute.
+- [x] Tạo `LoopRuntime` có max iteration và final fallback.
+- [x] Tạo observer ghi trace/runtime log.
+- [x] Viết unit test cho read-only tool, tool error và max iteration.
 
 Tiêu chí hoàn thành:
 
@@ -43,18 +43,24 @@ Tiêu chí hoàn thành:
 Mục đích: chuyển thao tác fact thành tool rõ contract để correction workflow
 không còn phải ôm search/update/delete rải rác.
 
-- [ ] Tạo `search_facts`.
-- [ ] Tạo `list_facts`.
-- [ ] Tạo `update_fact`.
-- [ ] Tạo `delete_fact`.
-- [ ] Giữ episode read-only trong V0.
-- [ ] Ghi trace/runtime log cho tool mutate.
-- [ ] Test input thiếu, ID không tồn tại, ID hợp lệ.
+- [x] Tạo `search_facts`.
+- [x] Tạo `list_facts`.
+- [x] Tạo `update_fact`.
+- [x] Tạo `delete_fact`.
+- [x] Giữ episode read-only trong V0.
+- [x] Gắn `mutates_state=True` cho update/delete để LoopResult/observer phân biệt mutate tool.
+- [x] Test input thiếu, ID không tồn tại, ID hợp lệ.
 
 Tiêu chí hoàn thành:
 
 - Tool trả kết quả đủ để controller/Deep trả lời user.
 - Mutate tool không ghi DB khi input chưa đủ chắc.
+
+Trạng thái 2026-10-08:
+
+- Đã thêm `niko/memory/loop_tools.py` với `build_memory_fact_tools(...)`.
+- Đã thêm `tests/test_memory_loop_tools.py` cho search/list/update/delete và LoopRuntime integration nhẹ.
+- Chưa nối các tools này vào `MemoryCorrectionWorkflow` hoặc `ChatReplyGraph`.
 
 ## Phase 4: Correction Flow Uses Loop
 
@@ -104,4 +110,3 @@ Tiêu chí hoàn thành:
 
 - Deep trả lời dựa trên dữ liệu issue đã fetch.
 - Chat memory SQLite không bị trộn thành nơi lưu Jira/business records.
-

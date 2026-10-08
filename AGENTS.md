@@ -44,9 +44,9 @@ separate business backend lane that Niko can retrieve from later.
   imports should keep working through `bots.decision_model.memory`.
 - `niko/chat_gateway.py`: Normalizes channel-specific messages into
   `ChatGatewayMessage` and identity context.
-- `niko/loop/` (planned): Future generic tool-loop runtime. It should own
-  Tool/ToolRegistry/LoopResult/observer mechanics once implemented. Keep it
-  independent from Telegram and from any single domain tool.
+- `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
+  LoopRuntime, and observer mechanics. Keep it independent from Telegram and
+  from any single domain tool; domain adapters should live near their owners.
 - `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
   replies, Fast/Deep handoff, background deep jobs, busy replies, followups,
   final reply composition, memory writes, and trace events.
@@ -71,6 +71,9 @@ separate business backend lane that Niko can retrieve from later.
 - `niko/memory/correction_workflow.py`: Phase 5 V1 chat memory correction
   workflow. Owns pending fact choices, fact match/apply guardrails, and
   correction trace/runtime logs while `MemoryRuntime` keeps the public facade.
+- `niko/memory/loop_tools.py`: Memory fact tools for Loop core V0. Owns
+  `search_facts`, `list_facts`, `update_fact`, and `delete_fact` adapters over
+  `MemoryStore`; these tools are not wired into chat flow yet.
 - `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
 - `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
 - `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
@@ -158,8 +161,9 @@ Important boundaries:
   Loop/tool slot matures, memory correction should become an explicit
   workflow/tool with durable state instead of accumulating more ad-hoc chat
   pending logic.
-- Tool/Loop is represented in the dashboard as an intended harness slot, but it
-  is not a complete tool router yet.
+- Loop core V0 exists in `niko/loop/`, and memory fact tool adapters exist in
+  `niko/memory/loop_tools.py`, but they are not connected to chat flow yet and
+  do not make a complete tool router. Jira domain tools are still planned.
 
 ## Business Domains And Future Jira Gateway
 

@@ -308,9 +308,10 @@ flowchart TB
     class External boundary;
 ```
 
-Loop tổng quát chưa có trong code hiện tại. Tài liệu triển khai nằm ở
-`docs/loop/architecture.md` và checklist ở
-`docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
+Loop core V0 đã có trong `niko/loop/`, và fact tool adapters đã có trong
+`niko/memory/loop_tools.py`. Chúng vẫn chưa được nối vào luồng chat hoặc
+correction V1. Tài liệu triển khai nằm ở `docs/loop/architecture.md` và checklist
+ở `docs/plans/2026-10-08-niko-loop-implementation-checklist.md`. Khi Loop trưởng
 thành, correction V1 trong section 6 nên chuyển dần thành memory tool workflow:
 controller chọn search/list/update/delete, Python validate target rồi mới mutate
 SQLite. Cùng runtime Loop đó sẽ mở sang Jira/business tools nhưng không trộn dữ
