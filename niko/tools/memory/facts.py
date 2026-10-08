@@ -1,9 +1,8 @@
-"""Memory fact tool adapters cho Loop core V0.
+"""Fact tools cho Niko Loop.
 
-Các tool này là lớp mỏng trên `MemoryStore`: read-only tools dùng để search/list
-fact, còn mutate tools chỉ update/delete khi ID và nội dung đã hợp lệ. Correction
-loop default-off đang dùng chúng cho prompt sửa/xóa trực tiếp; tool router tổng
-quát cho chat/Jira vẫn là phase sau.
+Memory store vẫn thuộc `niko.memory`; file này chỉ là adapter ToolRegistry để
+Loop gọi search/list/update/delete fact theo contract chung. Các tool mutate
+state được đánh dấu rõ để trace/dashboard nhìn được rủi ro cập nhật SQLite.
 """
 
 from __future__ import annotations

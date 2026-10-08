@@ -21,8 +21,8 @@ from bots.decision_model.memory import (
     normalize_correction_prompt_text,
 )
 from niko.loop import LoopDecision, LoopResult, LoopRuntime, ToolContext, ToolRegistry, TraceLoopObserver
-from niko.memory.loop_tools import build_memory_fact_tools
 from niko.memory.store import MemoryStore, default_memory_store
+from niko.tools.memory.facts import build_memory_fact_tools
 
 
 @dataclass(frozen=True)

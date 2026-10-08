@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 
 from niko.loop import LoopDecision, LoopRuntime, ToolContext, ToolRegistry
-from niko.memory.loop_tools import build_memory_fact_tools
 from niko.memory.store import MemoryStore
+from niko.tools.memory.facts import build_memory_fact_tools
 
 
 class MemoryLoopToolsTests(unittest.TestCase):
