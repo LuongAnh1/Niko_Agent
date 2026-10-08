@@ -18,3 +18,7 @@ Roadmap dài hạn không đặt ở đây; dùng `docs/memory/` hoặc folder d
 - [Kế hoạch Niko Loop 2026-10-08](2026-10-08-niko-loop-implementation-plan.md)
 - [Checklist Niko Loop 2026-10-08](2026-10-08-niko-loop-implementation-checklist.md)
 - [Checklist đồng bộ docs/source commentary 2026-10-08](2026-10-08-docs-source-sync-checklist.md)
+- [Kế hoạch khảo sát tách core/gateway/graph 2026-10-08](2026-10-08-niko-core-split-survey.md)
+- [Checklist khảo sát tách core/gateway/graph 2026-10-08](2026-10-08-niko-core-split-survey-checklist.md)
+- [Kế hoạch triển khai tách core/gateway/graph 2026-10-08](2026-10-08-niko-core-split-implementation-plan.md)
+- [Checklist triển khai tách core/gateway/graph 2026-10-08](2026-10-08-niko-core-split-implementation-checklist.md)

@@ -11,6 +11,12 @@ có Jira fixture tools read-only V0, `niko/graphs/jira_issue/` đã có Jira iss
 context flow V0, và memory correction có bridge V0 default-off qua Loop. Đây
 chưa phải tool router hoàn chỉnh cho mọi chat/Jira workflow.
 
+Lưu ý ranh giới: `niko/loop/` không phải gateway runner, app assembly hay turn
+orchestrator. Loop chỉ chạy một workflow tool nhiều bước sau khi lớp điều phối
+đã quyết định cần dùng tool. Kế hoạch khảo sát tách các lớp core/gateway/graph
+nằm ở `docs/plans/2026-10-08-niko-core-split-survey.md`; phương hướng triển khai
+theo phase nằm ở `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`.
+
 ## 1. Vai Trò Của Loop
 
 Loop là vòng lặp:
