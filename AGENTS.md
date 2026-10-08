@@ -28,6 +28,28 @@ Keep chat memory and business/lakehouse memory separate in docs and design:
 Telegram chat memory is local interaction memory; Jira/lakehouse memory is a
 separate business backend lane that Niko can retrieve from later.
 
+## Waku Reference Principle
+
+Use `D:\Dự án cá nhân\Do_an_II\waku-agent` as a reference for responsibility
+boundaries, not as a folder-name template to copy mechanically.
+
+What Niko should learn from Waku:
+
+- Gateway code stays thin: platform IO, auth, parsing, send/reply only.
+- App/root code assembles settings, runtime dependencies, memory, tools, graphs,
+  and owns the stable turn entrypoint.
+- Graph/workflow code owns business flow and route topology.
+- Loop code owns reusable tool-call mechanics, not application routing.
+- Tool adapters are grouped by domain and never send platform replies directly.
+
+Do not add a new package just because Waku has a nearby concept. Add a package
+only when it owns real behavior, state, policy, workflow selection, or reusable
+mechanics. Bridge-only layers that merely forward calls should be removed or
+kept inside the existing assembly/root layer. In the current Niko baseline,
+`NikoApp` is the Waku-style assembly and turn entrypoint; `niko/orchestration/`
+should not exist again until Jira/memory workflow selection genuinely moves out
+of `ChatReplyGraph` and needs an independently testable owner.
+
 ## Architecture Map
 
 - `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
@@ -46,10 +68,10 @@ separate business backend lane that Niko can retrieve from later.
   `ChatGatewayMessage` and identity context.
 - `niko/gateway/`: Gateway runner. Owns the channel-agnostic handoff
   from normalized gateway messages/callbacks into the current chat workflow.
-- `niko/app.py`: Phase 2 assembly root. It owns the current chat workflow wiring
-  behind `NikoApp`/`create_niko_app()`, including injection points for memory,
-  trace, and future Jira workflow dependencies. For now it delegates directly
-  to `ChatReplyGraph`; it is not the turn orchestrator yet.
+- `niko/app.py`: Waku-style assembly root and current turn entrypoint. It owns
+  the current chat workflow wiring behind `NikoApp`/`create_niko_app()`,
+  including injection points for memory and trace. Do not add a separate
+  orchestration package while it only forwards to `ChatReplyGraph`.
 - `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
   LoopRuntime, and observer mechanics. Keep it independent from Telegram and
   from any single domain workflow.
@@ -109,15 +131,15 @@ separate business backend lane that Niko can retrieve from later.
   documents.
 
 Important current boundary: Niko has a runnable baseline harness, not a generic
-agent framework core yet. `GatewayRunner` and `NikoApp` are thin behavior-
-preserving bridges into the existing chat graph. `ChatReplyGraph` is still a
-hand-written business graph for chat, not a reusable Node/Edge/Workflow engine
-like Waku's graph runtime. The target split for gateway runner, app assembly,
-turn orchestrator, graphs, Loop, and tools started with `niko/gateway/` and
+agent framework core yet. `GatewayRunner` and `NikoApp` are thin
+behavior-preserving bridges into the existing chat graph. `ChatReplyGraph` is
+still a hand-written business graph for chat, not a reusable Node/Edge/Workflow
+engine like Waku's graph runtime. The target split for gateway runner, app
+assembly, graph workflows, Loop, and tools started with `niko/gateway/` and
 `niko/app.py`. The broader target is documented in
-`docs/plans/2026-10-08-niko-core-split-survey.md`; do not assume the turn
-orchestrator exists until later phases create it. The phase-by-phase
-implementation direction now lives in
+`docs/plans/2026-10-08-niko-core-split-survey.md`; do not add a separate
+orchestrator layer until Jira/memory workflow selection genuinely moves out of
+`ChatReplyGraph`. The phase-by-phase implementation direction now lives in
 `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
 tracking in `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
 
@@ -130,8 +152,8 @@ The Telegram gateway converts each accepted Telegram message into
 from niko.gateway import GatewayRunner
 ```
 
-`GatewayRunner` currently forwards the turn to `NikoApp`, and `NikoApp` forwards
-to `ChatReplyGraph` without changing route labels, trace events, memory behavior,
+`GatewayRunner` currently forwards the turn to `NikoApp`; `NikoApp` forwards to
+`ChatReplyGraph` without changing route labels, trace events, memory behavior,
 or Telegram callbacks.
 
 `ChatReplyGraph` runs either `single` or `two_agent` mode according to
@@ -307,12 +329,12 @@ bot process already owns that lock.
 - `docs/plans/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
   keeping Markdown docs and source file comments aligned with the current repo state.
 - `docs/plans/2026-10-08-niko-core-split-survey.md`: survey plan for separating
-  gateway runner, app assembly, turn orchestration, graphs, Loop, and tools.
+  gateway runner, app assembly, graph workflow selection, Loop, and tools.
 - `docs/plans/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
   the core/gateway/graph split survey and docs sync.
 - `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
   implementation direction for actually refactoring gateway runner, app assembly,
-  turn orchestrator, Jira workflow selection, and memory correction selection.
+  graph workflow selection, Jira workflow selection, and memory correction selection.
 - `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
   to tick after each core/gateway/graph split phase is implemented and verified.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
@@ -418,9 +440,13 @@ not relevant.
 ## Editing Rules For Future Sessions
 
 - Preserve the thin gateway boundary: Telegram should stay as IO/auth/parsing.
-- Keep `niko/gateway/` and `niko/app.py` behavior-preserving until the turn
-  orchestrator is explicitly introduced.
-- Do not implement the turn orchestrator split without following
+- Keep `niko/gateway/` and `niko/app.py` behavior-preserving until Jira/memory
+  selection is explicitly moved out of `ChatReplyGraph`.
+- Avoid creating bridge-only packages such as a turn orchestrator that only
+  delegates. Match Waku's spirit: `app.py` may coordinate a turn, while real
+  workflows live under `niko/graphs/` and reusable loop mechanics live under
+  `niko/loop/`.
+- Do not move Jira or memory correction workflow selection without following
   `docs/plans/2026-10-08-niko-core-split-implementation-plan.md` and updating
   its checklist.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the

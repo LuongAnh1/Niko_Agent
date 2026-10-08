@@ -4,6 +4,11 @@ Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-survey.md`
 Phạm vi: khảo sát, đối chiếu, suy luận và cập nhật tài liệu; chưa refactor code.
 
+Ghi chú sau triển khai 2026-10-08: đề xuất `niko/orchestration/` đã được review
+lại theo Waku và không giữ trong code vì bản V0 chỉ forward. Hướng hiện tại là
+`GatewayRunner -> NikoApp -> ChatReplyGraph` cho tới khi có workflow selection
+thật sự cần tách.
+
 ## Phase 1: Khảo Sát Waku
 
 Mục đích: hiểu cách Waku tách gateway, runner, app assembly, graph, loop và tools
@@ -39,7 +44,8 @@ lớp và trách nhiệm.
 - [x] Đề xuất `bots/<gateway>/` chỉ giữ platform IO.
 - [x] Đề xuất `niko/gateway/` cho gateway runner chung.
 - [x] Đề xuất `NikoApp` hoặc app factory làm assembly root.
-- [x] Đề xuất `niko/orchestration/` hoặc `niko/turns/` cho turn orchestrator.
+- [x] Đề xuất boundary chọn workflow cấp turn; sau review, không giữ package riêng
+      nếu package đó chỉ delegate.
 - [x] Giữ `niko/graphs/` cho workflow nghiệp vụ cụ thể.
 - [x] Giữ `niko/loop/` cho tool-loop runtime generic.
 - [x] Giữ `niko/tools/` cho tool adapters theo domain.
@@ -51,9 +57,9 @@ khai và test từng phần.
 
 - [x] Phase 1 tương lai: tạo gateway runner khung nhưng giữ behavior cũ.
 - [x] Phase 2 tương lai: tạo `NikoApp` assembly root.
-- [x] Phase 3 tương lai: tạo turn orchestrator V0.
+- [x] Phase 3 tương lai: review boundary theo Waku trước khi tạo lớp mới.
 - [x] Phase 4 tương lai: đưa Jira workflow selection ra khỏi `ChatReplyGraph`.
-- [x] Phase 5 tương lai: đưa memory correction selection ra orchestrator.
+- [x] Phase 5 tương lai: đưa memory correction selection ra lớp chọn workflow cấp turn.
 - [x] Phase 6 tương lai: cập nhật dashboard/docs và cleanup.
 
 ## Phase 5: Đồng Bộ Docs

@@ -1,7 +1,8 @@
 # Kế Hoạch Khảo Sát Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: tài liệu khảo sát, chưa triển khai refactor code
+Trạng thái: tài liệu khảo sát lịch sử; Phase 1/2 đã triển khai, Phase 3 đã
+review lại và không giữ package orchestrator chỉ-forward
 
 ## Mục Đích
 
@@ -86,9 +87,9 @@ niko/app.py hoặc niko/agent_app.py
   Assembly root: ráp config, MemoryRuntime, TraceLogger, ToolRegistry,
   workflow registry, ChatReplyGraph, JiraIssueAnalysisWorkflow và runtime.
 
-niko/orchestration/ hoặc niko/turns/
-  Turn orchestrator: chọn workflow cấp turn như memory correction, Jira issue
-  analysis, normal chat; không tự gọi Telegram API.
+niko/app.py
+  Turn entrypoint kiểu Waku: app có thể chọn workflow cấp turn khi Jira/memory
+  selection thật sự được tách; không tạo package riêng nếu chỉ delegate.
 
 niko/graphs/
   Workflow nghiệp vụ cụ thể: chat_reply, jira_issue, memory_correction sau này.
@@ -104,7 +105,7 @@ Ranh giới quan trọng:
 
 - Gateway chỉ chuyển message vào core và nhận reply callback/event để gửi ra
   platform.
-- Orchestrator chọn workflow, nhưng không chứa logic chi tiết của workflow.
+- Lớp chọn workflow cấp turn chọn workflow, nhưng không chứa logic chi tiết của workflow.
 - `ChatReplyGraph` nên quay lại đúng vai trò chat workflow: local/Fast/Deep,
   busy/followup và final compose.
 - `JiraIssueAnalysisWorkflow` không phụ thuộc Telegram; Jira bot thật sau này
@@ -136,21 +137,22 @@ Mục đích: gom wiring vào một chỗ thay vì global graph nằm trong gate
 - Gateway runner nhận app instance thay vì tự biết graph.
 - Dashboard/bot start path dùng app factory thống nhất.
 
-### Phase 3: Turn Orchestrator V0
+### Phase 3: Review Boundary Theo Waku
 
-Mục đích: đưa lựa chọn workflow cấp turn ra khỏi `ChatReplyGraph`.
+Mục đích: kiểm tra có cần một boundary riêng trước `ChatReplyGraph` hay chưa.
+Kết quả triển khai sau đó cho thấy một package orchestrator chỉ-forward không
+giống tinh thần Waku bằng việc để `NikoApp` làm turn entrypoint.
 
-- Tạo lớp/function orchestrator chạy trước normal chat workflow.
-- Orchestrator kiểm tra busy job, memory correction, Jira issue workflow và
-  fallback normal chat.
-- Trong phase đầu, orchestrator có thể gọi lại helper cũ để giảm rủi ro.
+- Không giữ package riêng nếu lớp đó chỉ forward.
+- Giữ `NikoApp -> ChatReplyGraph` cho tới khi có Jira/memory selection thật.
 - Trace route phải giữ tên event hiện tại để dashboard không vỡ.
 
 ### Phase 4: Tách Jira Selection Khỏi Chat Graph
 
 Mục đích: Jira không còn là nhánh riêng bên trong chat workflow.
 
-- Chuyển logic gọi `JiraIssueAnalysisWorkflow` ra orchestrator.
+- Chuyển logic gọi `JiraIssueAnalysisWorkflow` ra app-level workflow selection
+  hoặc graph boundary thật.
 - `ChatReplyGraph` chỉ nhận normal chat prompt.
 - `JiraIssueAnalysisWorkflow` tiếp tục trả `JiraIssueAnalysisResult`.
 - Existing Jira tests giữ nguyên behavior.
@@ -159,7 +161,8 @@ Mục đích: Jira không còn là nhánh riêng bên trong chat workflow.
 
 Mục đích: memory correction là workflow cấp turn, không phải phần chat reply.
 
-- Orchestrator gọi `MemoryRuntime.handle_memory_correction(...)` trước normal chat.
+- Lớp chọn workflow cấp turn gọi `MemoryRuntime.handle_memory_correction(...)`
+  trước normal chat.
 - Pending follow-up vẫn đi qua facade hiện tại.
 - Sau khi ổn mới tính chuyện biến correction thành graph/loop workflow hoàn chỉnh.
 
@@ -170,12 +173,12 @@ Mục đích: docs và quan sát khớp kiến trúc mới.
 - Cập nhật `AGENTS.md`, `docs/harness/architecture.md`,
   `docs/harness/telegram-chat-flow.md`, `docs/loop/architecture.md`.
 - Dashboard graph semantics đổi từ `Gateway -> ChatReplyGraph` sang
-  `Gateway -> GatewayRunner -> TurnOrchestrator -> Workflow`.
+  `Gateway -> GatewayRunner -> NikoApp -> Workflow`.
 - Xóa hoặc giữ compatibility shim tùy mức độ rủi ro, nhưng phải ghi rõ.
 
 ## 5. Điều Không Làm Trong Đợt Khảo Sát Này
 
-- Không tạo package `niko/gateway/`, `niko/orchestration/` hay `NikoApp`.
+- Không tạo package `niko/gateway/` hay `NikoApp` trong đợt khảo sát này.
 - Không sửa `bots/telegram/bot.py`.
 - Không đổi `ChatReplyGraph`.
 - Không đổi runtime behavior, dashboard API hoặc config schema.

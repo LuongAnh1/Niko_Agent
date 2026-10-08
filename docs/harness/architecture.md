@@ -121,10 +121,11 @@ niko/
 chuẩn hóa rồi chuyển nguyên sang `NikoApp`, chưa chọn workflow và chưa thay đổi
 route/trace/log hiện có.
 
-`niko.app` là assembly root Phase 2. `NikoApp` hiện sở hữu `ChatReplyGraph`, có
-chỗ inject `MemoryStore`/`MemoryRuntime`/`TraceLogger` và slot Jira workflow cho
-phase sau, nhưng `handle_message(...)` vẫn chỉ forward sang chat graph; nó chưa
-phải `TurnOrchestrator`.
+`niko.app` là assembly root theo tinh thần Waku. `NikoApp` hiện sở hữu
+`ChatReplyGraph`, có chỗ inject `MemoryStore`/`MemoryRuntime`/`TraceLogger`, rồi
+chuyển turn đã chuẩn hóa sang chat graph. Repo đã từng thử thêm một package
+orchestrator mỏng, nhưng đã gỡ vì nó chỉ forward và làm khác cấu trúc Waku mà
+chưa đem lại workflow selection thật.
 
 `niko.graphs.chat_reply` là graph nghiệp vụ chat. Nó quyết định route local/fast/deep/busy, quản lý deep job background, ghi trace, ghi chat log và episode sau deep job.
 
@@ -166,20 +167,20 @@ Phase đầu dùng Python-controlled loop vì runtime hiện gọi Claude qua
 ## Hướng Tách Core/Gateway/Graph
 
 Sau khi thêm memory correction loop và Jira issue workflow, `ChatReplyGraph`
-đang dần giữ cả vai trò chat workflow lẫn turn orchestrator. Target refactor đã
+đang dần giữ cả vai trò chat workflow lẫn lựa chọn workflow cấp turn. Target refactor đã
 được khảo sát trong `docs/plans/2026-10-08-niko-core-split-survey.md`: giữ
 `bots/<gateway>/` cho platform IO, thêm gateway runner chung, thêm app assembly
 root để ráp memory/tools/graphs/runtime, rồi đưa lựa chọn workflow cấp turn ra
-khỏi `ChatReplyGraph`.
+khỏi `ChatReplyGraph` khi có logic thật sự cần tách.
 
 Phương hướng triển khai theo phase nằm ở
 `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`; checklist để tick
 từng phần nằm ở `docs/plans/2026-10-08-niko-core-split-implementation-checklist.md`.
 
 Trạng thái hiện tại: Phase 1 đã có package `niko/gateway/` với `GatewayRunner`
-mỏng. Phase 2 đã có `niko/app.py` với `NikoApp` assembly root. Telegram gateway
-gọi runner, runner gọi app, còn app vẫn ủy quyền trực tiếp sang `ChatReplyGraph`.
-Chưa có turn orchestrator chung.
+mỏng. Phase 2 đã có `niko/app.py` với `NikoApp` assembly root. Phase 3 được
+điều chỉnh lại sau review với Waku: không giữ package orchestrator chỉ forward.
+Telegram gateway gọi runner, runner gọi app, app gọi trực tiếp `ChatReplyGraph`.
 
 ## Import Chính
 

@@ -2,7 +2,7 @@
 
 Ngày lập: 2026-10-08
 Tài liệu gốc: `docs/plans/2026-10-08-niko-core-split-implementation-plan.md`
-Trạng thái: Phase 2 NikoApp Assembly Root đã triển khai, chờ review/commit
+Trạng thái: Phase 3 đã review theo Waku, bỏ bridge orchestrator chỉ-forward
 
 ## Phase 0: Khóa Tài Liệu Triển Khai
 
@@ -43,7 +43,7 @@ Mục đích: gom wiring app vào một chỗ, không để gateway tự biết 
 
 - [x] Tạo `NikoApp` hoặc `create_niko_app()`.
 - [x] App quản lý MemoryStore/MemoryRuntime/TraceLogger/ChatReplyGraph.
-- [x] App có chỗ inject Jira workflow và dependency sau này.
+- [x] App quản lý dependency hiện dùng; không giữ slot Jira workflow nếu slot đó chưa được gọi.
 - [x] Gateway runner nhận app instance.
 - [x] Dashboard/bot startup dùng app factory thống nhất.
 - [x] Tests vẫn inject được store/logger tạm.
@@ -56,23 +56,41 @@ Kết quả kiểm thử Phase 2, 2026-10-08:
 - `rtk proxy python -m pytest -q` pass `216 passed`.
 - `rtk proxy git diff --check` pass, chỉ có warning CRLF do cấu hình Git/Windows.
 
-## Phase 3: TurnOrchestrator V0
+## Phase 3: Review Boundary Theo Waku
 
-Mục đích: tạo lớp quyết định workflow cấp turn, chuẩn bị tháo logic khỏi chat graph.
+Mục đích: đảm bảo boundary mới không chỉ là cầu nối hình thức. Waku để app điều
+phối một turn và để workflow thật nằm dưới graph, nên Niko không giữ package
+orchestrator nếu nó chỉ forward sang `ChatReplyGraph`.
 
-- [ ] Tạo package `niko/orchestration/` hoặc tên tương đương đã chốt.
-- [ ] Tạo `TurnOrchestrator` nhận prompt, gateway message, callbacks và app deps.
-- [ ] Orchestrator giữ thứ tự xử lý hiện tại.
-- [ ] Busy/followup behavior vẫn không tạo duplicate Deep job.
-- [ ] Normal chat fallback vẫn đi qua `ChatReplyGraph`.
-- [ ] Trace `turn_start`/`turn_end` vẫn nhất quán.
-- [ ] Chạy targeted Telegram tests và full suite nếu route graph thay đổi đáng kể.
+- [x] So sánh lại với Waku: `waku/app.py` là turn entrypoint, `waku/graph/` chứa workflow thật.
+- [x] Xóa package `niko/orchestration/` vì `TurnOrchestrator` V0 chỉ delegate.
+- [x] Xóa test riêng cho orchestrator mỏng.
+- [x] Gỡ injection `orchestrator` và `jira_workflow` chưa dùng trong `NikoApp`.
+- [x] App giữ thứ tự xử lý hiện tại bằng cách forward trực tiếp sang `ChatReplyGraph`.
+- [x] Busy/followup behavior vẫn không tạo duplicate Deep job.
+- [x] Normal chat fallback vẫn đi qua `ChatReplyGraph`.
+- [x] Trace `turn_start`/`turn_end` vẫn nhất quán.
+- [x] Chạy targeted Telegram tests và full suite nếu route graph thay đổi đáng kể.
+
+Kết quả kiểm thử Phase 3 trước khi review lại, 2026-10-08:
+
+- `rtk proxy python -m pytest tests/test_turn_orchestrator.py tests/test_niko_app.py tests/test_gateway_runner.py tests/test_telegram_prompt.py tests/test_ops_dashboard.py -q`
+  pass `68 passed`.
+- `rtk proxy python -m pytest -q` pass `219 passed`.
+- `rtk proxy git diff --check` pass, chỉ có warning CRLF do cấu hình Git/Windows.
+
+Ghi chú review 2026-10-08:
+
+- Folder `niko/orchestration/` bị coi là bridge chưa cần thiết vì khác vocabulary
+  của Waku mà chưa sở hữu workflow selection thật.
+- Luồng active quay về `GatewayRunner -> NikoApp -> ChatReplyGraph`.
+- Cần chạy lại test sau khi dọn bridge.
 
 ## Phase 4: Tách Jira Selection Khỏi ChatReplyGraph
 
 Mục đích: Jira issue workflow là workflow cấp turn, không còn nhánh trong chat graph.
 
-- [ ] Di chuyển Jira workflow selection sang orchestrator.
+- [ ] Di chuyển Jira workflow selection sang app-level workflow selection hoặc graph boundary thật.
 - [ ] Xóa hoặc làm private-deprecated helper `_handle_jira_issue_prompt` trong chat graph.
 - [ ] Giữ `JiraIssueAnalysisWorkflow` độc lập với Telegram.
 - [ ] Giữ semantics `NIKO_JIRA_TOOLS_ENABLED`.
@@ -83,9 +101,10 @@ Mục đích: Jira issue workflow là workflow cấp turn, không còn nhánh tr
 
 ## Phase 5: Tách Memory Correction Selection
 
-Mục đích: memory correction trở thành workflow cấp turn do orchestrator chọn.
+Mục đích: memory correction trở thành workflow cấp turn do app-level workflow
+selection chọn.
 
-- [ ] Di chuyển call `MemoryRuntime.handle_memory_correction(...)` ra orchestrator.
+- [ ] Di chuyển call `MemoryRuntime.handle_memory_correction(...)` ra lớp chọn workflow cấp turn.
 - [ ] Pending fact-ID follow-up vẫn qua durable pending facade hiện tại.
 - [ ] Correction loop default-off vẫn fallback về V1 khi lỗi.
 - [ ] `ChatReplyGraph` không còn chứa nhánh correction handled.
@@ -100,7 +119,7 @@ Mục đích: quan sát và tài liệu phản ánh kiến trúc mới, không c
 `ChatReplyGraph` như application core.
 
 - [ ] Cập nhật dashboard graph semantics nếu UI có sơ đồ flow.
-- [ ] Runtime log hiển thị workflow/orchestrator route khi cần.
+- [ ] Runtime log hiển thị workflow route khi cần.
 - [ ] Cập nhật `AGENTS.md`.
 - [ ] Cập nhật `README.md`.
 - [ ] Cập nhật `docs/harness/architecture.md`.

@@ -54,19 +54,16 @@ class NikoAppTests(unittest.TestCase):
             store = MemoryStore(state_path / "memory.sqlite3")
             memory_runtime = MemoryRuntime(store=store)
             trace_logger = TraceLogger(state_path / "traces", enabled=False)
-            jira_workflow = object()
 
             app = create_niko_app(
                 memory_store=store,
                 memory_runtime=memory_runtime,
                 trace_logger=trace_logger,
-                jira_workflow=jira_workflow,
             )
 
             self.assertIs(app.chat_graph.memory_store, store)
             self.assertIs(app.chat_graph.memory_runtime, memory_runtime)
             self.assertIs(app.chat_graph.trace_logger, trace_logger)
-            self.assertIs(app.jira_workflow, jira_workflow)
 
     def test_app_rejects_graph_and_dependency_injection_together(self):
         with tempfile.TemporaryDirectory() as temp_dir:

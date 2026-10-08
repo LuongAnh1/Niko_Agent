@@ -6,6 +6,27 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 
 Điểm quan trọng: Niko không gọi trực tiếp API LLM trong code. Runtime hiện tại gọi Claude CLI/FCC qua `fcc-claude` trên máy local.
 
+## Tinh Thần Học Từ Waku
+
+Niko tham khảo `waku-agent` để học cách tách trách nhiệm, không copy nguyên xi tên
+folder hay thêm lớp mới chỉ để giống cấu trúc bên đó. Điểm cần giữ là:
+
+- Gateway chỉ làm IO/auth/parsing/reply.
+- `NikoApp` là assembly root và turn entrypoint kiểu Waku `app.py`.
+- Workflow nghiệp vụ nằm dưới `niko/graphs/`.
+- Loop/tool runtime dùng chung nằm dưới `niko/loop/`.
+- Tool adapter theo domain nằm dưới `niko/tools/` và không tự gửi reply Telegram.
+
+Vì vậy luồng active hiện tại là:
+
+```text
+Telegram gateway -> GatewayRunner -> NikoApp -> ChatReplyGraph
+```
+
+Không tạo thêm package orchestrator nếu nó chỉ forward sang `ChatReplyGraph`.
+Khi Jira/memory workflow selection thật sự được tách khỏi chat graph, lúc đó mới
+tạo boundary mới hoặc mở rộng `NikoApp` bằng logic có test và tài liệu rõ ràng.
+
 ## Niko Hiện Có Gì
 
 - Telegram gateway: nhận/gửi tin qua Telegram, hỗ trợ group mention, `/id`, `/whoami`, allowlist, sticker.
@@ -26,7 +47,9 @@ Niko Agent là một AI agent harness chạy local. Repo này tập trung vào v
 ```text
 bots/telegram/                  # Telegram gateway
 bots/decision_model/            # Ollama/Nimble decision scripts cho triage, sticker, memory/Jira gates
+niko/app.py                     # Assembly root/turn entrypoint kiểu Waku
 niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessage
+niko/gateway/                    # GatewayRunner chung cho các platform gateway
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/graphs/jira_issue/          # Jira issue context flow V0 qua Loop tools
 niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
@@ -224,6 +247,8 @@ rtk python -m pytest
 ## Ghi Chú Phát Triển
 
 - Telegram gateway chỉ nên là cổng vào/ra, không chứa logic memory/LLM.
+- Học Waku theo boundary và trách nhiệm, không thêm bridge/package chỉ để giống tên.
+- `NikoApp` hiện là assembly root; chỉ tách workflow selection ra lớp mới khi lớp đó có logic thật.
 - Logic điều phối nằm trong `niko/graphs/chat_reply/`.
 - Runtime gọi LLM nằm trong `niko/runtime.py`.
 - Memory/trace/dashboard là harness baseline, không nên trộn vào gateway.

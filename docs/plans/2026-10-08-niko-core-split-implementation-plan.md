@@ -1,7 +1,7 @@
 # Kế Hoạch Triển Khai Tách Core, Gateway Và Graph Cho Niko
 
 Ngày lập: 2026-10-08
-Trạng thái: Phase 2 NikoApp assembly root đã triển khai, đang chờ khóa bằng test
+Trạng thái: Phase 3 đã review lại theo Waku và bỏ lớp orchestrator chỉ-forward
 Tài liệu nền: `docs/plans/2026-10-08-niko-core-split-survey.md`
 
 ## Mục Đích
@@ -28,7 +28,6 @@ bots/<gateway>/
   -> niko.chat_gateway.ChatGatewayMessage
   -> niko.gateway.GatewayRunner
   -> niko.app.NikoApp
-  -> niko.orchestration.TurnOrchestrator
      -> memory correction workflow
      -> Jira issue workflow
      -> chat reply workflow
@@ -41,11 +40,10 @@ Vai trò từng lớp:
   policy chọn agent, memory hoặc business workflow.
 - `niko/gateway/`: runner chung cho gateway. Nhận message đã chuẩn hóa, gọi app,
   serialize turn khi cần, bắt lỗi cấp gateway và trả kết quả cho callback reply.
-- `niko/app.py` hoặc `niko/agent_app.py`: assembly root. Ráp MemoryStore,
-  MemoryRuntime, TraceLogger, ChatReplyGraph, JiraIssueAnalysisWorkflow và các
-  dependency runtime.
-- `niko/orchestration/`: chọn workflow cấp turn. Lớp này quyết định prompt hiện tại
-  đi memory correction, Jira issue hay normal chat.
+- `niko/app.py`: assembly root theo tinh thần Waku. Ráp MemoryStore,
+  MemoryRuntime, TraceLogger, ChatReplyGraph và các dependency runtime. App có
+  thể chọn workflow cấp turn khi selection thật sự được tách ra; không tạo thêm
+  package chỉ để forward.
 - `niko/graphs/`: workflow nghiệp vụ cụ thể. Chat graph không cần biết Jira slot
   hoặc correction slot sau khi tách xong.
 - `niko/loop/`: Tool/ToolRegistry/LoopRuntime/observer generic.
@@ -79,14 +77,13 @@ Mục đích: gom wiring vào một chỗ thay vì để gateway hoặc module g
 
 Trạng thái 2026-10-08: đã thêm `niko/app.py` với `NikoApp` và
 `create_niko_app()`. `GatewayRunner` gọi `NikoApp.handle_message(...)`; app có
-đường inject memory/trace và slot Jira workflow cho phase sau, nhưng vẫn forward
-nguyên sang `ChatReplyGraph`.
+đường inject memory/trace và forward nguyên sang `ChatReplyGraph`.
 
 Thay đổi chính:
 
 - Thêm `NikoApp` hoặc `create_niko_app()`.
 - App sở hữu hoặc inject các dependency chính: memory store/runtime, trace logger,
-  chat workflow, Jira workflow và config-dependent runtime helpers.
+  chat workflow và config-dependent runtime helpers.
 - Gateway runner nhận app instance và gọi một method xử lý turn thống nhất.
 - Giữ compatibility path cho tests hoặc caller cũ trong thời gian chuyển tiếp.
 
@@ -96,25 +93,30 @@ Tiêu chí hoàn thành:
 - Tests vẫn có thể inject MemoryStore/TraceLogger như hiện tại.
 - Dashboard start/stop bot không đổi UX.
 
-## Phase 3: TurnOrchestrator V0
+## Phase 3: Review Boundary Theo Waku
 
-Mục đích: đưa lựa chọn workflow cấp turn ra khỏi chat workflow nhưng chưa tháo hết
-logic cùng lúc.
+Mục đích: kiểm tra boundary mới có thật sự làm hệ thống giống tinh thần Waku hơn
+không. Waku để app là nơi ráp dependency và điều phối một turn, còn workflow thật
+nằm dưới `graph/`; vì vậy Niko không nên giữ một package orchestrator nếu nó chỉ
+delegate sang `ChatReplyGraph`.
+
+Trạng thái 2026-10-08: đã gỡ `niko/orchestration/` và test riêng cho
+`TurnOrchestrator` vì đây là bridge mỏng chưa có workflow selection thật. Luồng
+hiện tại là `GatewayRunner -> NikoApp -> ChatReplyGraph`.
 
 Thay đổi chính:
 
-- Thêm `TurnOrchestrator` trong `niko/orchestration/` hoặc package tương đương.
-- Orchestrator nhận prompt, gateway message, reply callbacks và app dependencies.
-- Orchestrator chạy thứ tự hiện tại: busy/followup guard, memory correction, Jira
-  issue workflow nếu bật, rồi fallback normal chat.
-- Trong V0 có thể gọi helper cũ để giữ rủi ro thấp, nhưng public boundary phải
-  là orchestrator.
+- Xóa bridge-only package nếu nó chưa sở hữu logic thật.
+- Giữ `NikoApp` làm turn entrypoint kiểu Waku.
+- Chỉ tạo boundary mới khi Phase 4/5 thật sự di chuyển Jira hoặc memory
+  correction selection ra khỏi `ChatReplyGraph`.
 
 Tiêu chí hoàn thành:
 
 - Trace vẫn có `turn_start`, `route_decision`, `turn_end` như trước.
 - Busy Deep job và followup không bị tạo duplicate job.
 - Local/Fast/Deep route vẫn giữ cùng route label.
+- Không còn import hoặc docs active trỏ tới `niko/orchestration/`.
 
 ## Phase 4: Tách Jira Selection Khỏi ChatReplyGraph
 
@@ -122,10 +124,11 @@ Mục đích: Jira không còn là nhánh nằm trong chat workflow.
 
 Thay đổi chính:
 
-- Di chuyển logic chọn/chạy `JiraIssueAnalysisWorkflow` sang orchestrator.
+- Di chuyển logic chọn/chạy `JiraIssueAnalysisWorkflow` sang app-level workflow
+  selection hoặc một graph/workflow boundary thật.
 - `ChatReplyGraph` không còn `_handle_jira_issue_prompt`.
-- Jira workflow vẫn trả `JiraIssueAnalysisResult` và orchestrator quyết định reply
-  ngay hoặc handoff Deep với context.
+- Jira workflow vẫn trả `JiraIssueAnalysisResult` và lớp chọn workflow quyết định
+  reply ngay hoặc handoff Deep với context.
 - `NIKO_JIRA_TOOLS_ENABLED` và `NIKO_JIRA_DECISION_GATE_ENABLED` giữ semantics cũ.
 
 Tiêu chí hoàn thành:
@@ -141,7 +144,8 @@ reply workflow.
 
 Thay đổi chính:
 
-- Orchestrator gọi `MemoryRuntime.handle_memory_correction(...)` trước normal chat.
+- Lớp chọn workflow cấp turn gọi `MemoryRuntime.handle_memory_correction(...)`
+  trước normal chat.
 - Pending fact-ID follow-up vẫn đi qua facade hiện tại để giữ durable pending.
 - Correction loop default-off vẫn giữ fallback về V1.
 - `ChatReplyGraph` không cần biết correction handled/reply nữa.
@@ -160,7 +164,7 @@ Mục đích: làm observability và tài liệu khớp kiến trúc mới sau k
 Thay đổi chính:
 
 - Dashboard graph semantics đổi thành
-  `Gateway -> GatewayRunner -> TurnOrchestrator -> Workflow`.
+  `Gateway -> GatewayRunner -> NikoApp -> Workflow`.
 - Runtime log nên cho biết workflow nào xử lý turn.
 - Cập nhật `AGENTS.md`, `README.md`, `docs/harness/architecture.md`,
   `docs/harness/telegram-chat-flow.md`, `docs/loop/architecture.md`.
@@ -192,7 +196,7 @@ Các test nhóm chính:
 
 ## Rủi Ro Cần Kiểm Soát
 
-- Race với Deep job đang chạy khi di chuyển busy/followup ra orchestrator.
+- Race với Deep job đang chạy khi di chuyển busy/followup ra lớp chọn workflow cấp turn.
 - Trace event đổi tên làm dashboard hoặc live debug khó đọc.
 - Gateway runner vô tình nuốt lỗi khiến Telegram không trả error reply.
 - App assembly tạo singleton sai làm tests chia sẻ state.
@@ -200,6 +204,6 @@ Các test nhóm chính:
 
 ## Trạng Thái Hiện Tại
 
-Phase 2 đã thêm `NikoApp` assembly root mỏng để bọc wiring hiện tại. Chưa có
-`TurnOrchestrator`, và chưa di chuyển Jira/memory selection ra khỏi
-`ChatReplyGraph`.
+Phase 3 đã review lại boundary theo Waku và gỡ `TurnOrchestrator` bridge mỏng.
+Chưa di chuyển Jira/memory selection ra khỏi `ChatReplyGraph`; việc này sẽ làm ở
+Phase 4/5 bằng một boundary có logic thật, không phải lớp forward.
