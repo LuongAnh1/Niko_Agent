@@ -28,6 +28,27 @@ Keep chat memory and business/lakehouse memory separate in docs and design:
 Telegram chat memory is local interaction memory; Jira/lakehouse memory is a
 separate business backend lane that Niko can retrieve from later.
 
+The current research direction has expanded from chat memory alone toward an
+Agent Harness for SDLC context handoff. Treat this as two related but separate
+problems:
+
+- Context handoff: collect fragmented context from Jira/issues, docs, chat,
+  repo/code, meeting notes, and design notes; normalize it into a structured
+  requirement/task packet; keep evidence, open questions, and human approval
+  checkpoints.
+- Task execution: once the packet/use case is clear, run an execution workflow
+  that can produce design, code, tests, and traceability artifacts.
+
+The near-term SDLC scope is steps 1-3 only: requirement intake/analysis, system
+design/technical planning, and coding implementation. Human review is not an
+afterthought: each phase can pause for the project owner to confirm, edit, or
+redirect the artifact before the next phase consumes it.
+
+Do not collapse this direction back into "optimize Jira storage". Jira,
+Confluence/docs, GitHub/local repos, chat, and meeting notes are context
+sources. The harness should prove controlled handoff first; lakehouse/KG storage
+can come later when the workflow is worth scaling.
+
 ## Waku Reference Principle
 
 Use `D:\Dự án cá nhân\Do_an_II\waku-agent` as a reference for responsibility
@@ -50,6 +71,40 @@ kept inside the existing assembly/root layer. In the current Niko baseline,
 correction plus Jira issue workflow selection. `niko/orchestration/` should not
 exist again unless the selection logic outgrows `NikoApp` and needs an
 independently testable owner.
+
+## TraceDev Reference Principle
+
+Use `D:\Dự án cá nhân\Do_an_II\ISSTA2026-TraceDev` as a reference for the lower
+execution layer, not as the whole Niko architecture. TraceDev is best understood
+as a straight requirement/use-case-to-code pipeline:
+
+```text
+structured use case
+  -> Requirement Refiner
+  -> Designer
+  -> Validator traceability checks
+  -> Developer
+  -> Tester
+  -> code/test/traceability artifacts
+```
+
+TraceDev's valuable lesson is its traceability-driven execution loop: it checks
+whether requirements are represented in design/code and feeds missing links back
+into the producing agent. It does not solve Niko's upper-layer problem of
+turning fragmented Jira/docs/chat/repo context into a clean task packet. When
+borrowing ideas from TraceDev, keep the split explicit:
+
+```text
+Niko context handoff layer
+  fragmented collaboration context -> normalized task/use-case packet
+
+TraceDev-style execution layer
+  normalized packet/use case -> design -> code -> tests -> traceability
+```
+
+If a future workflow integrates TraceDev-like behavior, add checkpoints between
+phases so the human can approve or alter requirement, design, and coding-plan
+artifacts before downstream work continues.
 
 ## Architecture Map
 
@@ -128,8 +183,11 @@ independently testable owner.
 - `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
   prompts, except for Fast JSON triage.
 - `niko/.runtime/`: Local runtime state. Do not commit it.
-- `docs/`: Architecture, flow, memory/ops, business-domain, demo, and roadmap
-  documents.
+- `docs/`: Local-only architecture, flow, memory/ops, business-domain, demo,
+  roadmap, and research notes. `docs/` is intentionally ignored by git and has
+  been removed from git tracking; use it when present on the developer's
+  machine, but do not stage or commit docs unless the project owner explicitly
+  changes this policy.
 
 Important current boundary: Niko has a runnable baseline harness, not a generic
 agent framework core yet. `GatewayRunner` is still a thin gateway bridge.
@@ -317,6 +375,11 @@ bot process already owns that lock.
 
 ## Important Docs
 
+`docs/` is local-only working documentation. These files may exist on the
+developer's machine and should be used for planning/research when available, but
+they are intentionally ignored by git. Do not treat missing docs in a fresh clone
+as a code failure, and do not re-add docs to git unless explicitly asked.
+
 - `README.md`: high-level setup and baseline explanation.
 - `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
 - `docs/harness/current-runtime-flow.md`: current turn-level runtime map from
@@ -359,6 +422,9 @@ bot process already owns that lock.
 - `docs/memory/chat-memory-architecture-flow.md`: current/target memory
   architecture and retrieval/write/consolidation/correction flow diagrams.
 - `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
+- `docs/agent-harness-sdlc/README.md`: local research note for the SDLC context
+  handoff direction. It frames TraceDev as the lower execution layer and Niko as
+  the harness/checkpoint layer that normalizes context before execution.
 
 ## Environment And State
 
@@ -483,5 +549,11 @@ not relevant.
 - Do not recreate old entry points such as `niko/agent.py` or
   `niko/agent_router.py`; the active graph is under `niko/graphs/chat_reply/`.
 - Keep `niko/.runtime/` out of git.
+- Keep `docs/` out of git. It is local planning/research material for this
+  machine, now ignored by `.gitignore`; do not stage it or remove the ignore
+  rule unless the owner explicitly asks to publish docs again.
+- Keep the SDLC context-handoff direction separate from TraceDev-style
+  execution. Build/plan checkpoints and normalized artifacts before assuming the
+  system can run directly from raw Jira/docs/chat context to code.
 - Prefer small, test-covered changes. Existing tests cover routing, Telegram
   prompt behavior, memory store, trace logger, and dashboard snapshot.
