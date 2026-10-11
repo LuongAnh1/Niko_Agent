@@ -108,133 +108,53 @@ artifacts before downstream work continues.
 
 ## Architecture Map
 
-- `bots/telegram/`: Telegram gateway. Handles long polling, message parsing,
-  auth/allowlist, mention filtering, `/id`, `/whoami`, replies, and stickers.
-  Keep this layer thin. It should not own memory, routing, or LLM policy.
-- `bots/decision_model/`: Local Ollama/Nimble decision scripts. Owns the
-  `/v1/systemone` client, route-label mapping, sticker mood, memory retrieval/write
-  decisions, memory candidate classification, Jira decision gate, and warmup
-  script for keeping the model loaded. This layer decides labels/modes only; it
-  should not generate free-form user replies.
-- `bots/decision_model/memory/`: Memory-specific Decision Model package. Keep
-  retrieval, write, candidate, and correction prompts/normalizers in separate
-  files here so each decision surface can be debugged independently. Public
-  imports should keep working through `bots.decision_model.memory`.
-- `niko/chat_gateway.py`: Normalizes channel-specific messages into
-  `ChatGatewayMessage` and identity context.
-- `niko/gateway/`: Gateway runner. Owns the channel-agnostic handoff
-  from normalized gateway messages/callbacks into the current chat workflow.
+- `bots/telegram/`: thin Telegram gateway; platform IO/auth/parsing/reply only.
+- `bots/decision_model/`: local Ollama/Nimble label decisions for routing,
+  sticker mood, memory, correction, and Jira gates. No free-form user replies.
+- `niko/chat_gateway.py` and `niko/gateway/`: channel-agnostic message handoff.
 - `niko/app.py`: Waku-style assembly root and current turn entrypoint. It owns
-  workflow selection for memory correction and Jira issue flow, then delegates
-  normal local/Fast/Deep chat to `ChatReplyGraph`. Do not add a separate
-  orchestration package while `NikoApp` can own the behavior directly.
-- `niko/loop/`: Generic tool-loop core V0. Owns Tool/ToolRegistry/LoopResult,
-  LoopRuntime, and observer mechanics. Keep it independent from Telegram and
-  from any single domain workflow.
-- `niko/tools/`: Tool adapters for Loop. Keep adapters here, grouped by domain
-  such as `memory/` and `jira/`. Tools follow the `niko.loop.Tool` contract and
-  should fetch/normalize data or mutate only through explicit domain guardrails;
-  tools must not send Telegram/Jira replies or own workflow policy.
-- `niko/graphs/chat_reply/`: Main chat business graph. Owns routing, local
-  replies, Fast/Deep handoff, background deep jobs, busy replies, followups,
-  final reply composition, memory writes, and trace events.
-- `niko/graphs/jira_issue/`: Phase 6B Jira issue analysis workflow. It wraps
-  Jira Loop tools, formats issue/comment/changelog context with evidence, and
-  hands the context to Deep. Phase 6C adds a default-off Decision Model gate for
-  ambiguous Jira/task prompts. It is not a Jira bot/gateway and does not write
-  Jira data into chat memory SQLite.
-- `niko/runtime.py`: Claude CLI runtime. Loads env, reads `niko/HOOK.md`,
-  injects identity/memory context, resolves `CLAUDE_WORKDIR`, and calls
-  `fcc-claude`.
-- `niko/harness/trace.py`: JSONL trace logger. Default trace path is
-  `niko/.runtime/traces/YYYY-MM-DD.jsonl`.
-- `niko/harness/runtime_log.py`: JSONL runtime log logger for Bots dashboard
-  table. Default log path is `niko/.runtime/logs/YYYY-MM-DD.jsonl`.
-- `niko/memory/store.py`: SQLite memory store for `chat_log`, `facts`, `episodes`,
-  and consolidation state. Uses FTS5 when available, with LIKE fallback.
-- `niko/memory/runtime.py`: MemoryRuntime pipeline for retrieval gate,
-  retrieval modes (`search/list/recent/none`), recent working-memory context,
-  write gate, memory correction workflow facade, store search/list, chat log
-  writes, episode writes, manual/auto consolidation facade, and context
-  formatting before Deep.
-- `niko/memory/context.py`: RetrievedMemory result type, formatter helpers, and
-  compatibility wrappers such as `retrieve_memory_context(...)`.
-- `niko/memory/working_memory.py`: Ephemeral recent conversation window builder
-  from `chat_log`, shared by Deep prompt context and correction decision context.
-- `niko/memory/correction_workflow.py`: Phase 5 V1 chat memory correction
-  workflow. Owns pending fact choices, fact match/apply guardrails, and
-  durable pending state in SQLite while `MemoryRuntime` keeps the public facade.
-- `niko/memory/correction_loop.py`: Phase 4A default-off bridge from correction
-  prompts to LoopRuntime + memory fact tools. It handles direct correction
-  prompts when `NIKO_MEMORY_CORRECTION_LOOP_ENABLED=1`, and falls back to V1 on
-  loop errors.
-- `niko/tools/memory/facts.py`: Memory fact tools for Loop core V0. Owns
-  `search_facts`, `list_facts`, `update_fact`, and `delete_fact` adapters over
-  `MemoryStore`; direct correction prompts can use them through the default-off
-  correction loop bridge. The old `niko/memory/loop_tools.py` compatibility
-  shim has been removed; new imports should use `niko/tools/memory/facts.py`.
-- `niko/tools/jira/`: Read-only Jira fixture tools V0 for parsing issue keys and
-  fetching issue/comment/changelog data through Loop. This is a runtime tool lane,
-  not the lakehouse/KG ingestion layer and not a Jira bot yet.
-- `niko/ops/dashboard.py`: Thin stdlib HTTP entrypoint for Niko Ops dashboard.
-- `niko/ops/bots.py`: Dashboard bot controls for Telegram Bot and Decision Model.
-- `niko/ops/config_schema.py`: Config tab schema, validation, masking, snapshots.
-- `niko/ops/templates/dashboard.html`: Dashboard HTML/CSS/JS frontend template.
-- `niko/HOOK.md`: Niko persona and operating instructions loaded into agent
-  prompts, except for Fast JSON triage.
-- `niko/.runtime/`: Local runtime state. Do not commit it.
-- `docs/`: Local-only architecture, flow, memory/ops, business-domain, demo,
-  roadmap, and research notes. `docs/` is intentionally ignored by git and has
-  been removed from git tracking; use it when present on the developer's
-  machine, but do not stage or commit docs unless the project owner explicitly
-  changes this policy.
+  turn-level selection before delegating to workflows.
+- `niko/graphs/chat_reply/`: main local/Fast/Deep chat workflow.
+- `niko/graphs/jira_issue/`: read-only Jira issue analysis workflow, not a Jira
+  bot and not lakehouse ingestion.
+- `niko/loop/`: reusable tool-loop core.
+- `niko/tools/<domain>/`: Loop tool adapters such as memory and Jira.
+- `niko/memory/`: SQLite chat memory baseline and correction/consolidation
+  runtime.
+- `niko/runtime.py`: Claude/FCC CLI runtime.
+- `niko/harness/` and `niko/ops/`: traces, runtime logs, dashboard, config, bot
+  controls.
+- `niko/.runtime/`: local runtime state. Do not commit.
+- `docs/`: local-only planning/research docs. Do not stage or commit unless the
+  owner explicitly changes policy.
 
-Important current boundary: Niko has a runnable baseline harness, not a generic
-agent framework core yet. `GatewayRunner` is still a thin gateway bridge.
-`NikoApp` is now the Waku-style assembly root and owns turn-level selection for
-memory correction and Jira issue workflow before normal chat. `ChatReplyGraph`
-is still a hand-written business graph for local/Fast/Deep chat, not a reusable
-Node/Edge/Workflow engine like Waku's graph runtime. The target split for
-gateway runner, app assembly, graph workflows, Loop, and tools started with
-`niko/gateway/` and `niko/app.py`. The broader target is documented in
-`docs/plans/core-split/2026-10-08-niko-core-split-survey.md`; do not add a separate
-orchestrator layer unless a future workflow owner needs real behavior beyond
-`NikoApp`. The phase-by-phase implementation direction now lives in
-`docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`, with checklist
-tracking in `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`.
+Important boundary: Niko is a runnable baseline harness, not a generic agent
+framework core. Avoid bridge-only layers. `NikoApp` may coordinate a turn; real
+workflows belong under `niko/graphs/`, reusable loop mechanics under
+`niko/loop/`, and tools under `niko/tools/<domain>/`.
 
 ## Chat Flow
 
-The Telegram gateway converts each accepted Telegram message into
-`ChatGatewayMessage`, then calls:
+Telegram turns follow this high-level path:
 
-```python
-from niko.gateway import GatewayRunner
+```text
+bots/telegram
+  -> ChatGatewayMessage
+  -> GatewayRunner
+  -> NikoApp
+  -> memory correction / Jira workflow / chat reply graph
+  -> reply
 ```
-
-`GatewayRunner` currently forwards the turn to `NikoApp`. `NikoApp` opens the
-turn, preserves the route/busy order, handles memory correction and Jira issue
-workflow selection, then hands normal local/Fast/Deep chat to `ChatReplyGraph`.
-
-`ChatReplyGraph` runs either `single` or `two_agent` mode according to
-`NIKO_AGENT_MODE`.
 
 In `two_agent` mode:
 
-- Local rules answer simple greetings/thanks/ping/praise messages quickly.
-- Deep keywords, long prompts, newlines, or code blocks route to Niko Deep.
-- Gray-zone prompts can route to the local Ollama/Nimble decision model when
-  `NIKO_DECISION_MODEL_ENABLED=1`.
-- Nimble decision `reply_now` means the graph should answer quickly. If the
-  decision does not include reply text, the graph can call Niko Fast/Fable via
-  `NIKO_FAST_AGENT_COMMAND` to generate the quick reply.
-- Nimble decision `send_to_deep` queues a Deep background job and sends a wait
-  reply.
-- Fast triage/Fast reply receive a short recent `chat_log` window as working
-  memory so context-dependent follow-ups are not answered blindly. This is not
-  long-term facts/episodes retrieval.
-- Deep receives working memory plus long-term memory context according to memory
-  retrieval settings.
+- local rules answer trivial greetings/thanks/ping/praise;
+- Nimble can decide `reply_now` vs `send_to_deep` for gray-zone prompts;
+- Fast/Fable may produce quick replies when Nimble chooses `reply_now`;
+- Deep handles careful work, code, tools, Jira, memory-heavy questions, and
+  uncertain context;
+- Fast triage/reply receives a short recent `chat_log` working-memory window;
+- Deep receives working memory plus long-term memory according to settings.
 - When `NIKO_JIRA_TOOLS_ENABLED=1`, `NikoApp` can route prompts with Jira issue
   keys through `niko/graphs/jira_issue/` before normal chat. The workflow fetches
   fixture data with Loop, adds evidence context to Deep, and returns a safe
@@ -258,33 +178,23 @@ new triage work should prefer `bots/decision_model/`.
 
 ## Memory Baseline
 
-SQLite currently stores three groups of data:
+SQLite currently stores:
 
-- `chat_log`: operational conversation log for user/assistant messages.
-- `facts`: Semantic Memory baseline, added manually through Ops/API or through
-  conservative consolidation of explicit chat facts.
-- `episodes`: Episodic Memory baseline, mostly completed Deep jobs and followups.
+- `chat_log`: operational conversation history;
+- `facts`: semantic memory baseline;
+- `episodes`: episodic memory baseline.
 
 Important boundaries:
 
-- `chat_log` is not the same thing as Semantic/Episodic Memory. It is an
-  operational log that can later feed analysis.
-- Working memory is ephemeral: Fast triage/reply and Deep can receive a short
-  recent conversation window rebuilt from `chat_log` for the current turn, but
-  that window is not Semantic/Episodic long-term memory.
-- Semantic extraction is not mature yet. Facts are mainly added through Ops/API
-  and explicit consolidation, either manual `Run once` or default-off auto; free-form
-  summarizer extraction is not built yet.
-- Episodic records are basic summaries of deep work, not rich event models yet.
-- Retrieval is text-based FTS/LIKE, not embeddings, reranking, or graph
-  reasoning. The local Decision Model can choose skip/retrieve/list facts/recent
-  episodes and retrieval modes, but it does not write SQLite data itself.
-- Consolidation has manual and default-off auto paths. Dashboard/API `Refresh
-  batch` previews the next batch, and `Run once` processes one batch. Auto
-  consolidation only runs when `NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=1`, after
-  enough complete user/assistant exchanges, in a background worker guarded by a
-  single-process lock. Wait/busy assistant replies do not count as completed
-  exchanges.
+- `chat_log` is not long-term semantic memory by itself.
+- Working memory is ephemeral recent conversation context rebuilt from
+  `chat_log`.
+- Semantic extraction is conservative and still immature.
+- Retrieval is text-based FTS/LIKE, not embeddings/reranking/graph reasoning.
+- The local decision model may choose labels/modes, but Python owns all SQLite
+  mutations.
+- Consolidation exists in manual/default-off auto paths; inspect
+  `niko/memory/` for exact current behavior.
 - Memory correction treats `current_prompt` as the primary evidence. Recent
   turns are only attached when the current prompt has an explicit sửa/xóa/quên
   signal or is a pending fact-ID follow-up. Neutral prompts must not inherit old
@@ -305,18 +215,12 @@ Important boundaries:
 
 ## Business Domains And Future Jira Gateway
 
-Docs under `docs/business-domains/` describe the product/business framing:
-
 - Telegram is the current real-time conversation gateway.
-- Jira is the planned task/issue gateway for Phase 2.
+- Jira is the planned task/issue gateway and current fixture/tool lane.
 - Memory upgrade work should explain why reading scattered prompt text is not
   enough for task analysis.
-- Distinguish three Jira-related lanes: runtime Jira tools under `niko/tools/jira/`
-  plus `niko/graphs/jira_issue/` for direct issue analysis, a future Jira
-  bot/gateway that lives on Jira, and the separate lakehouse/KG repo that
-  ingests/processes Jira data for analysis.
-
-Expected Phase 2 story:
+- Distinguish runtime Jira tools, a future Jira bot/gateway, and the separate
+  lakehouse/KG data-processing direction.
 
 ```text
 User asks about a Jira issue key
@@ -333,38 +237,15 @@ demo.
 
 ## Trace And Ops Dashboard
 
-Trace events are JSONL and should make a turn observable. Typical events include
-`turn_start`, `route_decision`, `memory_retrieval`, `memory_gate_decision`,
-`memory_correction_decision`, `memory_correction_clarify`,
-`memory_correction_applied`, `memory_write_chat_log`, `memory_write_decision`,
-`memory_write_episode`, `deep_job_started`, `deep_agent_call_started`,
-`deep_agent_call_finished`, `reply_delivered`, errors, and `turn_end`.
-
-Memory gate trace/runtime logs should include decision/label/query plus
-`fact_mode` and `episode_mode`, so inventory turns can be debugged without
-guessing from raw prompt text.
+Trace events are JSONL and should make route, memory, tool, Deep/Fast, and
+reply decisions observable. Use trace/runtime logs instead of terminal-only
+printing for operational behavior.
 
 Run the dashboard locally before starting bots:
 
 ```bash
 rtk python -m niko.ops.dashboard
 ```
-
-Default URL:
-
-```text
-http://127.0.0.1:7777
-```
-
-Dashboard graph semantics:
-
-- `Gateway -> GatewayRunner -> NikoApp -> Reply`: local, busy, correction, or safe workflow reply.
-- `Gateway -> GatewayRunner -> NikoApp -> Fast Agent -> Reply`: Fast reply path.
-- `Gateway -> GatewayRunner -> NikoApp -> Memory Gate -> Loop/Deep Agent -> Reply`: Deep/tool path.
-- `Memory Gate -> Memory Records`: retrieval from facts/episodes.
-- `Reply/turn events -> Trace/Ops`: observer path, not part of agent reasoning.
-- Runtime log source `niko_app` event `workflow_selected` shows which app-level
-  workflow handled a turn before normal chat continues.
 
 The dashboard `Bots` tab is the preferred place to start/stop Telegram Bot,
 warm up or stop/unload Decision Model, and inspect runtime logs. Terminal output
@@ -373,58 +254,16 @@ Telegram Bot uses `niko/.runtime/telegram_bot.lock` as a single-instance guard;
 dashboard should show `external` instead of starting a duplicate when a terminal
 bot process already owns that lock.
 
-## Important Docs
+## Docs Policy
 
-`docs/` is local-only working documentation. These files may exist on the
-developer's machine and should be used for planning/research when available, but
-they are intentionally ignored by git. Do not treat missing docs in a fresh clone
-as a code failure, and do not re-add docs to git unless explicitly asked.
+`docs/` is local-only working documentation. It may contain architecture notes,
+plans, diagrams, translated papers, and live-test logs. It is intentionally
+ignored by git and has been removed from git tracking.
 
-- `README.md`: high-level setup and baseline explanation.
-- `docs/harness/architecture.md`: repo layout, module boundaries, and runtime state.
-- `docs/harness/current-runtime-flow.md`: current turn-level runtime map from
-  Telegram gateway through NikoApp, chat graph, memory, Loop, Jira workflow, and ops.
-- `docs/harness/telegram-chat-flow.md`: Telegram routing and two-agent behavior.
-- `docs/harness/memory-ops.md`: SQLite memory, trace, and dashboard.
-- `docs/harness/memory-eval-scenarios.md`: deterministic chat memory eval
-  scenarios for retrieval/write/correction regression checks.
-- `docs/loop/architecture.md`: target architecture for the generic Niko Loop,
-  ToolRegistry, observer events, and first memory/Jira tool workflows.
-- `docs/business-domains/README.md`: Telegram gateway, planned Jira gateway, and
-  memory upgrade business context.
-- `docs/demo/demo-guide.md`: demo script for showing the harness to a supervisor.
-- `docs/plans/README.md`: grouped index for short-term implementation plans and
-  checklists under memory, loop, Jira, core split, and maintenance.
-- `docs/plans/memory/2026-10-07-chat-memory-decision-model.md`: short-term chat memory
-  implementation plan using the local Decision Model.
-- `docs/plans/memory/2026-10-07-chat-memory-decision-model-checklist.md`: phase-by-phase
-  checklist and live verification status for chat memory work.
-- `docs/plans/memory/2026-10-07-chat-memory-live-test-checklist.md`: concrete live-test
-  checklist for current Phase 6/7 memory flow verification.
-- `docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md`: implementation plan
-  for the generic Loop runtime.
-- `docs/plans/loop/2026-10-08-niko-loop-implementation-checklist.md`: phase checklist
-  for Loop docs, core runtime, memory tools, dashboard observability, and Jira lane.
-- `docs/plans/jira/2026-10-08-jira-live-test-checklist.md`: live Telegram/dashboard
-  checklist for Jira runtime tools, fixture no-data behavior, gate prompts, and
-  read-only boundary.
-- `docs/plans/maintenance/2026-10-08-docs-source-sync-checklist.md`: audit checklist for
-  keeping Markdown docs and source file comments aligned with the current repo state.
-- `docs/plans/core-split/2026-10-08-niko-core-split-survey.md`: survey plan for separating
-  gateway runner, app assembly, graph workflow selection, Loop, and tools.
-- `docs/plans/core-split/2026-10-08-niko-core-split-survey-checklist.md`: checklist for
-  the core/gateway/graph split survey and docs sync.
-- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md`: phase-by-phase
-  implementation direction for actually refactoring gateway runner, app assembly,
-  graph workflow selection, Jira workflow selection, and memory correction selection.
-- `docs/plans/core-split/2026-10-08-niko-core-split-implementation-checklist.md`: checklist
-  to tick after each core/gateway/graph split phase is implemented and verified.
-- `docs/memory/chat-memory-architecture-flow.md`: current/target memory
-  architecture and retrieval/write/consolidation/correction flow diagrams.
-- `docs/memory/roadmap.md`: path from baseline memory to lakehouse/KG work.
-- `docs/agent-harness-sdlc/README.md`: local research note for the SDLC context
-  handoff direction. It frames TraceDev as the lower execution layer and Niko as
-  the harness/checkpoint layer that normalizes context before execution.
+Use local docs when present, especially `docs/agent-harness-sdlc/README.md` for
+the SDLC context-handoff direction and `docs/plans/` for local checklists. Do
+not treat missing docs in a fresh clone as a code failure, and do not re-add docs
+to git unless the owner explicitly asks.
 
 ## Environment And State
 
@@ -444,47 +283,9 @@ reply settings in the dashboard Config tab. Dashboard-spawned bot subprocesses
 must use `runtime_subprocess_env()` so file-env keys are not inherited as OS
 overrides.
 
-Core runtime config keys:
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_ALLOWED_CHAT_IDS=
-CLAUDE_CLI_COMMAND=fcc-claude -p
-CLAUDE_DEEP_AGENT_COMMAND=fcc-claude --bare --no-session-persistence --tools= -p
-CLAUDE_WORKDIR=niko/.runtime/claude_sandbox
-NIKO_AGENT_MODE=two_agent
-NIKO_DECISION_MODEL_ENABLED=1
-NIKO_DECISION_MODEL_BASE_URL=http://localhost:11434
-NIKO_DECISION_MODEL_NAME=nimble
-NIKO_DECISION_MODEL_TIMEOUT_SECONDS=10
-NIKO_DECISION_MODEL_KEEP_ALIVE=-1
-NIKO_FAST_TRIAGE_REPLY_CONFIDENCE_THRESHOLD=0.65
-NIKO_FAST_AGENT_COMMAND=fcc-claude --model fable --bare --no-session-persistence --tools "" -p
-NIKO_STATE_DIR=niko/.runtime
-NIKO_TRACE_ENABLED=1
-NIKO_RUNTIME_LOG_ENABLED=1
-NIKO_MEMORY_ENABLED=1
-NIKO_MEMORY_RETRIEVAL_ENABLED=1
-NIKO_MEMORY_GATE_ENABLED=0
-NIKO_MEMORY_WRITE_ENABLED=1
-NIKO_MEMORY_WRITE_GATE_ENABLED=0
-NIKO_MEMORY_CORRECTION_DETECTION_ENABLED=0
-NIKO_MEMORY_CORRECTION_LOOP_ENABLED=0
-NIKO_MEMORY_CONSOLIDATION_AUTO_ENABLED=0
-NIKO_MEMORY_CONSOLIDATE_EVERY_N_EXCHANGES=6
-NIKO_MEMORY_TOP_K=4
-NIKO_MEMORY_RECENT_TURNS=6
-NIKO_MEMORY_RECENT_CHAR_BUDGET=2400
-NIKO_MEMORY_LONG_TERM_CHAR_BUDGET=3600
-NIKO_JIRA_TOOLS_ENABLED=0
-NIKO_JIRA_FIXTURE_PATH=
-NIKO_JIRA_LOOP_MAX_ITERATIONS=5
-NIKO_JIRA_DECISION_GATE_ENABLED=0
-NIKO_JIRA_DECISION_CONFIDENCE_THRESHOLD=0.75
-NIKO_JIRA_DECISION_RECENT_TURNS=4
-NIKO_OPS_HOST=127.0.0.1
-NIKO_OPS_PORT=7777
-```
+For exact config keys, inspect `niko/ops/config_schema.py`, `niko/config.py`,
+and the dashboard Config tab. Do not keep a full config-key catalog in this
+bootstrap file.
 
 Do not reveal or commit secrets from `.env` files, Telegram tokens, runtime
 config, runtime SQLite data, trace contents, or runtime logs that may contain
@@ -533,9 +334,9 @@ not relevant.
   delegates. Match Waku's spirit: `app.py` may coordinate a turn, while real
   workflows live under `niko/graphs/` and reusable loop mechanics live under
   `niko/loop/`.
-- Do not move additional workflow selection responsibilities without following
-  `docs/plans/core-split/2026-10-08-niko-core-split-implementation-plan.md` and updating
-  its checklist.
+- Do not move additional workflow selection responsibilities without an explicit
+  plan. If local `docs/plans/` exists, update the relevant checklist; otherwise
+  explain the plan in the response and keep the change small.
 - Put Ollama/Nimble decision-model behavior in `bots/decision_model/`, not in the
   Telegram gateway. Nimble is for route/label decisions, not free-form reply
   generation.
