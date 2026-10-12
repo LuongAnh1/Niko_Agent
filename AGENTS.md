@@ -1,8 +1,10 @@
 # Niko Agent Working Context
 
-This repo is a local Python AI agent harness for Niko Agent. Niko does not call an
-LLM API directly from the application code. The current runtime shells out to
-Claude/FCC through `fcc-claude` on the developer's machine.
+This repo is a local Python AI agent harness for Niko Agent. The current Deep
+agent path calls DeepSeek's OpenAI-compatible Chat Completions API from
+`niko/runtime.py`. Legacy Claude/FCC CLI helpers may remain for fallback or
+debugging, but new Deep-agent work should not assume `fcc-claude` is the primary
+runtime.
 
 When talking to the project owner, use Vietnamese, refer to yourself as "em",
 and refer to the user as "anh".
@@ -106,6 +108,33 @@ If a future workflow integrates TraceDev-like behavior, add checkpoints between
 phases so the human can approve or alter requirement, design, and coding-plan
 artifacts before downstream work continues.
 
+## SDLC Harness Upgrade Direction
+
+The next Niko upgrade direction is documented in
+`docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and its checklist. Treat that
+plan as the local source of truth when working on SDLC integration.
+
+The intended boundary is:
+
+```text
+Niko_Agent
+  Telegram conversation control, decision routing, memory, status replies
+
+SDLC_Harness
+  source loading, requirement/design/code workflow, artifacts, checkpoints,
+  traceability, and tool sync results
+```
+
+Niko should not directly load Jira/use-case source data for the SDLC workflow.
+Niko should call SDLC_Harness, read its JSON status/checkpoint fields, and report
+those back to the user. SDLC_Harness owns fixture/Jira/dataset source adapters.
+
+The runtime upgrade target for this direction is **DeepSeek only**. The current
+Deep-agent path already calls DeepSeek; remaining FCC/Claude code/config is
+legacy fallback/debug. Do not add new FCC/Claude-dependent behavior for the SDLC
+lane. Do not design this upgrade as a generic provider abstraction unless the
+owner explicitly changes direction.
+
 ## Architecture Map
 
 - `bots/telegram/`: thin Telegram gateway; platform IO/auth/parsing/reply only.
@@ -116,12 +145,16 @@ artifacts before downstream work continues.
   turn-level selection before delegating to workflows.
 - `niko/graphs/chat_reply/`: main local/Fast/Deep chat workflow.
 - `niko/graphs/jira_issue/`: read-only Jira issue analysis workflow, not a Jira
-  bot and not lakehouse ingestion.
+  bot and not lakehouse ingestion. This is now a legacy/experimental fixture
+  lane for SDLC planning and should not be expanded as the main use-case source.
 - `niko/loop/`: reusable tool-loop core.
 - `niko/tools/<domain>/`: Loop tool adapters such as memory and Jira.
 - `niko/memory/`: SQLite chat memory baseline and correction/consolidation
   runtime.
-- `niko/runtime.py`: Claude/FCC CLI runtime.
+- `niko/sdlc/`: adapter từ Niko sang repo `../SDLC_Harness`; Niko chỉ gọi CLI/API
+  workflow và nhận JSON trạng thái, không tự kéo use case từ Jira.
+- `niko/runtime.py`: DeepSeek runtime cho Deep agent chính; Claude/FCC CLI helper
+  là legacy fallback/debug.
 - `niko/harness/` and `niko/ops/`: traces, runtime logs, dashboard, config, bot
   controls.
 - `niko/.runtime/`: local runtime state. Do not commit.
@@ -216,7 +249,9 @@ Important boundaries:
 ## Business Domains And Future Jira Gateway
 
 - Telegram is the current real-time conversation gateway.
-- Jira is the planned task/issue gateway and current fixture/tool lane.
+- Jira is the planned task/issue gateway, but the current fixture/tool lane in
+  Niko is legacy for the SDLC direction. New use-case/source loading should live
+  in SDLC_Harness, with Niko reading SDLC status instead of reading Jira itself.
 - Memory upgrade work should explain why reading scattered prompt text is not
   enough for task analysis.
 - Distinguish runtime Jira tools, a future Jira bot/gateway, and the separate
@@ -344,7 +379,7 @@ not relevant.
 - When adding reusable Loop mechanics, put them in `niko/loop/`. Put ToolRegistry
   adapters in `niko/tools/<domain>/`; keep actual persistence/runtime ownership
   in the domain package, such as `niko/memory/` for SQLite memory.
-- Put CLI/LLM invocation details in `niko/runtime.py`.
+- Put DeepSeek/LLM invocation details in `niko/runtime.py`.
 - Put memory persistence/retrieval in `niko/memory/`.
 - Put observability-only behavior in `niko/harness/` or `niko/ops/`.
 - Do not recreate old entry points such as `niko/agent.py` or
