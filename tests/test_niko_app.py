@@ -4,11 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from niko.app import NikoApp, create_niko_app
+from niko.app import NikoApp, _format_sdlc_reply, create_niko_app
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
+from niko.sdlc.client import ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
 
 
 class FakeChatGraph:
@@ -180,6 +181,117 @@ class NikoAppTests(unittest.TestCase):
         self.assertEqual(len(graph.memory_runtime.calls), 1)
         self.assertEqual(graph.normal_calls, [("two_agent", "hello")])
         self.assertIsNotNone(graph.last_two_agent_route)
+
+    def test_app_routes_enabled_sdlc_prompt_before_legacy_jira(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+        message = SimpleNamespace(user=SimpleNamespace(key="telegram:1"))
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_START,
+            run_id="run_20261012_120000_abcd1234",
+            source_ref="eTour UC1",
+            current_phase="phase_1",
+            status="checkpoint_pending",
+            summary_for_user="Da tao requirement packet cho UC1.",
+            pending_checkpoint={"title": "Duyet requirement packet"},
+            allowed_next_actions=["approve", "revise"],
+            latest_artifacts={"requirement_packet": "runtime/path.json"},
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_JIRA_TOOLS_ENABLED": "1",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class, patch("niko.app.JiraIssueAnalysisWorkflow") as jira_workflow:
+            client_class.return_value.start_or_get_run.return_value = result
+            route = app.handle_message("Niko thuc hien eTour UC1", message, delivered.append)
+
+        self.assertEqual(route, ROUTE_SDLC_START)
+        self.assertIn("SDLC_Harness", delivered[0])
+        self.assertIn("run_20261012_120000_abcd1234", delivered[0])
+        client_class.return_value.start_or_get_run.assert_called_once_with(
+            dataset="eTour",
+            use_case="UC1",
+            requested_by="telegram:1",
+        )
+        jira_workflow.assert_not_called()
+        self.assertEqual(graph.normal_calls, [])
+
+    def test_app_routes_sdlc_status_prompt(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+        message = SimpleNamespace(user=SimpleNamespace(key="telegram:1"))
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            current_phase="phase_1",
+            status="checkpoint_pending",
+            summary_for_user="Dang cho anh duyet requirement packet.",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "run_20261012_120000_abcd1234 den dau roi em?",
+                message,
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertIn("checkpoint_pending", delivered[0])
+        client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
+        self.assertEqual(graph.normal_calls, [])
+
+    def test_sdlc_reply_formats_checkpoint_for_telegram(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_START_JIRA,
+            run_id="run_20261012_170506_b0909cb6",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="waiting_requirement_approval",
+            status="waiting_requirement_approval",
+            summary_for_user=(
+                "Đã chuẩn hóa jira SDLC-1 thành formal use case và requirement packet v1 "
+                "bằng Requirement Refiner, validator đã pass, và sync status=synced. "
+                "Run đang chờ anh duyệt requirement trước khi chuyển sang design."
+            ),
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            latest_artifacts={"requirement_packet": "path", "trace_graph": "path"},
+            last_sync={
+                "mode": "real",
+                "status": "synced",
+                "targets": [
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                    {"tool": "confluence", "status": "synced", "url": "https://example.atlassian.net/wiki/x/abc"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("Jira issue `SDLC-1`", reply)
+        self.assertIn("đang chờ anh duyệt requirement", reply)
+        self.assertIn("Đã đồng bộ:", reply)
+        self.assertIn("https://example.atlassian.net/browse/SDLC-1", reply)
+        self.assertIn("Việc tiếp theo:", reply)
+        self.assertNotIn("approve_checkpoint", reply)
 
     def test_app_logs_memory_correction_workflow_route(self):
         with tempfile.TemporaryDirectory() as temp_dir:

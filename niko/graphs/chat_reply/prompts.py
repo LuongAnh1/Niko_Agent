@@ -28,7 +28,7 @@ DEFAULT_TOOL_UNAVAILABLE_REPLY = (
     "Neu anh muon em xem file/tai lieu nao, anh gui noi dung hoac de harness nap phan lien quan vao prompt giup em nhe."
 )
 DEFAULT_NIKO_DEEP_WAIT_REPLY = (
-    "Da anh doi em chut, cau nay can phan tich ky hon nen em day sang Opus 5 roi bao lai anh ngay."
+    "Da anh doi em chut, cau nay can phan tich ky hon nen em day sang Deep agent roi bao lai anh ngay."
 )
 DEFAULT_NIKO_DEEP_BUSY_REPLY = (
     "Da anh doi em chut, em van dang xu ly cau truoc. Khi co ket qua em se gui lai anh."

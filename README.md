@@ -4,7 +4,7 @@
 
 Niko Agent là một AI agent harness chạy local. Repo này tập trung vào việc có một hệ thống chạy thật để quan sát luồng agent, ghi trace, lưu memory cơ bản, rồi dùng baseline đó làm nền cho hướng cải tiến Semantic/Episodic Memory.
 
-Điểm quan trọng: Niko không gọi trực tiếp API LLM trong code. Runtime hiện tại gọi Claude CLI/FCC qua `fcc-claude` trên máy local.
+Điểm quan trọng: Deep agent hiện gọi DeepSeek API từ `niko/runtime.py`. Các đường Claude/FCC CLI còn lại chỉ là legacy fallback/debug, không phải runtime chính của hướng SDLC mới.
 
 ## Tinh Thần Học Từ Waku
 
@@ -33,7 +33,7 @@ selection này lớn tới mức cần owner độc lập có test và tài li�
 - Telegram gateway: nhận/gửi tin qua Telegram, hỗ trợ group mention, `/id`, `/whoami`, allowlist, sticker.
 - Two-agent chat flow:
   - Fast agent: phản hồi nhanh, triage, hoặc compose câu trả lời cuối.
-  - Deep agent: xử lý tác vụ cần suy nghĩ lâu hơn qua `fcc-claude`.
+  - Deep agent: xử lý tác vụ cần suy nghĩ lâu hơn qua DeepSeek API.
 - Harness tracing: ghi JSONL event theo từng turn.
 - SQLite memory baseline:
   - `chat_log`: lịch sử hội thoại đã xử lý.
@@ -53,7 +53,7 @@ niko/chat_gateway.py             # Chuẩn hóa message thành ChatGatewayMessag
 niko/gateway/                    # GatewayRunner chung cho các platform gateway
 niko/graphs/chat_reply/          # Router, Fast/Deep handoff, final compose
 niko/graphs/jira_issue/          # Jira issue context flow V0 qua Loop tools
-niko/runtime.py                  # Gọi fcc-claude, nạp hook, inject identity/memory
+niko/runtime.py                  # Gọi DeepSeek cho Deep agent, nạp hook, inject identity/memory
 niko/harness/trace.py            # Trace JSONL theo turn
 niko/harness/runtime_log.py      # Runtime log JSONL cho tab Bots
 niko/loop/                       # Loop core V0: ToolRegistry, LoopRuntime, observer
@@ -79,7 +79,7 @@ docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
 
 ## Chạy Nhanh
 
-1. Cài và cấu hình FCC/Claude CLI để lệnh `fcc-claude` chạy được.
+1. Cấu hình `DEEPSEEK_API_KEY` trong dashboard tab `Config -> Agent Runtime` để Deep agent gọi DeepSeek.
 2. Cài Ollama, bật Ollama server, rồi pull model Nimble dùng cho decision triage:
 
 ```bash
@@ -104,7 +104,7 @@ Dashboard mặc định: `http://127.0.0.1:7777`
 
 5. Trong dashboard:
 
-- Tab `Config`: nhập `TELEGRAM_BOT_TOKEN`, allowlist, command Claude/Fast, Nimble, sticker, memory và reply text.
+- Tab `Config`: nhập `TELEGRAM_BOT_TOKEN`, allowlist, DeepSeek, Nimble, sticker, memory, SDLC_Harness và reply text.
 - Tab `Bots`: bấm `Warmup` cho Decision Model, rồi `Start` Telegram Bot.
 - Tab `Bots` cũng có bảng runtime log thay cho các dòng log trước đây trên terminal.
 
@@ -134,7 +134,7 @@ NIKO_RUNTIME_CONFIG_FILE=niko/.runtime/config.json
 Các nhóm nên chỉnh trong dashboard:
 
 - `Telegram Gateway`: token, allowlist, group mode, timeout/retry.
-- `Agent Commands`: `CLAUDE_CLI_COMMAND`, `CLAUDE_DEEP_AGENT_COMMAND`, `NIKO_FAST_AGENT_COMMAND`, timeout và hook file.
+- `Agent Runtime`: DeepSeek API key/base URL/model/timeout, legacy Claude/FCC fallback/debug command, Fast command, timeout và hook file.
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
 - `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, auto consolidation, trace và runtime log.
@@ -261,3 +261,47 @@ rtk python -m pytest
 - Runtime gọi LLM nằm trong `niko/runtime.py`.
 - Memory/trace/dashboard là harness baseline, không nên trộn vào gateway.
 - `niko/.runtime/` là dữ liệu chạy local và không commit.
+## SDLC Harness Upgrade Direction
+
+Niko is being upgraded toward a two-repo SDLC harness flow:
+
+```text
+Niko_Agent
+  -> Telegram conversation control, routing, memory and user-facing status
+
+SDLC_Harness
+  -> source loading, requirement/design/code workflow, artifacts, checkpoints
+     and tool sync results
+```
+
+The planned runtime direction for this upgrade is **DeepSeek only**. The current
+Deep-agent path already calls DeepSeek; remaining FCC/Claude runtime paths are
+legacy fallback/debug. The current Jira fixture workflow inside Niko is also
+legacy for the SDLC direction: new use-case loading and workflow state should
+live in SDLC_Harness, while Niko calls SDLC_Harness and reports
+status/checkpoints back to the user.
+
+See `docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and
+`docs/plans/2026-10-12-niko-sdlc-upgrade-checklist.md` for the local upgrade
+plan.
+<!-- NIKO_SDLC_SYNC_START -->
+## SDLC Harness Integration Snapshot
+
+Niko hiện là lớp hội thoại/điều phối cho SDLC_Harness, không phải nơi tự xử lý
+pipeline requirement. Khi người dùng yêu cầu chạy use case hoặc Jira issue đã
+cấu hình, Niko nhận diện intent, gọi CLI JSON của `../SDLC_Harness`, rồi format
+kết quả ngắn gọn để trả về Telegram.
+
+Ranh giới hiện tại:
+
+- Niko sở hữu Telegram gateway, dashboard config, memory/chat baseline, route
+  Fast/Deep và client gọi SDLC.
+- SDLC_Harness sở hữu source intake từ fixture/Jira, Requirement Refiner,
+  validator/repair loop, artifact runtime, trạng thái run và sync
+  Jira/Confluence.
+- Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
+  test hoặc khi chưa cấu hình Atlassian.
+- Phase 2 thiết kế/coding chưa nằm trong baseline này.
+
+<!-- NIKO_SDLC_SYNC_END -->
+

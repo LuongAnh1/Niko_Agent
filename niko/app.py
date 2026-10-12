@@ -1,9 +1,9 @@
 """Assembly root và điểm chọn workflow cấp turn hiện tại của Niko.
 
 Theo tinh thần Waku, app là nơi ráp config/dependency và là entrypoint cấp turn
-cho gateway. Phase 4/5 đã đưa workflow selection thật ra khỏi `ChatReplyGraph`:
-memory correction và Jira issue flow được chọn ở đây, còn chat graph giữ phần
-local/Fast/Deep.
+cho gateway. Workflow selection thật nằm ở đây: memory correction, Jira issue
+flow và SDLC client được chọn trước khi chat graph xử lý local/Fast/Deep.
+Pipeline requirement/artifact/sync của SDLC vẫn thuộc repo SDLC_Harness.
 """
 
 from __future__ import annotations
@@ -16,6 +16,15 @@ from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
+from niko.sdlc.client import (
+    ROUTE_SDLC_START,
+    ROUTE_SDLC_START_JIRA,
+    ROUTE_SDLC_STATUS,
+    SdlcClient,
+    SdlcResult,
+    detect_sdlc_request,
+    sdlc_enabled,
+)
 
 
 ReplyCallback = Callable[[str], None]
@@ -97,6 +106,17 @@ class NikoApp:
         if memory_route:
             return memory_route
 
+        sdlc_route = self._handle_sdlc_prompt(
+            conversation_id,
+            prompt,
+            gateway_message,
+            deliver_reply,
+            notify_working,
+            trace_turn.turn_id,
+        )
+        if sdlc_route:
+            return sdlc_route
+
         jira_route = self._handle_jira_issue_prompt(
             conversation_id,
             prompt,
@@ -165,6 +185,87 @@ class NikoApp:
             deliver_reply,
             route=correction.route,
             trace_id=trace_turn.turn_id,
+        )
+
+    def _handle_sdlc_prompt(
+        self,
+        conversation_id: str,
+        prompt: str,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        notify_working: NotifyCallback | None,
+        trace_id: str,
+    ) -> str:
+        """Nếu bật SDLC_Harness, route use case/checkpoint qua repo workflow riêng."""
+        if not sdlc_enabled():
+            return ""
+
+        request = detect_sdlc_request(prompt)
+        if request is None:
+            return ""
+
+        if notify_working is not None:
+            try:
+                notify_working()
+            except Exception:
+                pass
+
+        if request.action == ROUTE_SDLC_STATUS:
+            result = SdlcClient().get_status(run_id=request.run_id)
+        elif request.action == ROUTE_SDLC_START_JIRA:
+            result = SdlcClient().start_from_jira(
+                issue_key=request.issue_key,
+                requested_by=_user_key(gateway_message),
+            )
+        else:
+            result = SdlcClient().start_or_get_run(
+                dataset=request.dataset,
+                use_case=request.use_case,
+                requested_by=_user_key(gateway_message),
+            )
+
+        self._log_workflow_selected(
+            "sdlc_harness",
+            result.action,
+            conversation_id,
+            trace_id,
+            {
+                "ok": result.ok,
+                "run_id": result.run_id,
+                "current_phase": result.current_phase,
+                "status": result.status,
+                "error_code": result.error_code,
+            },
+        )
+        try:
+            self.chat_graph.trace_logger.event(
+                trace_id,
+                "sdlc_harness_finished",
+                {
+                    "route": result.action,
+                    "ok": result.ok,
+                    "run_id": result.run_id,
+                    "source_ref": result.source_ref,
+                    "current_phase": result.current_phase,
+                    "status": result.status,
+                    "pending_checkpoint": result.pending_checkpoint,
+                    "allowed_next_actions": result.allowed_next_actions,
+                    "latest_artifacts": result.latest_artifacts,
+                    "last_sync": result.last_sync,
+                    "error_code": result.error_code,
+                },
+            )
+        except Exception:
+            pass
+
+        return self.chat_graph.finish_workflow_reply(
+            conversation_id,
+            _format_sdlc_reply(result),
+            gateway_message,
+            deliver_reply,
+            route=result.action,
+            trace_id=trace_id,
+            meta={"run_id": result.run_id, "ok": result.ok, "error_code": result.error_code},
         )
 
     def _handle_jira_issue_prompt(
@@ -268,6 +369,190 @@ class NikoApp:
             f"NikoApp workflow: {workflow} route={route}",
             data=payload,
         )
+
+
+def _user_key(gateway_message) -> str:
+    """Lấy user key an toàn cho các workflow không phụ thuộc Telegram object thật."""
+    user = getattr(gateway_message, "user", None)
+    return str(getattr(user, "key", "") or "niko")
+
+
+def _format_sdlc_reply(result: SdlcResult) -> str:
+    """Đổi JSON trạng thái SDLC thành reply ngắn để người dùng quyết định bước tiếp."""
+    if not result.ok:
+        detail = result.message or "SDLC_Harness chưa xử lý được yêu cầu này."
+        if result.error_code:
+            return (
+                f"Dạ SDLC_Harness đang lỗi `{result.error_code}`.\n"
+                f"Chi tiết: {detail}\n"
+                "Em đã ghi lỗi vào log để mình soi tiếp."
+            )
+        return f"Dạ SDLC_Harness đang lỗi: {detail}"
+
+    status_label = _format_sdlc_status(result.current_phase, result.status)
+    source_label = _format_sdlc_source(result.source_ref)
+    sync_lines = _format_sync_targets(result.last_sync)
+    action_lines = _format_action_suggestions(result.allowed_next_actions)
+
+    if result.action == ROUTE_SDLC_STATUS:
+        lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
+    else:
+        lines = ["Dạ SDLC_Harness đã nhận việc rồi anh."]
+
+    if source_label:
+        lines.append(f"Nguồn: {source_label}.")
+    if status_label:
+        lines.append(f"Trạng thái: {status_label}.")
+    elif result.current_phase or result.status:
+        status = " / ".join(part for part in (result.current_phase, result.status) if part)
+        lines.append(f"Trạng thái: {status}.")
+
+    if result.summary_for_user:
+        lines.append("")
+        lines.append(_format_sdlc_summary(result.summary_for_user))
+
+    if sync_lines:
+        lines.append("")
+        lines.append("Đã đồng bộ:")
+        lines.extend(sync_lines)
+
+    checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
+    if checkpoint_title:
+        lines.append("")
+        lines.append(f"Checkpoint cần anh duyệt: {checkpoint_title}.")
+
+    if action_lines:
+        lines.append("")
+        lines.append("Việc tiếp theo:")
+        lines.extend(action_lines)
+
+    if result.run_id:
+        lines.append("")
+        lines.append(f"Mã run: `{result.run_id}`")
+
+    artifacts = _format_artifact_labels(result.latest_artifacts)
+    if artifacts:
+        lines.append(f"Artifact nội bộ: {artifacts}.")
+
+    raw_status = _format_raw_status(result.current_phase, result.status)
+    if raw_status and raw_status not in (status_label or ""):
+        lines.append(f"Mã trạng thái: `{raw_status}`")
+    return "\n".join(lines)
+
+
+def _format_sdlc_status(current_phase: str, status: str) -> str:
+    """Dịch phase/status kỹ thuật thành trạng thái dễ đọc trên Telegram."""
+
+    status_key = (status or current_phase or "").strip()
+    labels = {
+        "requirement_drafting": "đang chuẩn hóa requirement",
+        "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
+        "checkpoint_pending": "đang chờ duyệt checkpoint",
+        "failed": "đang lỗi ở bước xử lý requirement",
+        "done": "đã hoàn tất",
+        "cancelled": "đã hủy",
+    }
+    label = labels.get(status_key)
+    if not label and current_phase and status and current_phase != status:
+        label = f"{current_phase} / {status}"
+    return label or status_key
+
+
+def _format_sdlc_source(source_ref: str) -> str:
+    """Rút gọn source_ref để người đọc hiểu nguồn context đến từ đâu."""
+
+    source = str(source_ref or "").strip()
+    if source.startswith("jira_issue:"):
+        return f"Jira issue `{source.split(':', 1)[1]}`"
+    if source.startswith("dataset_use_case:"):
+        parts = source.split(":")
+        if len(parts) >= 3:
+            return f"{parts[1]} {parts[2]}"
+    return source
+
+
+def _format_sdlc_summary(summary: str) -> str:
+    """Làm mềm summary từ SDLC_Harness, tránh cảm giác dump log máy."""
+
+    cleaned = " ".join(str(summary or "").split())
+    replacements = {
+        "Đã chuẩn hóa jira": "Em đã chuẩn hóa Jira issue",
+        "Đã chuẩn hóa eTour": "Em đã chuẩn hóa eTour",
+        "validator đã pass": "validator đã kiểm tra xong",
+        "sync status=synced": "đã đồng bộ lên tool",
+        "Run đang chờ anh duyệt requirement trước khi chuyển sang design.": (
+            "Hiện run đang chờ anh duyệt requirement trước khi chuyển sang design."
+        ),
+    }
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new)
+    return cleaned
+
+
+def _format_sync_targets(last_sync: dict) -> list[str]:
+    """Hiển thị link Jira/Confluence nếu sync thật đã có URL."""
+
+    targets = last_sync.get("targets") if isinstance(last_sync, dict) else None
+    if not isinstance(targets, list):
+        return []
+
+    lines: list[str] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        tool = _title_tool(str(target.get("tool") or "tool"))
+        status = str(target.get("status") or "").strip()
+        url = str(target.get("url") or "").strip()
+        if url:
+            lines.append(f"- {tool}: {url}")
+        elif status:
+            lines.append(f"- {tool}: {status}")
+    return lines[:3]
+
+
+def _format_action_suggestions(actions: list[str]) -> list[str]:
+    """Dịch allowed_next_actions thành việc anh cần làm thật sự."""
+
+    action_set = {str(action) for action in actions if action}
+    suggestions: list[str] = []
+    if "approve_checkpoint" in action_set:
+        suggestions.append("- Anh review requirement packet/checkpoint trước.")
+        suggestions.append("- Nếu ổn, nói em để mình khóa checkpoint và mở bước design.")
+    if "request_change" in action_set:
+        suggestions.append("- Nếu chưa ổn, anh nhắn rõ phần muốn sửa trong requirement.")
+    if not suggestions and "get_status" in action_set:
+        suggestions.append("- Anh có thể hỏi lại mã run để xem tiến độ.")
+    if "cancel_run" in action_set:
+        suggestions.append("- Nếu muốn bỏ lần chạy này, anh bảo em hủy run.")
+    return suggestions[:4]
+
+
+def _format_artifact_labels(value: dict) -> str:
+    """Hiển thị artifact bằng tên dễ đọc thay vì key/path thô."""
+
+    labels = {
+        "use_case_packet": "use case packet",
+        "formal_use_case": "formal use case",
+        "formal_check_report": "formal check report",
+        "requirement_packet": "requirement packet",
+        "trace_graph": "trace graph",
+    }
+    names = [labels.get(str(key), str(key)) for key in value.keys()]
+    return ", ".join(names)
+
+
+def _format_raw_status(current_phase: str, status: str) -> str:
+    """Giữ mã trạng thái kỹ thuật để test/log và tra cứu vẫn rõ."""
+
+    parts = [part for part in (current_phase, status) if part]
+    if len(parts) == 2 and parts[0] == parts[1]:
+        return parts[0]
+    return " / ".join(parts)
+
+
+def _title_tool(tool: str) -> str:
+    mapping = {"jira": "Jira", "confluence": "Confluence"}
+    return mapping.get(tool.lower(), tool)
 
 
 def create_niko_app(
