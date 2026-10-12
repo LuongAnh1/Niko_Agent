@@ -16,6 +16,14 @@ from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
+from niko.sdlc.client import (
+    ROUTE_SDLC_START,
+    ROUTE_SDLC_STATUS,
+    SdlcClient,
+    SdlcResult,
+    detect_sdlc_request,
+    sdlc_enabled,
+)
 
 
 ReplyCallback = Callable[[str], None]
@@ -97,6 +105,17 @@ class NikoApp:
         if memory_route:
             return memory_route
 
+        sdlc_route = self._handle_sdlc_prompt(
+            conversation_id,
+            prompt,
+            gateway_message,
+            deliver_reply,
+            notify_working,
+            trace_turn.turn_id,
+        )
+        if sdlc_route:
+            return sdlc_route
+
         jira_route = self._handle_jira_issue_prompt(
             conversation_id,
             prompt,
@@ -165,6 +184,82 @@ class NikoApp:
             deliver_reply,
             route=correction.route,
             trace_id=trace_turn.turn_id,
+        )
+
+    def _handle_sdlc_prompt(
+        self,
+        conversation_id: str,
+        prompt: str,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        notify_working: NotifyCallback | None,
+        trace_id: str,
+    ) -> str:
+        """Nếu bật SDLC_Harness, route use case/checkpoint qua repo workflow riêng."""
+        if not sdlc_enabled():
+            return ""
+
+        request = detect_sdlc_request(prompt)
+        if request is None:
+            return ""
+
+        if notify_working is not None:
+            try:
+                notify_working()
+            except Exception:
+                pass
+
+        if request.action == ROUTE_SDLC_STATUS:
+            result = SdlcClient().get_status(run_id=request.run_id)
+        else:
+            result = SdlcClient().start_or_get_run(
+                dataset=request.dataset,
+                use_case=request.use_case,
+                requested_by=_user_key(gateway_message),
+            )
+
+        self._log_workflow_selected(
+            "sdlc_harness",
+            result.action,
+            conversation_id,
+            trace_id,
+            {
+                "ok": result.ok,
+                "run_id": result.run_id,
+                "current_phase": result.current_phase,
+                "status": result.status,
+                "error_code": result.error_code,
+            },
+        )
+        try:
+            self.chat_graph.trace_logger.event(
+                trace_id,
+                "sdlc_harness_finished",
+                {
+                    "route": result.action,
+                    "ok": result.ok,
+                    "run_id": result.run_id,
+                    "source_ref": result.source_ref,
+                    "current_phase": result.current_phase,
+                    "status": result.status,
+                    "pending_checkpoint": result.pending_checkpoint,
+                    "allowed_next_actions": result.allowed_next_actions,
+                    "latest_artifacts": result.latest_artifacts,
+                    "last_sync": result.last_sync,
+                    "error_code": result.error_code,
+                },
+            )
+        except Exception:
+            pass
+
+        return self.chat_graph.finish_workflow_reply(
+            conversation_id,
+            _format_sdlc_reply(result),
+            gateway_message,
+            deliver_reply,
+            route=result.action,
+            trace_id=trace_id,
+            meta={"run_id": result.run_id, "ok": result.ok, "error_code": result.error_code},
         )
 
     def _handle_jira_issue_prompt(
@@ -268,6 +363,54 @@ class NikoApp:
             f"NikoApp workflow: {workflow} route={route}",
             data=payload,
         )
+
+
+def _user_key(gateway_message) -> str:
+    """Lấy user key an toàn cho các workflow không phụ thuộc Telegram object thật."""
+    user = getattr(gateway_message, "user", None)
+    return str(getattr(user, "key", "") or "niko")
+
+
+def _format_sdlc_reply(result: SdlcResult) -> str:
+    """Đổi JSON trạng thái SDLC thành reply ngắn để người dùng quyết định bước tiếp."""
+    if not result.ok:
+        detail = result.message or "SDLC_Harness chưa xử lý được yêu cầu này."
+        if result.error_code:
+            return f"Dạ SDLC_Harness đang lỗi `{result.error_code}`: {detail}"
+        return f"Dạ SDLC_Harness đang lỗi: {detail}"
+
+    lines = ["Dạ em đã lấy trạng thái từ SDLC_Harness."]
+    if result.run_id:
+        lines.append(f"Run: `{result.run_id}`")
+    if result.source_ref:
+        lines.append(f"Nguồn: {result.source_ref}")
+    if result.current_phase or result.status:
+        status = " / ".join(part for part in (result.current_phase, result.status) if part)
+        lines.append(f"Trạng thái: {status}")
+    if result.summary_for_user:
+        lines.append(result.summary_for_user)
+
+    checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
+    if checkpoint_title:
+        lines.append(f"Checkpoint cần duyệt: {checkpoint_title}")
+
+    artifacts = _format_mapping_keys(result.latest_artifacts)
+    if artifacts:
+        lines.append(f"Artifact mới nhất: {artifacts}")
+
+    actions = _format_actions(result.allowed_next_actions)
+    if actions:
+        lines.append(f"Hành động tiếp theo: {actions}")
+    return "\n".join(lines)
+
+
+def _format_mapping_keys(value: dict) -> str:
+    keys = [str(key) for key in value if str(key).strip()]
+    return ", ".join(keys[:5])
+
+
+def _format_actions(actions: list[str]) -> str:
+    return ", ".join(action for action in actions if action)
 
 
 def create_niko_app(

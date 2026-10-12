@@ -1243,15 +1243,14 @@ class MemoryStoreTests(unittest.TestCase):
                     "NIKO_RUNTIME_CONFIG_FILE": str(Path(temp_dir) / "config.json"),
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",
-                    "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
                 },
                 clear=True,
             ), patch("niko.memory.runtime.default_memory_store", return_value=store), patch(
-                "niko.runtime.run_cli", return_value="OK"
-            ) as run_cli:
+                "niko.runtime.call_deepseek", return_value="OK"
+            ) as call_deepseek:
                 self.assertEqual(call_deep_agent("semantic facts SQLite", message, trace_id="turn-1", trace_logger=trace_logger), "OK")
 
-            prompt = run_cli.call_args.args[1]
+            prompt = call_deepseek.call_args.args[0]
             events = trace_logger.read_events()
 
         self.assertIn("Relevant semantic facts", prompt)
@@ -1282,18 +1281,17 @@ class MemoryStoreTests(unittest.TestCase):
                     "NIKO_RUNTIME_LOG_ENABLED": "0",
                     "NIKO_PROMPT_HOOK_FILE": "",
                     "CHAT_IDENTITY_ENABLED": "0",
-                    "CLAUDE_DEEP_AGENT_COMMAND": "fcc-claude -p",
                 },
                 clear=True,
             ), patch("niko.memory.runtime.default_memory_store", return_value=store), patch(
                 "niko.memory.runtime.decide_memory_retrieval",
                 return_value=MemoryRetrievalDecision(decision=MEMORY_SKIP, reason="standalone"),
             ), patch(
-                "niko.runtime.run_cli", return_value="OK"
-            ) as run_cli:
+                "niko.runtime.call_deepseek", return_value="OK"
+            ) as call_deepseek:
                 self.assertEqual(call_deep_agent("generic standalone", message, trace_id="turn-1", trace_logger=trace_logger), "OK")
 
-            prompt = run_cli.call_args.args[1]
+            prompt = call_deepseek.call_args.args[0]
             events = trace_logger.read_events()
 
         self.assertNotIn("Relevant semantic facts", prompt)

@@ -1,22 +1,25 @@
-"""Runtime shell-out sang LLM CLI của Niko.
+"""Runtime LLM của Niko.
 
-Ứng dụng không gọi API LLM trực tiếp. File này build argv, resolve workdir, nạp
-persona hook, thêm identity/memory context khi gọi Deep, rồi shell out sang CLI
-đã cấu hình (`fcc-claude` hiện tại). Telegram gateway và chat graph chỉ gọi
-runtime ở mức hàm public, không cần biết model, session, path hay command line.
+Deep agent chính gọi DeepSeek qua Chat Completions API. Các helper CLI cũ vẫn
+được giữ cho Fast/legacy fallback hoặc debug command-line, nhưng luồng Deep mặc
+định không còn shell out sang `fcc-claude`.
 
-Lỗi command, timeout và non-zero exit được chuẩn hóa thành `RuntimeError` để
-trace/graph xử lý nhất quán. File này không chọn route và không tự quyết định
-memory nào cần retrieve; phần đó thuộc graph hoặc `MemoryRuntime`.
+File này nạp persona hook, thêm identity/memory context khi gọi Deep, chuẩn hóa
+lỗi runtime thành `RuntimeError`, và ghi runtime log để dashboard quan sát. Nó
+không chọn route và không tự quyết định memory nào cần retrieve; phần đó thuộc
+graph hoặc `MemoryRuntime`.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from niko.chat_gateway import build_identity_context
 from niko.config import env_flag, env_value, resolve_project_path
@@ -27,6 +30,9 @@ DEFAULT_CLAUDE_COMMAND = "fcc-claude -p"
 DEFAULT_CLAUDE_DEEP_AGENT_COMMAND = ""
 DEFAULT_CLAUDE_WORKDIR = ""
 DEFAULT_NIKO_PROMPT_HOOK_FILE = "niko/HOOK.md"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
+DEFAULT_DEEPSEEK_TIMEOUT_SECONDS = "90"
 
 
 def split_command(command: str) -> list[str]:
@@ -140,7 +146,7 @@ load_telegram_prompt_hook = load_prompt_hook
 
 
 def deep_agent_command() -> str:
-    """Deep có command riêng; nếu trống thì dùng command Claude mặc định."""
+    """Legacy CLI command của Deep agent; giữ tạm cho đường Claude/FCC cũ."""
     command = env_value("CLAUDE_DEEP_AGENT_COMMAND", DEFAULT_CLAUDE_DEEP_AGENT_COMMAND).strip()
     if command:
         return command
@@ -171,7 +177,7 @@ def call_deep_agent_with_context(
     trace_logger=None,
     extra_context: str = "",
 ) -> str:
-    """Gọi Deep agent với context bổ sung từ workflow tool như Jira."""
+    """Gọi Deep agent với memory và context bổ sung từ workflow/tool."""
     memory_context = ""
     try:
         from niko.harness.trace import default_trace_logger
@@ -216,7 +222,105 @@ def call_deep_agent_with_context(
         prompt_label="Current user message",
         memory_context=combined_context,
     )
-    return call_claude(deep_prompt, deep_agent_command())
+    return call_deepseek(deep_prompt)
+
+
+def call_deepseek(prompt: str) -> str:
+    """Gọi DeepSeek Chat Completions cho Deep agent chính của Niko."""
+    api_key = env_value("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Thieu DEEPSEEK_API_KEY. Hay cau hinh trong dashboard Config truoc khi goi Deep.")
+
+    base_url = env_value("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL).strip() or DEFAULT_DEEPSEEK_BASE_URL
+    model = env_value("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL).strip() or DEFAULT_DEEPSEEK_MODEL
+    timeout_seconds = _positive_int_env("DEEPSEEK_TIMEOUT_SECONDS", DEFAULT_DEEPSEEK_TIMEOUT_SECONDS)
+    url = _deepseek_chat_url(base_url)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    request = Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    default_runtime_logger().event(
+        "deep_runtime",
+        "deepseek_request",
+        f"Goi DeepSeek model={model}",
+        data={"model": model, "base_url": base_url, "prompt_chars": len(prompt)},
+    )
+
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            raw_response = response.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        default_runtime_logger().event(
+            "deep_runtime",
+            "deepseek_error",
+            f"DeepSeek HTTP error: {exc.code}",
+            level="error",
+            data={"status": exc.code, "body": body},
+        )
+        raise RuntimeError(f"DeepSeek tra ve HTTP {exc.code}: {body or exc.reason}") from exc
+    except URLError as exc:
+        default_runtime_logger().event(
+            "deep_runtime",
+            "deepseek_error",
+            f"Loi ket noi DeepSeek: {exc.reason}",
+            level="error",
+            data={"error": str(exc.reason)},
+        )
+        raise RuntimeError(f"Loi ket noi DeepSeek: {exc.reason}") from exc
+    except TimeoutError as exc:
+        default_runtime_logger().event(
+            "deep_runtime",
+            "deepseek_error",
+            "DeepSeek timeout",
+            level="error",
+            data={"timeout_seconds": timeout_seconds},
+        )
+        raise RuntimeError(f"DeepSeek chay qua lau, da het timeout {timeout_seconds}s.") from exc
+
+    try:
+        response_payload = json.loads(raw_response)
+        content = response_payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        default_runtime_logger().event(
+            "deep_runtime",
+            "deepseek_error",
+            "DeepSeek response khong dung schema",
+            level="error",
+            data={"body": raw_response},
+        )
+        raise RuntimeError("DeepSeek response khong dung schema Chat Completions.") from exc
+
+    default_runtime_logger().event(
+        "deep_runtime",
+        "deepseek_response",
+        f"DeepSeek da tra loi model={model}",
+        data={"model": model, "reply_chars": len(str(content or ""))},
+    )
+    return str(content or "").strip() or "(Khong co noi dung tra ve.)"
+
+
+def _deepseek_chat_url(base_url: str) -> str:
+    normalized = str(base_url or DEFAULT_DEEPSEEK_BASE_URL).strip().rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return f"{normalized}/chat/completions"
+
+
+def _positive_int_env(name: str, default: str) -> int:
+    try:
+        return max(1, int(env_value(name, default)))
+    except ValueError:
+        return int(default)
 
 
 def call_claude(prompt: str, command: str | None = None) -> str:

@@ -155,6 +155,7 @@ class OpsDashboardTests(unittest.TestCase):
             trace_logger = TraceLogger(Path(temp_dir) / "traces", enabled=True)
             with patch.dict(os.environ, {"NIKO_RUNTIME_CONFIG_FILE": str(config_path)}, clear=False):
                 os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+                os.environ.pop("DEEPSEEK_API_KEY", None)
                 server = create_server("127.0.0.1", 0, memory_store=store, trace_logger=trace_logger)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -162,15 +163,18 @@ class OpsDashboardTests(unittest.TestCase):
                 try:
                     updated = self._json_post(
                         f"{base_url}/api/config",
-                        {"values": {"TELEGRAM_BOT_TOKEN": "123456:secret-token"}},
+                        {"values": {"TELEGRAM_BOT_TOKEN": "123456:secret-token", "DEEPSEEK_API_KEY": "ds-secret"}},
                     )["config"]
 
                     self.assertEqual(updated["overrides"]["TELEGRAM_BOT_TOKEN"], "********")
+                    self.assertEqual(updated["overrides"]["DEEPSEEK_API_KEY"], "********")
                     telegram = next(section for section in updated["sections"] if section["id"] == "telegram")
                     token_field = next(field for field in telegram["fields"] if field["name"] == "TELEGRAM_BOT_TOKEN")
                     self.assertEqual(token_field["value"], "********")
                     self.assertNotIn("secret-token", json.dumps(updated))
+                    self.assertNotIn("ds-secret", json.dumps(updated))
                     self.assertIn("secret-token", config_path.read_text(encoding="utf-8"))
+                    self.assertIn("ds-secret", config_path.read_text(encoding="utf-8"))
 
                     memory = next(section for section in updated["sections"] if section["id"] == "memory")
                     retrieval_gate = next(
@@ -196,12 +200,22 @@ class OpsDashboardTests(unittest.TestCase):
                         field for field in decision["fields"] if field["name"] == "NIKO_DECISION_MODEL_KEEP_ALIVE"
                     )
                     self.assertIn("RAM/VRAM", keep_alive["help"])
+                    agents = next(section for section in updated["sections"] if section["id"] == "agents")
+                    deepseek_key = next(field for field in agents["fields"] if field["name"] == "DEEPSEEK_API_KEY")
+                    self.assertEqual(deepseek_key["value"], "********")
+                    deepseek_model = next(field for field in agents["fields"] if field["name"] == "DEEPSEEK_MODEL")
+                    self.assertEqual(deepseek_model["default"], "deepseek-chat")
                     business = next(section for section in updated["sections"] if section["id"] == "business")
+                    sdlc_enabled = next(
+                        field for field in business["fields"] if field["name"] == "NIKO_SDLC_HARNESS_ENABLED"
+                    )
+                    self.assertEqual(sdlc_enabled["default"], "0")
+                    self.assertIn("SDLC_Harness", sdlc_enabled["help"])
                     jira_enabled = next(
                         field for field in business["fields"] if field["name"] == "NIKO_JIRA_TOOLS_ENABLED"
                     )
                     self.assertEqual(jira_enabled["default"], "0")
-                    self.assertIn("issue key", jira_enabled["help"])
+                    self.assertIn("Legacy demo", jira_enabled["help"])
                     jira_gate = next(
                         field for field in business["fields"] if field["name"] == "NIKO_JIRA_DECISION_GATE_ENABLED"
                     )
