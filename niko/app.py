@@ -18,6 +18,7 @@ from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_START,
+    ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
     SdlcClient,
     SdlcResult,
@@ -211,6 +212,11 @@ class NikoApp:
 
         if request.action == ROUTE_SDLC_STATUS:
             result = SdlcClient().get_status(run_id=request.run_id)
+        elif request.action == ROUTE_SDLC_START_JIRA:
+            result = SdlcClient().start_from_jira(
+                issue_key=request.issue_key,
+                requested_by=_user_key(gateway_message),
+            )
         else:
             result = SdlcClient().start_or_get_run(
                 dataset=request.dataset,
@@ -376,41 +382,177 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
     if not result.ok:
         detail = result.message or "SDLC_Harness chưa xử lý được yêu cầu này."
         if result.error_code:
-            return f"Dạ SDLC_Harness đang lỗi `{result.error_code}`: {detail}"
+            return (
+                f"Dạ SDLC_Harness đang lỗi `{result.error_code}`.\n"
+                f"Chi tiết: {detail}\n"
+                "Em đã ghi lỗi vào log để mình soi tiếp."
+            )
         return f"Dạ SDLC_Harness đang lỗi: {detail}"
 
-    lines = ["Dạ em đã lấy trạng thái từ SDLC_Harness."]
-    if result.run_id:
-        lines.append(f"Run: `{result.run_id}`")
-    if result.source_ref:
-        lines.append(f"Nguồn: {result.source_ref}")
-    if result.current_phase or result.status:
+    status_label = _format_sdlc_status(result.current_phase, result.status)
+    source_label = _format_sdlc_source(result.source_ref)
+    sync_lines = _format_sync_targets(result.last_sync)
+    action_lines = _format_action_suggestions(result.allowed_next_actions)
+
+    if result.action == ROUTE_SDLC_STATUS:
+        lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
+    else:
+        lines = ["Dạ SDLC_Harness đã nhận việc rồi anh."]
+
+    if source_label:
+        lines.append(f"Nguồn: {source_label}.")
+    if status_label:
+        lines.append(f"Trạng thái: {status_label}.")
+    elif result.current_phase or result.status:
         status = " / ".join(part for part in (result.current_phase, result.status) if part)
-        lines.append(f"Trạng thái: {status}")
+        lines.append(f"Trạng thái: {status}.")
+
     if result.summary_for_user:
-        lines.append(result.summary_for_user)
+        lines.append("")
+        lines.append(_format_sdlc_summary(result.summary_for_user))
+
+    if sync_lines:
+        lines.append("")
+        lines.append("Đã đồng bộ:")
+        lines.extend(sync_lines)
 
     checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
     if checkpoint_title:
-        lines.append(f"Checkpoint cần duyệt: {checkpoint_title}")
+        lines.append("")
+        lines.append(f"Checkpoint cần anh duyệt: {checkpoint_title}.")
 
-    artifacts = _format_mapping_keys(result.latest_artifacts)
+    if action_lines:
+        lines.append("")
+        lines.append("Việc tiếp theo:")
+        lines.extend(action_lines)
+
+    if result.run_id:
+        lines.append("")
+        lines.append(f"Mã run: `{result.run_id}`")
+
+    artifacts = _format_artifact_labels(result.latest_artifacts)
     if artifacts:
-        lines.append(f"Artifact mới nhất: {artifacts}")
+        lines.append(f"Artifact nội bộ: {artifacts}.")
 
-    actions = _format_actions(result.allowed_next_actions)
-    if actions:
-        lines.append(f"Hành động tiếp theo: {actions}")
+    raw_status = _format_raw_status(result.current_phase, result.status)
+    if raw_status and raw_status not in (status_label or ""):
+        lines.append(f"Mã trạng thái: `{raw_status}`")
     return "\n".join(lines)
 
 
-def _format_mapping_keys(value: dict) -> str:
-    keys = [str(key) for key in value if str(key).strip()]
-    return ", ".join(keys[:5])
+def _format_sdlc_status(current_phase: str, status: str) -> str:
+    """Dịch phase/status kỹ thuật thành trạng thái dễ đọc trên Telegram."""
+
+    status_key = (status or current_phase or "").strip()
+    labels = {
+        "requirement_drafting": "đang chuẩn hóa requirement",
+        "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
+        "checkpoint_pending": "đang chờ duyệt checkpoint",
+        "failed": "đang lỗi ở bước xử lý requirement",
+        "done": "đã hoàn tất",
+        "cancelled": "đã hủy",
+    }
+    label = labels.get(status_key)
+    if not label and current_phase and status and current_phase != status:
+        label = f"{current_phase} / {status}"
+    return label or status_key
 
 
-def _format_actions(actions: list[str]) -> str:
-    return ", ".join(action for action in actions if action)
+def _format_sdlc_source(source_ref: str) -> str:
+    """Rút gọn source_ref để người đọc hiểu nguồn context đến từ đâu."""
+
+    source = str(source_ref or "").strip()
+    if source.startswith("jira_issue:"):
+        return f"Jira issue `{source.split(':', 1)[1]}`"
+    if source.startswith("dataset_use_case:"):
+        parts = source.split(":")
+        if len(parts) >= 3:
+            return f"{parts[1]} {parts[2]}"
+    return source
+
+
+def _format_sdlc_summary(summary: str) -> str:
+    """Làm mềm summary từ SDLC_Harness, tránh cảm giác dump log máy."""
+
+    cleaned = " ".join(str(summary or "").split())
+    replacements = {
+        "Đã chuẩn hóa jira": "Em đã chuẩn hóa Jira issue",
+        "Đã chuẩn hóa eTour": "Em đã chuẩn hóa eTour",
+        "validator đã pass": "validator đã kiểm tra xong",
+        "sync status=synced": "đã đồng bộ lên tool",
+        "Run đang chờ anh duyệt requirement trước khi chuyển sang design.": (
+            "Hiện run đang chờ anh duyệt requirement trước khi chuyển sang design."
+        ),
+    }
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new)
+    return cleaned
+
+
+def _format_sync_targets(last_sync: dict) -> list[str]:
+    """Hiển thị link Jira/Confluence nếu sync thật đã có URL."""
+
+    targets = last_sync.get("targets") if isinstance(last_sync, dict) else None
+    if not isinstance(targets, list):
+        return []
+
+    lines: list[str] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        tool = _title_tool(str(target.get("tool") or "tool"))
+        status = str(target.get("status") or "").strip()
+        url = str(target.get("url") or "").strip()
+        if url:
+            lines.append(f"- {tool}: {url}")
+        elif status:
+            lines.append(f"- {tool}: {status}")
+    return lines[:3]
+
+
+def _format_action_suggestions(actions: list[str]) -> list[str]:
+    """Dịch allowed_next_actions thành việc anh cần làm thật sự."""
+
+    action_set = {str(action) for action in actions if action}
+    suggestions: list[str] = []
+    if "approve_checkpoint" in action_set:
+        suggestions.append("- Anh review requirement packet/checkpoint trước.")
+        suggestions.append("- Nếu ổn, nói em để mình khóa checkpoint và mở bước design.")
+    if "request_change" in action_set:
+        suggestions.append("- Nếu chưa ổn, anh nhắn rõ phần muốn sửa trong requirement.")
+    if not suggestions and "get_status" in action_set:
+        suggestions.append("- Anh có thể hỏi lại mã run để xem tiến độ.")
+    if "cancel_run" in action_set:
+        suggestions.append("- Nếu muốn bỏ lần chạy này, anh bảo em hủy run.")
+    return suggestions[:4]
+
+
+def _format_artifact_labels(value: dict) -> str:
+    """Hiển thị artifact bằng tên dễ đọc thay vì key/path thô."""
+
+    labels = {
+        "use_case_packet": "use case packet",
+        "formal_use_case": "formal use case",
+        "formal_check_report": "formal check report",
+        "requirement_packet": "requirement packet",
+        "trace_graph": "trace graph",
+    }
+    names = [labels.get(str(key), str(key)) for key in value.keys()]
+    return ", ".join(names)
+
+
+def _format_raw_status(current_phase: str, status: str) -> str:
+    """Giữ mã trạng thái kỹ thuật để test/log và tra cứu vẫn rõ."""
+
+    parts = [part for part in (current_phase, status) if part]
+    if len(parts) == 2 and parts[0] == parts[1]:
+        return parts[0]
+    return " / ".join(parts)
+
+
+def _title_tool(tool: str) -> str:
+    mapping = {"jira": "Jira", "confluence": "Confluence"}
+    return mapping.get(tool.lower(), tool)
 
 
 def create_niko_app(

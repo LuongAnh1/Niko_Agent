@@ -370,6 +370,14 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Thời gian tối đa Niko chờ một lệnh CLI SDLC_Harness trả JSON.",
             },
             {
+                "name": "SDLC_HARNESS_LLM_MODE",
+                "label": "SDLC LLM mode",
+                "type": "select",
+                "default": "fake",
+                "choices": ["fake", "deepseek"],
+                "help": "Chọn LLM mode khi Niko gọi SDLC_Harness. `fake` dùng cho test nhanh/offline; `deepseek` gọi API thật để sinh artifact live.",
+            },
+            {
                 "name": "NIKO_JIRA_TOOLS_ENABLED",
                 "label": "Legacy Jira fixture tools",
                 "type": "bool",

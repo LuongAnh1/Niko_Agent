@@ -23,12 +23,15 @@ from niko.harness.runtime_log import default_runtime_logger
 DEFAULT_SDLC_HARNESS_WORKDIR = "../SDLC_Harness"
 DEFAULT_SDLC_HARNESS_PYTHON_COMMAND = "python"
 DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS = 120
+DEFAULT_SDLC_HARNESS_LLM_MODE = "fake"
 ROUTE_SDLC_START = "sdlc_start_or_get_run"
+ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
 UC1_PATTERN = re.compile(r"\b(?:uc\s*1|uc1)\b", re.IGNORECASE)
 ETOUR_PATTERN = re.compile(r"\betour\b", re.IGNORECASE)
+JIRA_ISSUE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
 START_WORDS = ("thuc hien", "thực hiện", "chay", "chạy", "lam", "làm", "xu ly", "xử lý")
 
@@ -40,6 +43,7 @@ class SdlcRequest:
     action: str
     dataset: str = "eTour"
     use_case: str = "UC1"
+    issue_key: str = ""
     run_id: str = ""
 
 
@@ -78,6 +82,10 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
     if run_match and any(word in lowered for word in STATUS_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_STATUS, run_id=run_match.group(0))
 
+    issue_match = JIRA_ISSUE_PATTERN.search(text)
+    if issue_match and any(word in lowered for word in START_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_START_JIRA, issue_key=issue_match.group(0).upper())
+
     if UC1_PATTERN.search(text) and (ETOUR_PATTERN.search(text) or any(word in lowered for word in START_WORDS)):
         return SdlcRequest(action=ROUTE_SDLC_START)
 
@@ -88,19 +96,36 @@ class SdlcClient:
     """Client subprocess tối giản cho CLI JSON của SDLC_Harness."""
 
     def start_or_get_run(self, *, dataset: str, use_case: str, requested_by: str) -> SdlcResult:
+        args = [
+            "start-or-get-run",
+            "--dataset",
+            dataset,
+            "--use-case",
+            use_case,
+            "--requested-by",
+            requested_by,
+        ]
+        _append_llm_mode(args)
         payload = self._run_json(
-            [
-                "start-or-get-run",
-                "--dataset",
-                dataset,
-                "--use-case",
-                use_case,
-                "--requested-by",
-                requested_by,
-            ],
+            args,
             event=ROUTE_SDLC_START,
         )
         return _result_from_payload(payload, ROUTE_SDLC_START)
+
+    def start_from_jira(self, *, issue_key: str, requested_by: str) -> SdlcResult:
+        args = [
+            "start-from-jira",
+            "--issue-key",
+            issue_key,
+            "--requested-by",
+            requested_by,
+        ]
+        _append_llm_mode(args)
+        payload = self._run_json(
+            args,
+            event=ROUTE_SDLC_START_JIRA,
+        )
+        return _result_from_payload(payload, ROUTE_SDLC_START_JIRA)
 
     def get_status(self, *, run_id: str) -> SdlcResult:
         payload = self._run_json(["get-status", "--run-id", run_id], event=ROUTE_SDLC_STATUS)
@@ -195,6 +220,12 @@ def _timeout_seconds() -> int:
         return max(1, int(raw_value))
     except ValueError:
         return DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS
+
+
+def _append_llm_mode(args: list[str]) -> None:
+    raw_mode = env_value("SDLC_HARNESS_LLM_MODE", DEFAULT_SDLC_HARNESS_LLM_MODE).strip()
+    if raw_mode:
+        args.extend(["--llm-mode", raw_mode])
 
 
 def _dict_value(value: Any) -> dict[str, Any]:

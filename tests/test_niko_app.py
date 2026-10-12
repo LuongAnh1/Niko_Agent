@@ -4,12 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from niko.app import NikoApp, create_niko_app
+from niko.app import NikoApp, _format_sdlc_reply, create_niko_app
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
-from niko.sdlc.client import ROUTE_SDLC_START, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
 
 
 class FakeChatGraph:
@@ -258,6 +258,40 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("checkpoint_pending", delivered[0])
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
+
+    def test_sdlc_reply_formats_checkpoint_for_telegram(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_START_JIRA,
+            run_id="run_20261012_170506_b0909cb6",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="waiting_requirement_approval",
+            status="waiting_requirement_approval",
+            summary_for_user=(
+                "Đã chuẩn hóa jira SDLC-1 thành formal use case và requirement packet v1 "
+                "bằng Requirement Refiner, validator đã pass, và sync status=synced. "
+                "Run đang chờ anh duyệt requirement trước khi chuyển sang design."
+            ),
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            latest_artifacts={"requirement_packet": "path", "trace_graph": "path"},
+            last_sync={
+                "mode": "real",
+                "status": "synced",
+                "targets": [
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                    {"tool": "confluence", "status": "synced", "url": "https://example.atlassian.net/wiki/x/abc"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("Jira issue `SDLC-1`", reply)
+        self.assertIn("đang chờ anh duyệt requirement", reply)
+        self.assertIn("Đã đồng bộ:", reply)
+        self.assertIn("https://example.atlassian.net/browse/SDLC-1", reply)
+        self.assertIn("Việc tiếp theo:", reply)
+        self.assertNotIn("approve_checkpoint", reply)
 
     def test_app_logs_memory_correction_workflow_route(self):
         with tempfile.TemporaryDirectory() as temp_dir:
