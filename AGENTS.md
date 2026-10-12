@@ -393,3 +393,26 @@ not relevant.
   system can run directly from raw Jira/docs/chat context to code.
 - Prefer small, test-covered changes. Existing tests cover routing, Telegram
   prompt behavior, memory store, trace logger, and dashboard snapshot.
+<!-- NIKO_SDLC_SYNC_START -->
+## Latest SDLC Sync Boundary
+
+Niko can start or inspect a Phase 1 SDLC run when the user asks to execute an
+eTour use case or a configured Jira issue. Keep this boundary strict:
+
+```text
+Telegram/user prompt
+  -> Niko detects an SDLC intent
+  -> Niko calls SDLC_Harness CLI JSON
+  -> SDLC_Harness loads Jira/fixture source, refines requirements, validates,
+     writes runtime artifacts, syncs Jira/Confluence, and returns a compact
+     machine-readable result
+  -> Niko formats the result for chat
+```
+
+Do not duplicate SDLC source loading, requirement refinement, artifact writing,
+or Jira/Confluence sync inside Niko. If richer SDLC behavior is needed, extend
+the SDLC_Harness contract first, then adapt `niko/sdlc/`. The old read-only Jira
+fixture workflow in Niko is only for issue analysis, not the SDLC requirement
+pipeline.
+<!-- NIKO_SDLC_SYNC_END -->
+

@@ -1,9 +1,9 @@
 """Assembly root và điểm chọn workflow cấp turn hiện tại của Niko.
 
 Theo tinh thần Waku, app là nơi ráp config/dependency và là entrypoint cấp turn
-cho gateway. Phase 4/5 đã đưa workflow selection thật ra khỏi `ChatReplyGraph`:
-memory correction và Jira issue flow được chọn ở đây, còn chat graph giữ phần
-local/Fast/Deep.
+cho gateway. Workflow selection thật nằm ở đây: memory correction, Jira issue
+flow và SDLC client được chọn trước khi chat graph xử lý local/Fast/Deep.
+Pipeline requirement/artifact/sync của SDLC vẫn thuộc repo SDLC_Harness.
 """
 
 from __future__ import annotations

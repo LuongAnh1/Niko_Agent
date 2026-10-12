@@ -284,3 +284,24 @@ status/checkpoints back to the user.
 See `docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and
 `docs/plans/2026-10-12-niko-sdlc-upgrade-checklist.md` for the local upgrade
 plan.
+<!-- NIKO_SDLC_SYNC_START -->
+## SDLC Harness Integration Snapshot
+
+Niko hiện là lớp hội thoại/điều phối cho SDLC_Harness, không phải nơi tự xử lý
+pipeline requirement. Khi người dùng yêu cầu chạy use case hoặc Jira issue đã
+cấu hình, Niko nhận diện intent, gọi CLI JSON của `../SDLC_Harness`, rồi format
+kết quả ngắn gọn để trả về Telegram.
+
+Ranh giới hiện tại:
+
+- Niko sở hữu Telegram gateway, dashboard config, memory/chat baseline, route
+  Fast/Deep và client gọi SDLC.
+- SDLC_Harness sở hữu source intake từ fixture/Jira, Requirement Refiner,
+  validator/repair loop, artifact runtime, trạng thái run và sync
+  Jira/Confluence.
+- Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
+  test hoặc khi chưa cấu hình Atlassian.
+- Phase 2 thiết kế/coding chưa nằm trong baseline này.
+
+<!-- NIKO_SDLC_SYNC_END -->
+
