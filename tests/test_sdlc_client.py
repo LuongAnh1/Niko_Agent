@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from niko.sdlc.client import (
+    ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
@@ -28,6 +29,13 @@ class SdlcClientTests(unittest.TestCase):
 
         self.assertIsNotNone(request)
         self.assertEqual(request.action, ROUTE_SDLC_STATUS)
+        self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
+
+    def test_detects_checkpoint_approval_request(self):
+        request = detect_sdlc_request("Niko, duyet run_20261012_120000_abcd1234 giup anh")
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request.action, ROUTE_SDLC_APPROVE)
         self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
 
     def test_detects_jira_issue_start_request(self):
@@ -115,6 +123,36 @@ class SdlcClientTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.status, "done")
         self.assertIn("get-status", run.call_args.args[0])
+
+    def test_approve_checkpoint_parses_cli_json(self):
+        payload = (
+            '{"ok": true, "run_id": "run_20261012_120000_abcd1234", '
+            '"status": "waiting_design_approval", "allowed_next_actions": ["approve_checkpoint"]}'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "SDLC_HARNESS_LLM_MODE": "deepseek",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            result = SdlcClient().approve_checkpoint(run_id="run_20261012_120000_abcd1234")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.action, ROUTE_SDLC_APPROVE)
+        self.assertEqual(result.status, "waiting_design_approval")
+        command = run.call_args.args[0]
+        self.assertIn("approve-checkpoint", command)
+        self.assertIn("--run-id", command)
+        self.assertIn("run_20261012_120000_abcd1234", command)
+        self.assertIn("--llm-mode", command)
+        self.assertIn("deepseek", command)
 
     def test_returns_config_error_when_workdir_is_missing(self):
         with patch.dict(

@@ -396,8 +396,9 @@ not relevant.
 <!-- NIKO_SDLC_SYNC_START -->
 ## Latest SDLC Sync Boundary
 
-Niko can start or inspect a Phase 1 SDLC run when the user asks to execute an
-eTour use case or a configured Jira issue. Keep this boundary strict:
+Niko can start, inspect, and approve the current static SDLC checkpoint when the
+user gives a clear run id. Phase 1/2 integration is approve-only: Niko does not
+edit SDLC artifacts or handle change requests yet. Keep this boundary strict:
 
 ```text
 Telegram/user prompt
@@ -414,5 +415,10 @@ or Jira/Confluence sync inside Niko. If richer SDLC behavior is needed, extend
 the SDLC_Harness contract first, then adapt `niko/sdlc/`. The old read-only Jira
 fixture workflow in Niko is only for issue analysis, not the SDLC requirement
 pipeline.
+
+Current Telegram SDLC actions are `start`, `get_status`, and
+`approve_checkpoint` with an explicit `run_id`. Do not expose `request_change`,
+`cancel_run`, `resume_run`, or dynamic context invalidation until the matching
+SDLC_Harness phase exists and its JSON contract is extended.
 <!-- NIKO_SDLC_SYNC_END -->
 

@@ -9,7 +9,7 @@ from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
-from niko.sdlc.client import ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import ROUTE_SDLC_APPROVE, ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
 
 
 class FakeChatGraph:
@@ -259,6 +259,53 @@ class NikoAppTests(unittest.TestCase):
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
+    def test_app_routes_sdlc_approve_prompt(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+        message = SimpleNamespace(user=SimpleNamespace(key="telegram:1"))
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_APPROVE,
+            run_id="run_20261012_120000_abcd1234",
+            current_phase="design_review",
+            status="waiting_design_approval",
+            summary_for_user="Da duyet requirement va tao design checkpoint V2.",
+            pending_checkpoint={"type": "design_approval", "artifact_ref": "design_artifact_v2"},
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            latest_artifacts={"design_artifact": "path", "design_quality_report": "path"},
+            quality_reports={
+                "design_traceability": {
+                    "summary": "khong phat hien missing link class/sequence.",
+                    "versions": ["v1", "v2"],
+                }
+            },
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.approve_checkpoint.return_value = result
+            route = app.handle_message(
+                "Niko, duyet run_20261012_120000_abcd1234 giup anh",
+                message,
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
+        self.assertIn("design checkpoint", delivered[0])
+        self.assertIn("repair iterations: 1", delivered[0])
+        self.assertIn("design_artifact_v2", delivered[0])
+        self.assertNotIn("muốn sửa", delivered[0])
+        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
+        self.assertEqual(graph.normal_calls, [])
+
     def test_sdlc_reply_formats_checkpoint_for_telegram(self):
         result = SdlcResult(
             ok=True,
@@ -292,6 +339,44 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("https://example.atlassian.net/browse/SDLC-1", reply)
         self.assertIn("Việc tiếp theo:", reply)
         self.assertNotIn("approve_checkpoint", reply)
+        self.assertNotIn("muốn sửa", reply)
+
+    def test_sdlc_reply_formats_design_checkpoint_static_approve_only(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261013_052040_47cd92fc",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="design_review",
+            status="waiting_design_approval",
+            summary_for_user="Da tao design checkpoint V2.",
+            pending_checkpoint={"type": "design_approval", "artifact_ref": "design_artifact_v2"},
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            latest_artifacts={"design_artifact": "path", "design_quality_report": "path"},
+            quality_reports={
+                "design_traceability": {
+                    "summary": "khong phat hien missing link class/sequence.",
+                    "versions": ["v1", "v2"],
+                }
+            },
+            last_sync={
+                "mode": "real",
+                "status": "synced",
+                "targets": [
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                    {"tool": "confluence", "status": "synced", "url": "https://example.atlassian.net/wiki/x/design"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("đang chờ anh review design checkpoint", reply)
+        self.assertIn("design_artifact_v2", reply)
+        self.assertIn("repair iterations: 1", reply)
+        self.assertIn("https://example.atlassian.net/wiki/x/design", reply)
+        self.assertNotIn("request_change", reply)
+        self.assertNotIn("muốn sửa", reply)
 
     def test_app_logs_memory_correction_workflow_route(self):
         with tempfile.TemporaryDirectory() as temp_dir:
