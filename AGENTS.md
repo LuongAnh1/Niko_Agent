@@ -397,7 +397,8 @@ not relevant.
 ## Latest SDLC Sync Boundary
 
 Niko can start, inspect, and approve the current static SDLC checkpoint when the
-user gives a clear run id. Phase 1/2 integration is approve-only: Niko does not
+user gives a clear run id. Phase 1/2/3 integration is approve-only: Niko can
+report requirement, design, and implementation-plan checkpoints, but does not
 edit SDLC artifacts or handle change requests yet. Keep this boundary strict:
 
 ```text
@@ -421,6 +422,7 @@ Current Telegram SDLC actions are `start`, `get_status`, and
 `cancel_run`, `resume_run`, or dynamic context invalidation until the matching
 SDLC_Harness phase exists and its JSON contract is extended. Niko should still
 surface SDLC `blocked`/sync-partial states clearly by reading `last_error` and
-`last_sync`; this is status reporting, not artifact mutation.
+`last_sync`; this is status reporting, not artifact mutation. Phase 4 code/PR is
+not open in Niko until SDLC_Harness exposes a matching checked contract.
 <!-- NIKO_SDLC_SYNC_END -->
 

@@ -138,6 +138,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
 - `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, auto consolidation, trace và runtime log.
+- `SDLC Harness`: bật/tắt route SDLC, workdir repo `../SDLC_Harness`, Python command và timeout CLI. Với các bước dài như approve design sang implementation plan, timeout nên đủ lớn, ví dụ 300s.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -296,11 +297,12 @@ Ranh giới hiện tại:
   Jira/Confluence.
 - Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
   test hoặc khi chưa cấu hình Atlassian.
-- Phase 2 design checkpoint hiện đã được Niko đọc/format ở mức status và approve
-  theo `run_id`: Niko hiển thị design artifact version, Validator summary, repair
-  iterations, link Jira/Confluence, trạng thái sync partial/full failure và lý do
-  `blocked` từ `last_error`. Niko chưa hỗ trợ `request_change`, context động,
-  hoặc tự sửa artifact SDLC từ Telegram.
+- Phase 2/3 checkpoint hiện đã được Niko đọc/format ở mức status và approve
+  theo `run_id`: Niko hiển thị design artifact/implementation plan, Validator
+  summary, repair iterations, link Jira/Confluence, trạng thái sync partial/full
+  failure và lý do `blocked` từ `last_error`. Niko chưa hỗ trợ `request_change`,
+  context động, hoặc tự sửa artifact SDLC từ Telegram; Phase 4 tạo code/PR chưa
+  mở trong Niko.
 
 <!-- NIKO_SDLC_SYNC_END -->
 
