@@ -127,7 +127,8 @@ class SdlcClientTests(unittest.TestCase):
     def test_approve_checkpoint_parses_cli_json(self):
         payload = (
             '{"ok": true, "run_id": "run_20261012_120000_abcd1234", '
-            '"status": "waiting_design_approval", "allowed_next_actions": ["approve_checkpoint"]}'
+            '"status": "waiting_design_approval", "allowed_next_actions": ["approve_checkpoint"], '
+            '"last_error": {"error_code": "none", "message": ""}}'
         )
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
@@ -147,6 +148,7 @@ class SdlcClientTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.action, ROUTE_SDLC_APPROVE)
         self.assertEqual(result.status, "waiting_design_approval")
+        self.assertEqual(result.last_error["error_code"], "none")
         command = run.call_args.args[0]
         self.assertIn("approve-checkpoint", command)
         self.assertIn("--run-id", command)

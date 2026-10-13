@@ -75,6 +75,7 @@ class SdlcResult:
     latest_artifacts: dict[str, Any] = field(default_factory=dict)
     quality_reports: dict[str, Any] = field(default_factory=dict)
     last_sync: dict[str, Any] = field(default_factory=dict)
+    last_error: dict[str, Any] = field(default_factory=dict)
     error_code: str = ""
     message: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -215,6 +216,7 @@ def _result_from_payload(payload: dict[str, Any], action: str) -> SdlcResult:
         latest_artifacts=_dict_value(payload.get("latest_artifacts")),
         quality_reports=_dict_value(payload.get("quality_reports")),
         last_sync=_dict_value(payload.get("last_sync")),
+        last_error=_dict_value(payload.get("last_error")),
         error_code=str(payload.get("error_code") or ""),
         message=str(payload.get("message") or ""),
         raw=payload,

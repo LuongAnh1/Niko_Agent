@@ -378,6 +378,138 @@ class NikoAppTests(unittest.TestCase):
         self.assertNotIn("request_change", reply)
         self.assertNotIn("muốn sửa", reply)
 
+    def test_sdlc_reply_formats_implementation_plan_checkpoint(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261013_143231_8e1a39d4",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="implementation_planning",
+            status="waiting_implementation_plan_review",
+            summary_for_user="Da duyet design va tao implementation plan cho run.",
+            pending_checkpoint={
+                "type": "implementation_plan_review",
+                "artifact_ref": "implementation_plan_v3",
+            },
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            latest_artifacts={
+                "implementation_plan": "path",
+                "implementation_plan_review": "path",
+            },
+            quality_reports={
+                "implementation_plan_review": {
+                    "summary": "Plan is approved for Phase 4. No blocking issues remain.",
+                    "repair_iterations": 2,
+                    "issue_count": 0,
+                }
+            },
+            last_sync={
+                "mode": "real",
+                "status": "synced",
+                "phase": "implementation_plan_review",
+                "targets": [
+                    {"tool": "confluence", "status": "synced", "url": "https://example.atlassian.net/wiki/x/plan"},
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("implementation plan", reply)
+        self.assertIn("implementation_plan_v3", reply)
+        self.assertIn("Implementation plan repair iterations: 2", reply)
+        self.assertIn("Implementation plan open issues: 0", reply)
+        self.assertIn("https://example.atlassian.net/wiki/x/plan", reply)
+        self.assertIn("Phase 4", reply)
+        self.assertIn("implementation plan, implementation plan review", reply)
+        self.assertNotIn("mở bước design", reply)
+        self.assertNotIn("request_change", reply)
+
+    def test_app_routes_sdlc_approve_to_implementation_plan_checkpoint(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+        message = SimpleNamespace(user=SimpleNamespace(key="telegram:1"))
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_APPROVE,
+            run_id="run_20261013_143231_8e1a39d4",
+            current_phase="implementation_planning",
+            status="waiting_implementation_plan_review",
+            pending_checkpoint={"type": "implementation_plan_review", "artifact_ref": "implementation_plan_v3"},
+            allowed_next_actions=["approve_checkpoint", "request_change", "cancel_run", "get_status"],
+            quality_reports={
+                "implementation_plan_review": {
+                    "summary": "Plan is approved for Phase 4.",
+                    "repair_iterations": 2,
+                    "issue_count": 0,
+                }
+            },
+            last_sync={
+                "status": "synced",
+                "targets": [
+                    {"tool": "confluence", "status": "synced", "url": "https://example.atlassian.net/wiki/x/plan"}
+                ],
+            },
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.approve_checkpoint.return_value = result
+            route = app.handle_message(
+                "Niko, duyet run_20261013_143231_8e1a39d4 giup anh",
+                message,
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
+        self.assertIn("implementation plan", delivered[0])
+        self.assertIn("Phase 4", delivered[0])
+        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
+        self.assertEqual(graph.normal_calls, [])
+
+    def test_sdlc_reply_formats_blocked_with_last_error_and_partial_sync(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261013_052040_47cd92fc",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="design_review",
+            status="blocked",
+            summary_for_user="Phase 2 bị chặn vì requirement chưa đủ rõ.",
+            allowed_next_actions=["get_status", "request_change", "cancel_run"],
+            latest_artifacts={"design_artifact": "path", "design_quality_report": "path"},
+            last_error={
+                "error_code": "requirement_traceability_blocked",
+                "message": "Requirement packet did not contain traceable requirement items.",
+            },
+            last_sync={
+                "mode": "real",
+                "status": "partial_failed",
+                "targets": [
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                    {"tool": "confluence", "status": "failed", "error": "API timeout while updating page"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("đang bị chặn", reply)
+        self.assertIn("Đồng bộ một phần:", reply)
+        self.assertIn("Confluence: failed", reply)
+        self.assertIn("requirement_traceability_blocked", reply)
+        self.assertIn("Requirement packet did not contain traceable requirement items", reply)
+        self.assertNotIn("Nếu ổn, nhắn em duyệt", reply)
+
     def test_app_logs_memory_correction_workflow_route(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             graph = FakeSelectableGraph()

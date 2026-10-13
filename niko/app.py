@@ -255,6 +255,7 @@ class NikoApp:
                     "allowed_next_actions": result.allowed_next_actions,
                     "latest_artifacts": result.latest_artifacts,
                     "last_sync": result.last_sync,
+                    "last_error": result.last_error,
                     "error_code": result.error_code,
                 },
             )
@@ -394,8 +395,10 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
 
     status_label = _format_sdlc_status(result.current_phase, result.status)
     source_label = _format_sdlc_source(result.source_ref)
+    sync_header = _format_sync_header(result.last_sync)
     sync_lines = _format_sync_targets(result.last_sync)
     quality_lines = _format_quality_summary(result.quality_reports)
+    block_lines = _format_blocked_reason(result)
     action_lines = _format_action_suggestions(result.allowed_next_actions, result.status or result.current_phase)
 
     if result.action == ROUTE_SDLC_STATUS:
@@ -419,14 +422,22 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
 
     if sync_lines:
         lines.append("")
-        lines.append("Đã đồng bộ:")
+        lines.append(sync_header)
         lines.extend(sync_lines)
+
+    if block_lines:
+        lines.append("")
+        lines.extend(block_lines)
 
     checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
     checkpoint_ref = str(result.pending_checkpoint.get("artifact_ref") or "").strip()
+    checkpoint_type = str(result.pending_checkpoint.get("type") or "").strip()
     if checkpoint_title:
         lines.append("")
         lines.append(f"Checkpoint cần anh duyệt: {checkpoint_title}.")
+    elif checkpoint_type == "implementation_plan_review" and checkpoint_ref:
+        lines.append("")
+        lines.append(f"Checkpoint cần anh duyệt: implementation plan (`{checkpoint_ref}`).")
     elif checkpoint_ref:
         lines.append("")
         lines.append(f"Checkpoint cần anh duyệt: `{checkpoint_ref}`.")
@@ -467,8 +478,11 @@ def _format_sdlc_status(current_phase: str, status: str) -> str:
         "design_repairing": "đang repair design theo Validator",
         "waiting_design_approval": "đang chờ anh review design checkpoint",
         "design_review": "đang chờ anh review design checkpoint",
+        "implementation_planning": "đang lập implementation plan",
+        "waiting_implementation_plan_review": "đang chờ anh review implementation plan trước khi sang code/PR",
+        "blocked": "đang bị chặn, cần review trước khi chạy tiếp",
         "checkpoint_pending": "đang chờ duyệt checkpoint",
-        "failed": "đang lỗi ở bước xử lý requirement",
+        "failed": "đang lỗi trong workflow SDLC",
         "done": "đã hoàn tất",
         "cancelled": "đã hủy",
     }
@@ -523,21 +537,69 @@ def _format_sync_targets(last_sync: dict) -> list[str]:
         tool = _title_tool(str(target.get("tool") or "tool"))
         status = str(target.get("status") or "").strip()
         url = str(target.get("url") or "").strip()
+        error = str(target.get("error") or target.get("message") or "").strip()
         if url:
-            lines.append(f"- {tool}: {url}")
+            if status and status not in {"synced", "mock_synced"}:
+                lines.append(f"- {tool}: {status} - {url}")
+            else:
+                lines.append(f"- {tool}: {url}")
+        elif status and error:
+            lines.append(f"- {tool}: {status} ({_clip_text(error, 120)})")
         elif status:
             lines.append(f"- {tool}: {status}")
     return lines[:3]
 
 
+def _format_sync_header(last_sync: dict) -> str:
+    """Đặt nhãn sync theo status để partial failure không bị hiểu là đã xong đẹp."""
+
+    status = str(last_sync.get("status") or "").strip() if isinstance(last_sync, dict) else ""
+    if status in {"partial_failed", "partially_failed", "partial_failure"}:
+        return "Đồng bộ một phần:"
+    if status in {"failed", "error", "sync_failed"}:
+        return "Đồng bộ đang lỗi:"
+    return "Đã đồng bộ:"
+
+
+def _format_blocked_reason(result: SdlcResult) -> list[str]:
+    """Hiển thị lý do blocked từ SDLC_Harness nếu contract có `last_error`."""
+
+    if result.status != "blocked" and result.current_phase != "blocked":
+        return []
+    error = result.last_error if isinstance(result.last_error, dict) else {}
+    code = str(error.get("error_code") or "").strip()
+    message = str(error.get("message") or "").strip()
+    if code and message:
+        return [f"Lý do chặn: `{code}` - {_clip_text(message, 220)}"]
+    if message:
+        return [f"Lý do chặn: {_clip_text(message, 220)}"]
+    return ["Lý do chặn: SDLC_Harness cần anh review artifact/quality report trước khi chạy tiếp."]
+
+
 def _format_quality_summary(quality_reports: dict) -> list[str]:
     """Rút gọn quality report của SDLC để Telegram không phải dump artifact."""
 
-    design_trace = quality_reports.get("design_traceability") if isinstance(quality_reports, dict) else None
-    if not isinstance(design_trace, dict):
+    if not isinstance(quality_reports, dict):
         return []
 
     lines: list[str] = []
+    plan_review = quality_reports.get("implementation_plan_review")
+    if isinstance(plan_review, dict):
+        summary = str(plan_review.get("summary") or "").strip()
+        if summary:
+            lines.append(f"- Validator plan: {_clip_text(summary, 180)}")
+        repair_iterations = plan_review.get("repair_iterations")
+        if repair_iterations is not None:
+            lines.append(f"- Implementation plan repair iterations: {repair_iterations}")
+        issue_count = plan_review.get("issue_count")
+        if issue_count is not None:
+            lines.append(f"- Implementation plan open issues: {issue_count}")
+        return lines[:3]
+
+    design_trace = quality_reports.get("design_traceability")
+    if not isinstance(design_trace, dict):
+        return []
+
     summary = str(design_trace.get("summary") or "").strip()
     if summary:
         lines.append(f"- Validator: {summary}")
@@ -555,7 +617,10 @@ def _format_action_suggestions(actions: list[str], status: str = "") -> list[str
     action_set = {str(action) for action in actions if action}
     suggestions: list[str] = []
     if "approve_checkpoint" in action_set:
-        if status == "waiting_design_approval":
+        if status == "waiting_implementation_plan_review":
+            suggestions.append("- Anh review implementation plan trên Jira/Confluence trước.")
+            suggestions.append("- Phase 4 tạo code/PR chưa mở trong Niko ở lát này; mình khóa checkpoint Phase 3 trước.")
+        elif status == "waiting_design_approval":
             suggestions.append("- Anh review design checkpoint trên Jira/Confluence trước.")
             suggestions.append("- Nếu ổn, nhắn em duyệt kèm mã run để mở bước tiếp theo khi workflow đã sẵn sàng.")
         else:
@@ -576,11 +641,30 @@ def _format_artifact_labels(value: dict) -> str:
         "requirement_packet": "requirement packet",
         "trace_graph": "trace graph",
         "designer_analysis": "designer analysis",
+        "requirement_graph": "requirement graph",
+        "class_diagram_graph": "class diagram graph",
+        "sequence_diagram_graph": "sequence diagram graph",
         "design_artifact": "design artifact",
         "requirement_design_trace": "requirement-design trace",
+        "missing_design_links": "missing design links",
         "design_quality_report": "design quality report",
+        "implementation_plan": "implementation plan",
+        "implementation_plan_structured": "implementation plan structured data",
+        "implementation_plan_review": "implementation plan review",
     }
-    names = [labels.get(str(key), str(key)) for key in value.keys()]
+    priority = (
+        "implementation_plan",
+        "implementation_plan_review",
+        "design_artifact",
+        "design_quality_report",
+        "requirement_packet",
+        "trace_graph",
+    )
+    keys = [key for key in priority if key in value]
+    keys.extend(key for key in value.keys() if key not in keys)
+    names = [labels.get(str(key), str(key)) for key in keys]
+    if len(names) > 6:
+        return f"{', '.join(names[:6])}, +{len(names) - 6} artifact khác"
     return ", ".join(names)
 
 
@@ -596,6 +680,13 @@ def _format_raw_status(current_phase: str, status: str) -> str:
 def _title_tool(tool: str) -> str:
     mapping = {"jira": "Jira", "confluence": "Confluence"}
     return mapping.get(tool.lower(), tool)
+
+
+def _clip_text(text: str, limit: int) -> str:
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(0, limit - 1)].rstrip() + "…"
 
 
 def create_niko_app(
