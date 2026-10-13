@@ -17,6 +17,7 @@ from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
+    ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
@@ -212,6 +213,8 @@ class NikoApp:
 
         if request.action == ROUTE_SDLC_STATUS:
             result = SdlcClient().get_status(run_id=request.run_id)
+        elif request.action == ROUTE_SDLC_APPROVE:
+            result = SdlcClient().approve_checkpoint(run_id=request.run_id)
         elif request.action == ROUTE_SDLC_START_JIRA:
             result = SdlcClient().start_from_jira(
                 issue_key=request.issue_key,
@@ -392,10 +395,13 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
     status_label = _format_sdlc_status(result.current_phase, result.status)
     source_label = _format_sdlc_source(result.source_ref)
     sync_lines = _format_sync_targets(result.last_sync)
-    action_lines = _format_action_suggestions(result.allowed_next_actions)
+    quality_lines = _format_quality_summary(result.quality_reports)
+    action_lines = _format_action_suggestions(result.allowed_next_actions, result.status or result.current_phase)
 
     if result.action == ROUTE_SDLC_STATUS:
         lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
+    elif result.action == ROUTE_SDLC_APPROVE:
+        lines = ["Dạ em đã gửi lệnh duyệt checkpoint sang SDLC_Harness rồi anh."]
     else:
         lines = ["Dạ SDLC_Harness đã nhận việc rồi anh."]
 
@@ -417,9 +423,18 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
         lines.extend(sync_lines)
 
     checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
+    checkpoint_ref = str(result.pending_checkpoint.get("artifact_ref") or "").strip()
     if checkpoint_title:
         lines.append("")
         lines.append(f"Checkpoint cần anh duyệt: {checkpoint_title}.")
+    elif checkpoint_ref:
+        lines.append("")
+        lines.append(f"Checkpoint cần anh duyệt: `{checkpoint_ref}`.")
+
+    if quality_lines:
+        lines.append("")
+        lines.append("Kiểm tra chất lượng:")
+        lines.extend(quality_lines)
 
     if action_lines:
         lines.append("")
@@ -447,6 +462,11 @@ def _format_sdlc_status(current_phase: str, status: str) -> str:
     labels = {
         "requirement_drafting": "đang chuẩn hóa requirement",
         "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
+        "design_drafting": "đang tạo design artifact",
+        "design_validating": "đang kiểm tra traceability của design",
+        "design_repairing": "đang repair design theo Validator",
+        "waiting_design_approval": "đang chờ anh review design checkpoint",
+        "design_review": "đang chờ anh review design checkpoint",
         "checkpoint_pending": "đang chờ duyệt checkpoint",
         "failed": "đang lỗi ở bước xử lý requirement",
         "done": "đã hoàn tất",
@@ -510,20 +530,39 @@ def _format_sync_targets(last_sync: dict) -> list[str]:
     return lines[:3]
 
 
-def _format_action_suggestions(actions: list[str]) -> list[str]:
-    """Dịch allowed_next_actions thành việc anh cần làm thật sự."""
+def _format_quality_summary(quality_reports: dict) -> list[str]:
+    """Rút gọn quality report của SDLC để Telegram không phải dump artifact."""
+
+    design_trace = quality_reports.get("design_traceability") if isinstance(quality_reports, dict) else None
+    if not isinstance(design_trace, dict):
+        return []
+
+    lines: list[str] = []
+    summary = str(design_trace.get("summary") or "").strip()
+    if summary:
+        lines.append(f"- Validator: {summary}")
+    versions = design_trace.get("versions") or []
+    if isinstance(versions, list) and versions:
+        repair_iterations = max(0, len(versions) - 1)
+        latest_version = str(versions[-1])
+        lines.append(f"- Design version: {latest_version}; repair iterations: {repair_iterations}")
+    return lines[:2]
+
+
+def _format_action_suggestions(actions: list[str], status: str = "") -> list[str]:
+    """Dịch allowed_next_actions theo scope hiện tại: static source và approve-only."""
 
     action_set = {str(action) for action in actions if action}
     suggestions: list[str] = []
     if "approve_checkpoint" in action_set:
-        suggestions.append("- Anh review requirement packet/checkpoint trước.")
-        suggestions.append("- Nếu ổn, nói em để mình khóa checkpoint và mở bước design.")
-    if "request_change" in action_set:
-        suggestions.append("- Nếu chưa ổn, anh nhắn rõ phần muốn sửa trong requirement.")
+        if status == "waiting_design_approval":
+            suggestions.append("- Anh review design checkpoint trên Jira/Confluence trước.")
+            suggestions.append("- Nếu ổn, nhắn em duyệt kèm mã run để mở bước tiếp theo khi workflow đã sẵn sàng.")
+        else:
+            suggestions.append("- Anh review requirement packet/checkpoint trước.")
+            suggestions.append("- Nếu ổn, nhắn em duyệt kèm mã run để mở bước design.")
     if not suggestions and "get_status" in action_set:
         suggestions.append("- Anh có thể hỏi lại mã run để xem tiến độ.")
-    if "cancel_run" in action_set:
-        suggestions.append("- Nếu muốn bỏ lần chạy này, anh bảo em hủy run.")
     return suggestions[:4]
 
 
@@ -536,6 +575,10 @@ def _format_artifact_labels(value: dict) -> str:
         "formal_check_report": "formal check report",
         "requirement_packet": "requirement packet",
         "trace_graph": "trace graph",
+        "designer_analysis": "designer analysis",
+        "design_artifact": "design artifact",
+        "requirement_design_trace": "requirement-design trace",
+        "design_quality_report": "design quality report",
     }
     names = [labels.get(str(key), str(key)) for key in value.keys()]
     return ", ".join(names)

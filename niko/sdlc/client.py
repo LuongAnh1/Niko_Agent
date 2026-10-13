@@ -27,6 +27,7 @@ DEFAULT_SDLC_HARNESS_LLM_MODE = "fake"
 ROUTE_SDLC_START = "sdlc_start_or_get_run"
 ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
+ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
 UC1_PATTERN = re.compile(r"\b(?:uc\s*1|uc1)\b", re.IGNORECASE)
@@ -34,6 +35,17 @@ ETOUR_PATTERN = re.compile(r"\betour\b", re.IGNORECASE)
 JIRA_ISSUE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
 START_WORDS = ("thuc hien", "thực hiện", "chay", "chạy", "lam", "làm", "xu ly", "xử lý")
+APPROVE_WORDS = (
+    "duyet",
+    "duyệt",
+    "approve",
+    "chap nhan",
+    "chấp nhận",
+    "dong y",
+    "đồng ý",
+    "xac nhan",
+    "xác nhận",
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +73,7 @@ class SdlcResult:
     pending_checkpoint: dict[str, Any] = field(default_factory=dict)
     allowed_next_actions: list[str] = field(default_factory=list)
     latest_artifacts: dict[str, Any] = field(default_factory=dict)
+    quality_reports: dict[str, Any] = field(default_factory=dict)
     last_sync: dict[str, Any] = field(default_factory=dict)
     error_code: str = ""
     message: str = ""
@@ -74,11 +87,14 @@ def sdlc_enabled() -> bool:
 
 
 def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
-    """Nhận diện lát cắt V1: eTour UC1 và status theo run_id."""
+    """Nhận diện lát cắt V1: start/status/approve theo run_id rõ ràng."""
 
     text = str(prompt or "").strip()
     lowered = text.lower()
     run_match = RUN_ID_PATTERN.search(text)
+    if run_match and any(word in lowered for word in APPROVE_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_APPROVE, run_id=run_match.group(0))
+
     if run_match and any(word in lowered for word in STATUS_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_STATUS, run_id=run_match.group(0))
 
@@ -130,6 +146,12 @@ class SdlcClient:
     def get_status(self, *, run_id: str) -> SdlcResult:
         payload = self._run_json(["get-status", "--run-id", run_id], event=ROUTE_SDLC_STATUS)
         return _result_from_payload(payload, ROUTE_SDLC_STATUS)
+
+    def approve_checkpoint(self, *, run_id: str) -> SdlcResult:
+        args = ["approve-checkpoint", "--run-id", run_id]
+        _append_llm_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_APPROVE)
+        return _result_from_payload(payload, ROUTE_SDLC_APPROVE)
 
     def _run_json(self, args: list[str], *, event: str) -> dict[str, Any]:
         try:
@@ -191,6 +213,7 @@ def _result_from_payload(payload: dict[str, Any], action: str) -> SdlcResult:
         pending_checkpoint=_dict_value(payload.get("pending_checkpoint")),
         allowed_next_actions=[str(item) for item in payload.get("allowed_next_actions") or []],
         latest_artifacts=_dict_value(payload.get("latest_artifacts")),
+        quality_reports=_dict_value(payload.get("quality_reports")),
         last_sync=_dict_value(payload.get("last_sync")),
         error_code=str(payload.get("error_code") or ""),
         message=str(payload.get("message") or ""),

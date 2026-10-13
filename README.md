@@ -74,7 +74,7 @@ niko/ops/                       # Mini Niko Ops dashboard
   templates/dashboard.html       # HTML/CSS/JS dashboard
 niko/HOOK.md                     # Persona/hook của Niko
 niko/.runtime/                   # Runtime state, không commit
-docs/                            # Tài liệu kiến trúc, flow, demo, roadmap
+docs/                            # Tài liệu local-only, không commit lên git
 ```
 
 ## Chạy Nhanh
@@ -197,23 +197,18 @@ Các kịch bản demo nhanh:
   `memory_gate_decision`, `memory_write_decision`, `memory_correction_decision`, `turn_end`.
 - Mở tab Bots để xem runtime log như `workflow_selected`, `telegram_message_processed`, `fast_triage_finished`, `sticker_decision`.
 
-Chi tiết hơn xem [docs/demo/demo-guide.md](docs/demo/demo-guide.md).
+Chi tiết hơn xem tài liệu local trong `docs/demo/demo-guide.md` nếu thư mục `docs/`
+có mặt trên máy này.
 
 ## Tài Liệu
 
-- [Kiến trúc](docs/harness/architecture.md)
-- [Luồng runtime hiện tại](docs/harness/current-runtime-flow.md)
-- [Luồng chat Telegram](docs/harness/telegram-chat-flow.md)
-- [Harness Memory & Ops](docs/harness/memory-ops.md)
-- [Chat Memory Eval Scenarios](docs/harness/memory-eval-scenarios.md)
-- [Niko Loop Architecture](docs/loop/architecture.md)
-- [Nghiệp vụ harness](docs/business-domains/README.md)
-- [Demo Guide](docs/demo/demo-guide.md)
-- [Mục lục kế hoạch triển khai](docs/plans/README.md)
-- [Kế hoạch Chat Memory Decision Model 2026-10-07](docs/plans/memory/2026-10-07-chat-memory-decision-model.md)
-- [Kế hoạch Niko Loop 2026-10-08](docs/plans/loop/2026-10-08-niko-loop-implementation-plan.md)
-- [Checklist Live Test Jira Runtime Tools 2026-10-08](docs/plans/jira/2026-10-08-jira-live-test-checklist.md)
-- [Memory Roadmap](docs/memory/roadmap.md)
+`docs/` là tài liệu làm việc local trên máy phát triển, đang bị `.gitignore` để
+tránh đưa kế hoạch, log test, bản dịch paper và ghi chú nghiên cứu lên GitHub.
+Khi thư mục này có mặt, các điểm nên đọc trước là:
+
+- `docs/agent-harness-sdlc/README.md`: hướng SDLC context handoff.
+- `docs/plans/`: kế hoạch/checklist triển khai theo ngày.
+- `docs/harness/`, `docs/memory/`, `docs/loop/`: kiến trúc baseline theo từng mảng.
 
 ## Ranh Giới Baseline
 
@@ -301,7 +296,10 @@ Ranh giới hiện tại:
   Jira/Confluence.
 - Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
   test hoặc khi chưa cấu hình Atlassian.
-- Phase 2 thiết kế/coding chưa nằm trong baseline này.
+- Phase 2 design checkpoint hiện đã được Niko đọc/format ở mức status và approve
+  theo `run_id`: Niko hiển thị design artifact version, Validator summary, repair
+  iterations và link Jira/Confluence. Niko chưa hỗ trợ `request_change`, context
+  động, hoặc tự sửa artifact SDLC từ Telegram.
 
 <!-- NIKO_SDLC_SYNC_END -->
 
