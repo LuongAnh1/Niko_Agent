@@ -255,6 +255,7 @@ class NikoApp:
                     "allowed_next_actions": result.allowed_next_actions,
                     "latest_artifacts": result.latest_artifacts,
                     "last_sync": result.last_sync,
+                    "last_error": result.last_error,
                     "error_code": result.error_code,
                 },
             )
@@ -394,8 +395,10 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
 
     status_label = _format_sdlc_status(result.current_phase, result.status)
     source_label = _format_sdlc_source(result.source_ref)
+    sync_header = _format_sync_header(result.last_sync)
     sync_lines = _format_sync_targets(result.last_sync)
     quality_lines = _format_quality_summary(result.quality_reports)
+    block_lines = _format_blocked_reason(result)
     action_lines = _format_action_suggestions(result.allowed_next_actions, result.status or result.current_phase)
 
     if result.action == ROUTE_SDLC_STATUS:
@@ -419,8 +422,12 @@ def _format_sdlc_reply(result: SdlcResult) -> str:
 
     if sync_lines:
         lines.append("")
-        lines.append("Đã đồng bộ:")
+        lines.append(sync_header)
         lines.extend(sync_lines)
+
+    if block_lines:
+        lines.append("")
+        lines.extend(block_lines)
 
     checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
     checkpoint_ref = str(result.pending_checkpoint.get("artifact_ref") or "").strip()
@@ -467,8 +474,9 @@ def _format_sdlc_status(current_phase: str, status: str) -> str:
         "design_repairing": "đang repair design theo Validator",
         "waiting_design_approval": "đang chờ anh review design checkpoint",
         "design_review": "đang chờ anh review design checkpoint",
+        "blocked": "đang bị chặn, cần review trước khi chạy tiếp",
         "checkpoint_pending": "đang chờ duyệt checkpoint",
-        "failed": "đang lỗi ở bước xử lý requirement",
+        "failed": "đang lỗi trong workflow SDLC",
         "done": "đã hoàn tất",
         "cancelled": "đã hủy",
     }
@@ -523,11 +531,43 @@ def _format_sync_targets(last_sync: dict) -> list[str]:
         tool = _title_tool(str(target.get("tool") or "tool"))
         status = str(target.get("status") or "").strip()
         url = str(target.get("url") or "").strip()
+        error = str(target.get("error") or target.get("message") or "").strip()
         if url:
-            lines.append(f"- {tool}: {url}")
+            if status and status not in {"synced", "mock_synced"}:
+                lines.append(f"- {tool}: {status} - {url}")
+            else:
+                lines.append(f"- {tool}: {url}")
+        elif status and error:
+            lines.append(f"- {tool}: {status} ({_clip_text(error, 120)})")
         elif status:
             lines.append(f"- {tool}: {status}")
     return lines[:3]
+
+
+def _format_sync_header(last_sync: dict) -> str:
+    """Đặt nhãn sync theo status để partial failure không bị hiểu là đã xong đẹp."""
+
+    status = str(last_sync.get("status") or "").strip() if isinstance(last_sync, dict) else ""
+    if status in {"partial_failed", "partially_failed", "partial_failure"}:
+        return "Đồng bộ một phần:"
+    if status in {"failed", "error", "sync_failed"}:
+        return "Đồng bộ đang lỗi:"
+    return "Đã đồng bộ:"
+
+
+def _format_blocked_reason(result: SdlcResult) -> list[str]:
+    """Hiển thị lý do blocked từ SDLC_Harness nếu contract có `last_error`."""
+
+    if result.status != "blocked" and result.current_phase != "blocked":
+        return []
+    error = result.last_error if isinstance(result.last_error, dict) else {}
+    code = str(error.get("error_code") or "").strip()
+    message = str(error.get("message") or "").strip()
+    if code and message:
+        return [f"Lý do chặn: `{code}` - {_clip_text(message, 220)}"]
+    if message:
+        return [f"Lý do chặn: {_clip_text(message, 220)}"]
+    return ["Lý do chặn: SDLC_Harness cần anh review artifact/quality report trước khi chạy tiếp."]
 
 
 def _format_quality_summary(quality_reports: dict) -> list[str]:
@@ -596,6 +636,13 @@ def _format_raw_status(current_phase: str, status: str) -> str:
 def _title_tool(tool: str) -> str:
     mapping = {"jira": "Jira", "confluence": "Confluence"}
     return mapping.get(tool.lower(), tool)
+
+
+def _clip_text(text: str, limit: int) -> str:
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(0, limit - 1)].rstrip() + "…"
 
 
 def create_niko_app(

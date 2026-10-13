@@ -378,6 +378,40 @@ class NikoAppTests(unittest.TestCase):
         self.assertNotIn("request_change", reply)
         self.assertNotIn("muốn sửa", reply)
 
+    def test_sdlc_reply_formats_blocked_with_last_error_and_partial_sync(self):
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261013_052040_47cd92fc",
+            source_ref="jira_issue:SDLC-1",
+            current_phase="design_review",
+            status="blocked",
+            summary_for_user="Phase 2 bị chặn vì requirement chưa đủ rõ.",
+            allowed_next_actions=["get_status", "request_change", "cancel_run"],
+            latest_artifacts={"design_artifact": "path", "design_quality_report": "path"},
+            last_error={
+                "error_code": "requirement_traceability_blocked",
+                "message": "Requirement packet did not contain traceable requirement items.",
+            },
+            last_sync={
+                "mode": "real",
+                "status": "partial_failed",
+                "targets": [
+                    {"tool": "jira", "status": "synced", "url": "https://example.atlassian.net/browse/SDLC-1"},
+                    {"tool": "confluence", "status": "failed", "error": "API timeout while updating page"},
+                ],
+            },
+        )
+
+        reply = _format_sdlc_reply(result)
+
+        self.assertIn("đang bị chặn", reply)
+        self.assertIn("Đồng bộ một phần:", reply)
+        self.assertIn("Confluence: failed", reply)
+        self.assertIn("requirement_traceability_blocked", reply)
+        self.assertIn("Requirement packet did not contain traceable requirement items", reply)
+        self.assertNotIn("Nếu ổn, nhắn em duyệt", reply)
+
     def test_app_logs_memory_correction_workflow_route(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             graph = FakeSelectableGraph()

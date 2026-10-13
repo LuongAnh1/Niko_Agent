@@ -419,6 +419,8 @@ pipeline.
 Current Telegram SDLC actions are `start`, `get_status`, and
 `approve_checkpoint` with an explicit `run_id`. Do not expose `request_change`,
 `cancel_run`, `resume_run`, or dynamic context invalidation until the matching
-SDLC_Harness phase exists and its JSON contract is extended.
+SDLC_Harness phase exists and its JSON contract is extended. Niko should still
+surface SDLC `blocked`/sync-partial states clearly by reading `last_error` and
+`last_sync`; this is status reporting, not artifact mutation.
 <!-- NIKO_SDLC_SYNC_END -->
 

@@ -298,8 +298,9 @@ Ranh giới hiện tại:
   test hoặc khi chưa cấu hình Atlassian.
 - Phase 2 design checkpoint hiện đã được Niko đọc/format ở mức status và approve
   theo `run_id`: Niko hiển thị design artifact version, Validator summary, repair
-  iterations và link Jira/Confluence. Niko chưa hỗ trợ `request_change`, context
-  động, hoặc tự sửa artifact SDLC từ Telegram.
+  iterations, link Jira/Confluence, trạng thái sync partial/full failure và lý do
+  `blocked` từ `last_error`. Niko chưa hỗ trợ `request_change`, context động,
+  hoặc tự sửa artifact SDLC từ Telegram.
 
 <!-- NIKO_SDLC_SYNC_END -->
 
