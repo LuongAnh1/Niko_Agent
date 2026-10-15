@@ -41,6 +41,38 @@ class SdlcClientTests(unittest.TestCase):
         self.assertEqual(request.action, ROUTE_SDLC_APPROVE)
         self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
 
+    def test_detects_continue_and_sync_requests(self):
+        cases = [
+            ("chạy tiếp run_20261012_120000_abcd1234", ROUTE_SDLC_CONTINUE),
+            ("continue run_20261012_120000_abcd1234", ROUTE_SDLC_CONTINUE),
+            ("đồng bộ lại run_20261012_120000_abcd1234", ROUTE_SDLC_SYNC),
+            ("retry sync run_20261012_120000_abcd1234", ROUTE_SDLC_SYNC),
+        ]
+
+        for prompt, expected_action in cases:
+            with self.subTest(prompt=prompt):
+                request = detect_sdlc_request(prompt)
+                self.assertIsNotNone(request)
+                self.assertEqual(request.action, expected_action)
+                self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
+
+    def test_control_intents_require_explicit_run_id(self):
+        for prompt in ("chạy tiếp giúp anh", "đồng bộ lại giúp anh", "status giúp anh", "duyệt giúp anh"):
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(detect_sdlc_request(prompt))
+
+    def test_control_intent_precedence_is_fixed(self):
+        run_id = "run_20261012_120000_abcd1234"
+        cases = [
+            (f"duyệt rồi đồng bộ lại và chạy tiếp {run_id}", ROUTE_SDLC_APPROVE),
+            (f"đồng bộ lại rồi chạy tiếp và xem status {run_id}", ROUTE_SDLC_SYNC),
+            (f"chạy tiếp rồi xem status {run_id}", ROUTE_SDLC_CONTINUE),
+        ]
+
+        for prompt, expected_action in cases:
+            with self.subTest(prompt=prompt):
+                self.assertEqual(detect_sdlc_request(prompt).action, expected_action)
+
     def test_detects_jira_issue_start_request(self):
         request = detect_sdlc_request("Niko, thực hiện issue SDLC-1 giúp anh")
 

@@ -6,9 +6,11 @@ load fixture/Jira/dataset của workflow SDLC.
 
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
     SdlcClient,
     SdlcRequest,
     SdlcResult,
@@ -18,9 +20,11 @@ from niko.sdlc.client import (
 
 __all__ = [
     "ROUTE_SDLC_APPROVE",
+    "ROUTE_SDLC_CONTINUE",
     "ROUTE_SDLC_START",
     "ROUTE_SDLC_START_JIRA",
     "ROUTE_SDLC_STATUS",
+    "ROUTE_SDLC_SYNC",
     "SdlcClient",
     "SdlcRequest",
     "SdlcResult",

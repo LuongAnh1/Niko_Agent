@@ -41,6 +41,18 @@ ETOUR_PATTERN = re.compile(r"\betour\b", re.IGNORECASE)
 JIRA_ISSUE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
 START_WORDS = ("thuc hien", "thực hiện", "chay", "chạy", "lam", "làm", "xu ly", "xử lý")
+SYNC_WORDS = ("dong bo lai", "đồng bộ lại", "sync lai", "sync lại", "resync", "retry sync")
+CONTINUE_WORDS = (
+    "chay tiep",
+    "chạy tiếp",
+    "tiep tuc",
+    "tiếp tục",
+    "continue",
+    "lam tiep",
+    "làm tiếp",
+    "trien khai tiep",
+    "triển khai tiếp",
+)
 APPROVE_WORDS = (
     "duyet",
     "duyệt",
@@ -95,13 +107,19 @@ def sdlc_enabled() -> bool:
 
 
 def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
-    """Nhận diện lát cắt V1: start/status/approve theo run_id rõ ràng."""
+    """Nhận diện SDLC control intent theo precedence cố định và run_id rõ ràng."""
 
     text = str(prompt or "").strip()
     lowered = text.lower()
     run_match = RUN_ID_PATTERN.search(text)
     if run_match and any(word in lowered for word in APPROVE_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_APPROVE, run_id=run_match.group(0))
+
+    if run_match and any(word in lowered for word in SYNC_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_SYNC, run_id=run_match.group(0))
+
+    if run_match and any(word in lowered for word in CONTINUE_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_CONTINUE, run_id=run_match.group(0))
 
     if run_match and any(word in lowered for word in STATUS_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_STATUS, run_id=run_match.group(0))

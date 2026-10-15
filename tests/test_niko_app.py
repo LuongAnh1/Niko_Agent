@@ -9,7 +9,15 @@ from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
-from niko.sdlc.client import ROUTE_SDLC_APPROVE, ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import (
+    ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_START,
+    ROUTE_SDLC_START_JIRA,
+    ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
+    SdlcResult,
+)
 from niko.sdlc.formatting import format_sdlc_reply
 
 
@@ -260,6 +268,173 @@ class NikoAppTests(unittest.TestCase):
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
+    def test_explicit_sdlc_status_bypasses_deep_busy_route(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+            allowed_next_actions=["continue_run", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "status run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertEqual(graph.normal_calls, [])
+        self.assertIsNone(graph.last_two_agent_route)
+        self.assertIn("implementation_ready", delivered[0])
+
+    def test_explicit_sdlc_status_runs_in_single_agent_mode(self):
+        graph = FakeSelectableGraph()
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "single_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "run_20261012_120000_abcd1234 đến đâu rồi em?",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertEqual(graph.normal_calls, [])
+        self.assertIn("implementation_ready", delivered[0])
+
+    def test_continue_and_sync_only_run_preflight_in_n4_3(self):
+        cases = [
+            (
+                "chạy tiếp run_20261012_120000_abcd1234",
+                ROUTE_SDLC_CONTINUE,
+                "implementation_ready",
+                ["continue_run", "get_status"],
+                "chạy tiếp Phase 4 hiện chưa được bật",
+            ),
+            (
+                "đồng bộ lại run_20261012_120000_abcd1234",
+                ROUTE_SDLC_SYNC,
+                "code_review_sync_failed",
+                ["sync_run", "get_status"],
+                "đồng bộ lại hiện chưa được bật",
+            ),
+        ]
+
+        for prompt, expected_route, status, actions, expected_text in cases:
+            with self.subTest(route=expected_route):
+                graph = FakeSelectableGraph(route_kind="busy_reply")
+                app = NikoApp(chat_graph=graph)
+                delivered = []
+                result = SdlcResult(
+                    ok=True,
+                    action=ROUTE_SDLC_STATUS,
+                    run_id="run_20261012_120000_abcd1234",
+                    status=status,
+                    allowed_next_actions=actions,
+                )
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "NIKO_AGENT_MODE": "two_agent",
+                        "NIKO_SDLC_HARNESS_ENABLED": "1",
+                        "NIKO_RUNTIME_LOG_ENABLED": "0",
+                    },
+                    clear=False,
+                ), patch("niko.app.SdlcClient") as client_class:
+                    client_class.return_value.get_status.return_value = result
+                    route = app.handle_message(
+                        prompt,
+                        SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                        delivered.append,
+                    )
+
+                self.assertEqual(route, expected_route)
+                self.assertIn(expected_text, delivered[0])
+                self.assertEqual(graph.normal_calls, [])
+                client_class.return_value.continue_run.assert_not_called()
+                client_class.return_value.sync_run.assert_not_called()
+
+    def test_code_review_approval_is_preflight_only_until_gate_exists(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="code_review_ready",
+            pending_checkpoint={"type": "code_review", "pull_request_url": "https://github.test/pr/27"},
+            allowed_next_actions=["approve_checkpoint", "get_status", "sync_run"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "duyệt run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
+        self.assertIn("chưa duyệt Code Review", delivered[0])
+        self.assertIn("Draft PR", delivered[0])
+        client_class.return_value.approve_checkpoint.assert_not_called()
+        self.assertEqual(graph.normal_calls, [])
+
+    def test_preflight_error_preserves_business_error_without_write(self):
+        graph = FakeSelectableGraph()
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=False,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            error_code="run_not_found",
+            message="Run not found",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "continue run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_CONTINUE)
+        self.assertIn("run_not_found", delivered[0])
+        client_class.return_value.continue_run.assert_not_called()
+
     def test_app_routes_sdlc_approve_prompt(self):
         graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
         app = NikoApp(chat_graph=graph)
@@ -292,6 +467,7 @@ class NikoAppTests(unittest.TestCase):
             },
             clear=False,
         ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
             client_class.return_value.approve_checkpoint.return_value = result
             route = app.handle_message(
                 "Niko, duyet run_20261012_120000_abcd1234 giup anh",
@@ -305,6 +481,7 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("design_artifact_v2", delivered[0])
         self.assertNotIn("muốn sửa", delivered[0])
         client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
+        client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
     def test_sdlc_reply_formats_checkpoint_for_telegram(self):
@@ -464,6 +641,7 @@ class NikoAppTests(unittest.TestCase):
             },
             clear=False,
         ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
             client_class.return_value.approve_checkpoint.return_value = result
             route = app.handle_message(
                 "Niko, duyet run_20261013_143231_8e1a39d4 giup anh",
@@ -475,6 +653,7 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("implementation plan", delivered[0])
         self.assertIn("Phase 4", delivered[0])
         client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
+        client_class.return_value.get_status.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
         self.assertEqual(graph.normal_calls, [])
 
     def test_sdlc_reply_formats_blocked_with_last_error_and_partial_sync(self):

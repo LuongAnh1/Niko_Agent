@@ -18,13 +18,16 @@ from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
     SdlcClient,
     detect_sdlc_request,
     sdlc_enabled,
 )
+from niko.sdlc.control import evaluate_sdlc_preflight, preflight_notice
 from niko.sdlc.formatting import format_sdlc_reply
 
 
@@ -70,6 +73,17 @@ class NikoApp:
         conversation_id = self.chat_graph.conversation_id_for(gateway_message)
         trace_turn = self.chat_graph.start_chat_turn(conversation_id, prompt, gateway_message)
 
+        sdlc_route = self._handle_sdlc_prompt(
+            conversation_id,
+            prompt,
+            gateway_message,
+            deliver_reply,
+            notify_working,
+            trace_turn.turn_id,
+        )
+        if sdlc_route:
+            return sdlc_route
+
         if not two_agent_mode_enabled():
             self._log_workflow_selected(
                 "single_agent",
@@ -106,17 +120,6 @@ class NikoApp:
         memory_route = self._handle_memory_correction(conversation_id, prompt, gateway_message, deliver_reply, trace_turn)
         if memory_route:
             return memory_route
-
-        sdlc_route = self._handle_sdlc_prompt(
-            conversation_id,
-            prompt,
-            gateway_message,
-            deliver_reply,
-            notify_working,
-            trace_turn.turn_id,
-        )
-        if sdlc_route:
-            return sdlc_route
 
         jira_route = self._handle_jira_issue_prompt(
             conversation_id,
@@ -211,25 +214,36 @@ class NikoApp:
             except Exception:
                 pass
 
+        client = SdlcClient()
+        preflight = None
         if request.action == ROUTE_SDLC_STATUS:
-            result = SdlcClient().get_status(run_id=request.run_id)
-        elif request.action == ROUTE_SDLC_APPROVE:
-            result = SdlcClient().approve_checkpoint(run_id=request.run_id)
+            result = client.get_status(run_id=request.run_id)
+        elif request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}:
+            status_result = client.get_status(run_id=request.run_id)
+            preflight = evaluate_sdlc_preflight(request.action, status_result)
+            if preflight.execute_now:
+                result = client.approve_checkpoint(run_id=request.run_id)
+            else:
+                result = status_result
         elif request.action == ROUTE_SDLC_START_JIRA:
-            result = SdlcClient().start_from_jira(
+            result = client.start_from_jira(
                 issue_key=request.issue_key,
                 requested_by=_user_key(gateway_message),
             )
         else:
-            result = SdlcClient().start_or_get_run(
+            result = client.start_or_get_run(
                 dataset=request.dataset,
                 use_case=request.use_case,
                 requested_by=_user_key(gateway_message),
             )
 
+        write_dispatched = request.action in {ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA} or bool(
+            preflight and preflight.execute_now
+        )
+
         self._log_workflow_selected(
             "sdlc_harness",
-            result.action,
+            request.action,
             conversation_id,
             trace_id,
             {
@@ -238,6 +252,8 @@ class NikoApp:
                 "current_phase": result.current_phase,
                 "status": result.status,
                 "error_code": result.error_code,
+                "preflight_reason": preflight.reason if preflight else "",
+                "write_dispatched": write_dispatched,
             },
         )
         try:
@@ -245,7 +261,7 @@ class NikoApp:
                 trace_id,
                 "sdlc_harness_finished",
                 {
-                    "route": result.action,
+                    "route": request.action,
                     "ok": result.ok,
                     "run_id": result.run_id,
                     "source_ref": result.source_ref,
@@ -257,19 +273,31 @@ class NikoApp:
                     "last_sync": result.last_sync,
                     "last_error": result.last_error,
                     "error_code": result.error_code,
+                    "preflight_reason": preflight.reason if preflight else "",
+                    "write_dispatched": write_dispatched,
                 },
             )
         except Exception:
             pass
 
+        reply = format_sdlc_reply(result)
+        notice = preflight_notice(preflight) if preflight else ""
+        if notice:
+            reply = f"{notice}\n\n{reply}"
+
         return self.chat_graph.finish_workflow_reply(
             conversation_id,
-            format_sdlc_reply(result),
+            reply,
             gateway_message,
             deliver_reply,
-            route=result.action,
+            route=request.action,
             trace_id=trace_id,
-            meta={"run_id": result.run_id, "ok": result.ok, "error_code": result.error_code},
+            meta={
+                "run_id": result.run_id,
+                "ok": result.ok,
+                "error_code": result.error_code,
+                "preflight_reason": preflight.reason if preflight else "",
+            },
         )
 
     def _handle_jira_issue_prompt(
