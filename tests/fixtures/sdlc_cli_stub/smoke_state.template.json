@@ -1,0 +1,83 @@
+{
+  "runs": {
+    "run_20261015_120000_a11ce001": {
+      "ok": true,
+      "run_id": "run_20261015_120000_a11ce001",
+      "source_ref": "fixture:eTour:UC1",
+      "current_phase": "implementation",
+      "status": "implementation_ready",
+      "summary_for_user": "Implementation plan đã sẵn sàng.",
+      "allowed_next_actions": ["continue_run", "get_status"]
+    },
+    "run_20261015_120001_a11ce002": {
+      "ok": true,
+      "run_id": "run_20261015_120001_a11ce002",
+      "current_phase": "code_review",
+      "status": "code_review_approval_sync_failed",
+      "summary_for_user": "PR đã Ready; đồng bộ Jira/Confluence chưa hoàn tất.",
+      "allowed_next_actions": ["sync_run", "get_status"],
+      "last_error": {
+        "error_code": "jira_sync_failed",
+        "message": "fixture failure"
+      },
+      "workspace": {
+        "pr_url": "https://github.test/example/target/pull/27",
+        "lifecycle": "ready_for_review",
+        "pr_number": 27
+      }
+    },
+    "run_20261015_120002_a11ce003": {
+      "ok": true,
+      "run_id": "run_20261015_120002_a11ce003",
+      "current_phase": "code_review",
+      "status": "code_review_ready",
+      "summary_for_user": "Draft PR đang chờ duyệt.",
+      "allowed_next_actions": ["approve_checkpoint", "get_status", "sync_run"],
+      "pending_checkpoint": {
+        "type": "code_review",
+        "pull_request_url": "https://github.test/example/target/pull/27"
+      }
+    }
+  },
+  "continue_results": {
+    "run_20261015_120000_a11ce001": {
+      "ok": true,
+      "run_id": "run_20261015_120000_a11ce001",
+      "current_phase": "code_review",
+      "status": "code_review_ready",
+      "summary_for_user": "Draft PR đã sẵn sàng: https://github.test/example/target/pull/27",
+      "allowed_next_actions": ["approve_checkpoint", "get_status", "sync_run"],
+      "pending_checkpoint": {
+        "type": "code_review",
+        "pull_request_url": "https://github.test/example/target/pull/27"
+      },
+      "workspace": {
+        "branch": "feature/sdlc-smoke-a11ce001",
+        "head_sha": "0123456789abcdef0123456789abcdef01234567",
+        "lifecycle": "draft_pr",
+        "pr_number": 27,
+        "pr_url": "https://github.test/example/target/pull/27"
+      }
+    }
+  },
+  "sync_results": {
+    "run_20261015_120001_a11ce002": {
+      "ok": true,
+      "run_id": "run_20261015_120001_a11ce002",
+      "current_phase": "code_review",
+      "status": "code_review_approved",
+      "summary_for_user": "Approval sync đã hoàn tất bằng fixture mock.",
+      "allowed_next_actions": ["get_status"],
+      "workspace": {
+        "pr_url": "https://github.test/example/target/pull/27",
+        "lifecycle": "ready_for_review",
+        "pr_number": 27
+      },
+      "last_sync": {
+        "status": "mock_synced",
+        "targets": []
+      }
+    }
+  },
+  "approval_results": {}
+}

@@ -83,6 +83,18 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
         self.assertIn("Draft PR: https://github.test/checkpoint", reply)
         self.assertNotIn("Draft PR: https://github.test/workspace", reply)
 
+    def test_pr_url_is_not_repeated_when_summary_already_contains_it(self):
+        pr_url = "https://github.test/pr/27"
+        reply = format_sdlc_reply(
+            _result(
+                summary_for_user=f"Draft PR đã sẵn sàng: {pr_url}",
+                pending_checkpoint={"type": "code_review", "pull_request_url": pr_url},
+                workspace={"pr_url": pr_url},
+            )
+        )
+
+        self.assertEqual(reply.count(pr_url), 1)
+
     def test_workspace_and_artifacts_only_expose_safe_metadata(self):
         reply = format_sdlc_reply(
             _result(
