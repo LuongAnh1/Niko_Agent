@@ -20,6 +20,7 @@ from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
@@ -242,7 +243,12 @@ class NikoApp:
         preflight = None
         if request.action == ROUTE_SDLC_STATUS:
             result = client.get_status(run_id=request.run_id)
-        elif request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}:
+        elif request.action in {
+            ROUTE_SDLC_APPROVE,
+            ROUTE_SDLC_CONTINUE,
+            ROUTE_SDLC_REVALIDATE,
+            ROUTE_SDLC_SYNC,
+        }:
             status_result = client.get_status(run_id=request.run_id)
             preflight = evaluate_sdlc_preflight(
                 request.action,
@@ -250,7 +256,8 @@ class NikoApp:
                 allow_code_review_approval=code_review_approval_enabled(),
             )
             if (
-                request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}
+                request.action
+                in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_REVALIDATE, ROUTE_SDLC_SYNC}
                 and preflight.allowed
                 and not preflight.execute_now
             ):
@@ -355,6 +362,7 @@ class NikoApp:
     ) -> str:
         action_label = {
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
+            ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
         }[request.action]
@@ -370,6 +378,8 @@ class NikoApp:
         def task() -> SdlcResult:
             if request.action == ROUTE_SDLC_CONTINUE:
                 return self.sdlc_client.continue_run(run_id=request.run_id)
+            if request.action == ROUTE_SDLC_REVALIDATE:
+                return self.sdlc_client.revalidate_implementation(run_id=request.run_id)
             if request.action == ROUTE_SDLC_SYNC:
                 return self.sdlc_client.sync_run(run_id=request.run_id)
             return self.sdlc_client.approve_checkpoint(run_id=request.run_id)

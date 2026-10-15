@@ -8,6 +8,7 @@ from niko.config import env_flag
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE,
     ROUTE_SDLC_SYNC,
     SdlcResult,
 )
@@ -46,6 +47,7 @@ PHASE1_3_APPROVAL_STATUSES = {
 _CONTRACT_ACTIONS = {
     ROUTE_SDLC_APPROVE: "approve_checkpoint",
     ROUTE_SDLC_CONTINUE: "continue_run",
+    ROUTE_SDLC_REVALIDATE: "revalidate_implementation",
     ROUTE_SDLC_SYNC: "sync_run",
 }
 
@@ -97,6 +99,9 @@ def evaluate_sdlc_preflight(
             return SdlcPreflight(action, status_result, False, False, PREFLIGHT_PHASE4_REQUIRED)
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
+    if action == ROUTE_SDLC_REVALIDATE:
+        return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
+
     if action == ROUTE_SDLC_SYNC:
         if not status.startswith("code_review_"):
             return SdlcPreflight(action, status_result, False, False, PREFLIGHT_CODE_REVIEW_REQUIRED)
@@ -132,6 +137,7 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
     if preflight.reason == PREFLIGHT_BACKGROUND_PENDING:
         action_label = {
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
+            ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review",
         }.get(preflight.action, "thực hiện")

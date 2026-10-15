@@ -509,6 +509,12 @@ def _inline_code(value: Any) -> str:
 
 def _clip_text(text: str, limit: int) -> str:
     cleaned = " ".join(str(text or "").split())
+    # SDLC summaries often wrap Windows paths in Markdown backticks. Redact the
+    # whole quoted value before the generic token matcher, otherwise a path that
+    # contains spaces is only hidden up to its first space.
+    cleaned = re.sub(r"(?i)`[A-Z]:[\\/][^`\r\n]+`", "`[local path]`", cleaned)
+    cleaned = re.sub(r'(?i)"[A-Z]:[\\/][^"\r\n]+"', '"[local path]"', cleaned)
+    cleaned = re.sub(r"(?i)'[A-Z]:[\\/][^'\r\n]+'", "'[local path]'", cleaned)
     cleaned = re.sub(r"(?i)\b[A-Z]:[\\/][^\s,;)\]]+", "[local path]", cleaned)
     cleaned = re.sub(r"(?i)file://[^\s,;)\]]+", "[local path]", cleaned)
     cleaned = re.sub(

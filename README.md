@@ -277,6 +277,9 @@ legacy for the SDLC direction: new use-case loading and workflow state should
 live in SDLC_Harness, while Niko calls SDLC_Harness and reports
 status/checkpoints back to the user.
 
+Fixture route nhận tên use case dạng `eTour UC<n>`; fixture tương ứng phải tồn tại
+trong `SDLC_Harness/fixtures/etour/`. Hiện UC1 và UC2 được chuẩn bị cho demo.
+
 See `docs/plans/sdlc/README.md` for the dated local plan index. The current
 Phase 4 plan is `docs/plans/sdlc/2026-10-15/phase4-integration-plan.md`.
 <!-- NIKO_SDLC_SYNC_START -->

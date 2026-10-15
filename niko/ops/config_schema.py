@@ -346,7 +346,7 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "label": "Enable SDLC Harness",
                 "type": "bool",
                 "default": "0",
-                "help": "Bật route eTour UC1/status sang repo SDLC_Harness. Niko chỉ gọi workflow bên đó và nhận trạng thái, không tự kéo use case từ Jira/tool.",
+                "help": "Bật route eTour UC<n>/status sang repo SDLC_Harness. Niko chỉ gọi workflow bên đó và nhận trạng thái, không tự kéo use case từ Jira/tool.",
             },
             {
                 "name": "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED",

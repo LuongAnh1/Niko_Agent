@@ -33,10 +33,11 @@ ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
 ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
+ROUTE_SDLC_REVALIDATE = "sdlc_revalidate_implementation"
 ROUTE_SDLC_SYNC = "sdlc_sync_run"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
-UC1_PATTERN = re.compile(r"\b(?:uc\s*1|uc1)\b", re.IGNORECASE)
+USE_CASE_PATTERN = re.compile(r"\buc\s*(\d+)\b", re.IGNORECASE)
 ETOUR_PATTERN = re.compile(r"\betour\b", re.IGNORECASE)
 JIRA_ISSUE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
@@ -52,6 +53,15 @@ CONTINUE_WORDS = (
     "làm tiếp",
     "trien khai tiep",
     "triển khai tiếp",
+)
+REVALIDATE_WORDS = (
+    "revalidate",
+    "chay lai validator",
+    "chạy lại validator",
+    "validate lai",
+    "validate lại",
+    "kiem tra lai validator",
+    "kiểm tra lại validator",
 )
 APPROVE_WORDS = (
     "duyet",
@@ -112,6 +122,9 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
     text = str(prompt or "").strip()
     lowered = text.lower()
     run_match = RUN_ID_PATTERN.search(text)
+    if run_match and any(word in lowered for word in REVALIDATE_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_REVALIDATE, run_id=run_match.group(0))
+
     if run_match and any(word in lowered for word in APPROVE_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_APPROVE, run_id=run_match.group(0))
 
@@ -128,8 +141,9 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
     if issue_match and any(word in lowered for word in START_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_START_JIRA, issue_key=issue_match.group(0).upper())
 
-    if UC1_PATTERN.search(text) and (ETOUR_PATTERN.search(text) or any(word in lowered for word in START_WORDS)):
-        return SdlcRequest(action=ROUTE_SDLC_START)
+    use_case_match = USE_CASE_PATTERN.search(text)
+    if use_case_match and (ETOUR_PATTERN.search(text) or any(word in lowered for word in START_WORDS)):
+        return SdlcRequest(action=ROUTE_SDLC_START, use_case=f"UC{use_case_match.group(1)}")
 
     return None
 
@@ -190,6 +204,14 @@ class SdlcClient:
         _append_sync_mode(args)
         payload = self._run_json(args, event=ROUTE_SDLC_CONTINUE)
         return _result_from_payload(payload, ROUTE_SDLC_CONTINUE)
+
+    def revalidate_implementation(self, *, run_id: str) -> SdlcResult:
+        """Chạy lại Verification Runner và Validator mà không sửa code."""
+
+        args = ["revalidate-implementation", "--run-id", run_id]
+        _append_llm_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE)
+        return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE)
 
     def sync_run(self, *, run_id: str) -> SdlcResult:
         """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""
