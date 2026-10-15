@@ -79,6 +79,47 @@ class TelegramPromptTests(unittest.TestCase):
     def make_agent(self) -> ChatReplyGraph:
         return ChatReplyGraph(memory_store=self.memory_store, trace_logger=self.trace_logger)
 
+    def test_background_workflow_final_reply_does_not_close_trace_twice(self):
+        agent = self.make_agent()
+        gateway_message = telegram_message_to_gateway(
+            {
+                "text": "continue run_20261012_120000_abcd1234",
+                "from": {"id": 123, "first_name": "Luong"},
+                "chat": {"id": 456, "type": "private"},
+            }
+        )
+        delivered = []
+        with patch.dict(os.environ, {"NIKO_MEMORY_WRITE_ENABLED": "1"}, clear=False):
+            trace_turn = agent.start_chat_turn("456", gateway_message.text, gateway_message)
+
+            agent.finish_workflow_reply(
+                "456",
+                "queued",
+                gateway_message,
+                delivered.append,
+                route="sdlc_job_queued",
+                trace_id=trace_turn.turn_id,
+            )
+            agent.finish_background_workflow_reply(
+                "456",
+                "finished",
+                gateway_message,
+                delivered.append,
+                route="sdlc_job_final",
+                trace_id=trace_turn.turn_id,
+            )
+
+        events = self.trace_logger.read_events(limit=20)
+        turn_ends = [event for event in events if event.get("type") == "turn_end"]
+        history = self.memory_store.chat_history("456", limit=10)
+
+        self.assertEqual(len(delivered), 2)
+        self.assertTrue(delivered[0].startswith("queued"))
+        self.assertTrue(delivered[1].startswith("finished"))
+        self.assertEqual(len(turn_ends), 1)
+        self.assertEqual([row["role"] for row in history], ["user", "assistant", "assistant"])
+        self.assertEqual([row["meta"]["route"] for row in history], ["incoming", "sdlc_job_queued", "sdlc_job_final"])
+
     def isolated_env(self, values: dict[str, str] | None = None) -> dict[str, str]:
         env = {
             "NIKO_STATE_DIR": str(self.state_path),

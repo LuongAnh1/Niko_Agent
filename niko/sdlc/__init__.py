@@ -17,6 +17,7 @@ from niko.sdlc.client import (
     detect_sdlc_request,
     sdlc_enabled,
 )
+from niko.sdlc.jobs import SdlcJob, SdlcJobRunner
 
 __all__ = [
     "ROUTE_SDLC_APPROVE",
@@ -28,6 +29,8 @@ __all__ = [
     "SdlcClient",
     "SdlcRequest",
     "SdlcResult",
+    "SdlcJob",
+    "SdlcJobRunner",
     "detect_sdlc_request",
     "sdlc_enabled",
 ]

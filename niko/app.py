@@ -9,6 +9,7 @@ Pipeline requirement/artifact/sync của SDLC vẫn thuộc repo SDLC_Harness.
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 
 from niko.graphs.chat_reply import ROUTE_BUSY_REPLY, ChatReplyGraph, two_agent_mode_enabled
 from niko.graphs.jira_issue import JiraIssueAnalysisWorkflow, jira_tools_enabled
@@ -24,15 +25,21 @@ from niko.sdlc.client import (
     ROUTE_SDLC_STATUS,
     ROUTE_SDLC_SYNC,
     SdlcClient,
+    SdlcRequest,
+    SdlcResult,
     detect_sdlc_request,
     sdlc_enabled,
 )
 from niko.sdlc.control import evaluate_sdlc_preflight, preflight_notice
 from niko.sdlc.formatting import format_sdlc_reply
+from niko.sdlc.jobs import SdlcJob, SdlcJobRunner
 
 
 ReplyCallback = Callable[[str], None]
 NotifyCallback = Callable[[], None]
+ROUTE_SDLC_JOB_QUEUED = "sdlc_job_queued"
+ROUTE_SDLC_JOB_DUPLICATE = "sdlc_job_duplicate"
+ROUTE_SDLC_JOB_FINAL = "sdlc_job_final"
 
 
 def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
@@ -49,6 +56,8 @@ class NikoApp:
         memory_store: MemoryStore | None = None,
         memory_runtime: MemoryRuntime | None = None,
         trace_logger: TraceLogger | None = None,
+        sdlc_client: SdlcClient | None = None,
+        sdlc_job_runner: SdlcJobRunner | None = None,
     ) -> None:
         if chat_graph is not None and any(dep is not None for dep in (memory_store, memory_runtime, trace_logger)):
             raise ValueError("Chi truyen chat_graph hoac cac dependency de tao graph, khong truyen ca hai.")
@@ -58,6 +67,20 @@ class NikoApp:
             memory_runtime=memory_runtime,
             trace_logger=trace_logger,
         )
+        self._sdlc_client = sdlc_client
+        self._sdlc_job_runner = sdlc_job_runner
+
+    @property
+    def sdlc_client(self) -> SdlcClient:
+        if self._sdlc_client is None:
+            self._sdlc_client = SdlcClient()
+        return self._sdlc_client
+
+    @property
+    def sdlc_job_runner(self) -> SdlcJobRunner:
+        if self._sdlc_job_runner is None:
+            self._sdlc_job_runner = SdlcJobRunner(trace_logger=self.chat_graph.trace_logger)
+        return self._sdlc_job_runner
 
     def handle_message(
         self,
@@ -156,6 +179,7 @@ class NikoApp:
             "handle_single_agent_message",
             "handle_busy_reply",
             "finish_workflow_reply",
+            "finish_background_workflow_reply",
         )
         return all(hasattr(self.chat_graph, name) for name in required)
 
@@ -214,13 +238,23 @@ class NikoApp:
             except Exception:
                 pass
 
-        client = SdlcClient()
+        client = self.sdlc_client
         preflight = None
         if request.action == ROUTE_SDLC_STATUS:
             result = client.get_status(run_id=request.run_id)
         elif request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}:
             status_result = client.get_status(run_id=request.run_id)
             preflight = evaluate_sdlc_preflight(request.action, status_result)
+            if request.action in {ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC} and preflight.allowed:
+                return self._queue_sdlc_action(
+                    conversation_id,
+                    request,
+                    gateway_message,
+                    deliver_reply,
+                    trace_id,
+                    status_result,
+                    preflight.reason,
+                )
             if preflight.execute_now:
                 result = client.approve_checkpoint(run_id=request.run_id)
             else:
@@ -297,8 +331,121 @@ class NikoApp:
                 "ok": result.ok,
                 "error_code": result.error_code,
                 "preflight_reason": preflight.reason if preflight else "",
+                "write_dispatched": write_dispatched,
             },
         )
+
+    def _queue_sdlc_action(
+        self,
+        conversation_id: str,
+        request: SdlcRequest,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        trace_id: str,
+        status_result: SdlcResult,
+        preflight_reason: str,
+    ) -> str:
+        action_label = "chạy tiếp Phase 4" if request.action == ROUTE_SDLC_CONTINUE else "đồng bộ lại"
+        job = SdlcJob(
+            run_id=request.run_id,
+            action=request.action,
+            conversation_id=conversation_id,
+            user_key=_user_key(gateway_message),
+            trace_id=trace_id,
+            started_at=time.time(),
+        )
+
+        def task() -> SdlcResult:
+            if request.action == ROUTE_SDLC_CONTINUE:
+                return self.sdlc_client.continue_run(run_id=request.run_id)
+            return self.sdlc_client.sync_run(run_id=request.run_id)
+
+        def on_reserved() -> None:
+            self._log_workflow_selected(
+                "sdlc_harness",
+                request.action,
+                conversation_id,
+                trace_id,
+                {
+                    "ok": status_result.ok,
+                    "run_id": request.run_id,
+                    "current_phase": status_result.current_phase,
+                    "status": status_result.status,
+                    "error_code": status_result.error_code,
+                    "preflight_reason": preflight_reason,
+                    "write_dispatched": True,
+                },
+            )
+            queued_reply = (
+                f"Dạ, em đã đưa yêu cầu {action_label} cho run `{request.run_id}` vào xử lý nền. "
+                "Em sẽ gửi kết quả khi SDLC Harness hoàn tất. Anh vẫn có thể hỏi trạng thái run trong lúc chờ."
+            )
+            self.chat_graph.finish_workflow_reply(
+                conversation_id,
+                queued_reply,
+                gateway_message,
+                deliver_reply,
+                route=ROUTE_SDLC_JOB_QUEUED,
+                trace_id=trace_id,
+                meta={
+                    "action": request.action,
+                    "run_id": request.run_id,
+                    "preflight_reason": preflight_reason,
+                    "write_dispatched": True,
+                },
+            )
+
+        def on_complete(result: SdlcResult) -> None:
+            self.chat_graph.finish_background_workflow_reply(
+                conversation_id,
+                format_sdlc_reply(result),
+                gateway_message,
+                deliver_reply,
+                route=ROUTE_SDLC_JOB_FINAL,
+                trace_id=trace_id,
+                meta={
+                    "action": request.action,
+                    "run_id": result.run_id or request.run_id,
+                    "ok": result.ok,
+                    "status": result.status,
+                    "error_code": result.error_code,
+                },
+            )
+
+        started = self.sdlc_job_runner.submit(job, task, on_reserved, on_complete)
+        if started:
+            return request.action
+
+        self._log_workflow_selected(
+            "sdlc_harness",
+            request.action,
+            conversation_id,
+            trace_id,
+            {
+                "run_id": request.run_id,
+                "preflight_reason": "duplicate_background_job",
+                "write_dispatched": False,
+            },
+        )
+        duplicate_reply = (
+            f"Run `{request.run_id}` đang có tác vụ SDLC chạy nền nên em không tạo tiến trình thứ hai. "
+            "Anh có thể hỏi trạng thái run để xem tiến độ hiện tại."
+        )
+        self.chat_graph.finish_workflow_reply(
+            conversation_id,
+            duplicate_reply,
+            gateway_message,
+            deliver_reply,
+            route=ROUTE_SDLC_JOB_DUPLICATE,
+            trace_id=trace_id,
+            meta={
+                "action": request.action,
+                "run_id": request.run_id,
+                "preflight_reason": "duplicate_background_job",
+                "write_dispatched": False,
+            },
+        )
+        return request.action
 
     def _handle_jira_issue_prompt(
         self,
@@ -414,6 +561,8 @@ def create_niko_app(
     memory_store: MemoryStore | None = None,
     memory_runtime: MemoryRuntime | None = None,
     trace_logger: TraceLogger | None = None,
+    sdlc_client: SdlcClient | None = None,
+    sdlc_job_runner: SdlcJobRunner | None = None,
 ) -> NikoApp:
     """Tạo app mặc định; tham số test-only giúp giữ đường inject graph hiện có."""
     return NikoApp(
@@ -421,4 +570,6 @@ def create_niko_app(
         memory_store=memory_store,
         memory_runtime=memory_runtime,
         trace_logger=trace_logger,
+        sdlc_client=sdlc_client,
+        sdlc_job_runner=sdlc_job_runner,
     )
