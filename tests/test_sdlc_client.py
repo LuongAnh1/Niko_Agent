@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -114,7 +115,11 @@ class SdlcClientTests(unittest.TestCase):
         self.assertEqual(command[-2:], ["--sync-mode", "real"])
 
     def test_get_status_parses_cli_json(self):
-        payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "done"}'
+        payload = (
+            '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "done", '
+            '"workspace": {"branch": "sdlc/sdlc-1-run_abcd1234", '
+            '"pr_url": "https://github.com/example/target/pull/1"}}'
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
@@ -128,7 +133,29 @@ class SdlcClientTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(result.status, "done")
+        self.assertEqual(result.workspace["branch"], "sdlc/sdlc-1-run_abcd1234")
+        self.assertEqual(result.workspace["pr_url"], "https://github.com/example/target/pull/1")
         self.assertIn("get-status", run.call_args.args[0])
+
+    def test_workspace_defaults_to_empty_dict_for_missing_or_invalid_values(self):
+        payloads = [
+            '{"ok": true, "status": "done"}',
+            '{"ok": true, "status": "done", "workspace": "invalid"}',
+            '{"ok": true, "status": "done", "workspace": []}',
+        ]
+
+        for payload in payloads:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+                os.environ,
+                {"SDLC_HARNESS_WORKDIR": temp_dir, "SDLC_HARNESS_PYTHON_COMMAND": "python"},
+                clear=False,
+            ), patch(
+                "niko.sdlc.client.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+            ):
+                result = SdlcClient().get_status(run_id="run_20261012_120000_abcd1234")
+
+            self.assertEqual(result.workspace, {})
 
     def test_approve_checkpoint_parses_cli_json(self):
         payload = (
@@ -246,7 +273,68 @@ class SdlcClientTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(result.error_code, "sdlc_cli_failed")
-        self.assertIn("missing run", result.message)
+        self.assertIn("exit code 2", result.message)
+        self.assertNotIn("missing run", result.message)
+
+    def test_keeps_business_error_json_from_nonzero_exit(self):
+        run_id = "run_20261012_120000_abcd1234"
+        error_codes = [
+            "checkpoint_not_current",
+            "github_pr_identity_mismatch",
+            "github_pr_not_open",
+            "github_pr_ready_failed",
+            "run_workspace_locked",
+        ]
+
+        for error_code in error_codes:
+            with self.subTest(error_code=error_code):
+                payload = json.dumps(
+                    {
+                        "ok": False,
+                        "run_id": run_id,
+                        "error_code": error_code,
+                        "message": f"Business error: {error_code}",
+                    }
+                )
+                with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+                    os.environ,
+                    {"SDLC_HARNESS_WORKDIR": temp_dir, "SDLC_HARNESS_PYTHON_COMMAND": "python"},
+                    clear=False,
+                ), patch(
+                    "niko.sdlc.client.subprocess.run",
+                    return_value=SimpleNamespace(
+                        returncode=1,
+                        stdout=payload,
+                        stderr="raw stderr must stay private",
+                    ),
+                ):
+                    result = SdlcClient().approve_checkpoint(run_id=run_id)
+
+                self.assertFalse(result.ok)
+                self.assertEqual(result.run_id, run_id)
+                self.assertEqual(result.error_code, error_code)
+                self.assertEqual(result.message, f"Business error: {error_code}")
+                self.assertNotIn("raw stderr", result.message)
+
+    def test_nonzero_exit_with_non_error_json_falls_back_safely(self):
+        payload = '{"ok": true, "message": "unexpected success payload"}'
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"SDLC_HARNESS_WORKDIR": temp_dir, "SDLC_HARNESS_PYTHON_COMMAND": "python"},
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=1, stdout=payload, stderr="private diagnostic"),
+        ), patch("niko.sdlc.client.default_runtime_logger") as runtime_logger:
+            result = SdlcClient().get_status(run_id="run_20261012_120000_abcd1234")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "sdlc_cli_failed")
+        self.assertNotIn("private diagnostic", result.message)
+        logged_error_data = runtime_logger.return_value.event.call_args_list[-1].kwargs["data"]
+        self.assertNotIn("private diagnostic", str(logged_error_data))
+        self.assertNotIn("unexpected success payload", str(logged_error_data))
 
     def test_normalizes_run_not_found_payload(self):
         payload = (

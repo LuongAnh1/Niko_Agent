@@ -82,6 +82,7 @@ class SdlcResult:
     quality_reports: dict[str, Any] = field(default_factory=dict)
     last_sync: dict[str, Any] = field(default_factory=dict)
     last_error: dict[str, Any] = field(default_factory=dict)
+    workspace: dict[str, Any] = field(default_factory=dict)
     error_code: str = ""
     message: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -214,17 +215,38 @@ class SdlcClient:
         except OSError as exc:
             return _error_payload("sdlc_process_error", f"Khong chay duoc SDLC_Harness: {exc}", str(exc))
 
-        if completed.returncode != 0:
-            message = completed.stderr.strip() or completed.stdout.strip() or "SDLC_Harness tra loi loi khong ro."
-            return _error_payload("sdlc_cli_failed", message, completed.stderr)
-
         try:
             payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            return _error_payload("sdlc_invalid_json", "SDLC_Harness khong tra JSON hop le.", completed.stdout)
+        except json.JSONDecodeError:
+            if completed.returncode != 0:
+                return _error_payload(
+                    "sdlc_cli_failed",
+                    f"SDLC_Harness command failed with exit code {completed.returncode}.",
+                    _process_output_summary(completed),
+                )
+            return _error_payload(
+                "sdlc_invalid_json",
+                "SDLC_Harness khong tra JSON hop le.",
+                _process_output_summary(completed),
+            )
 
         if not isinstance(payload, dict):
-            return _error_payload("sdlc_invalid_json", "SDLC_Harness JSON khong phai object.", completed.stdout)
+            error_code = "sdlc_cli_failed" if completed.returncode != 0 else "sdlc_invalid_json"
+            message = (
+                f"SDLC_Harness command failed with exit code {completed.returncode}."
+                if completed.returncode != 0
+                else "SDLC_Harness JSON khong phai object."
+            )
+            return _error_payload(error_code, message, _process_output_summary(completed))
+
+        if completed.returncode != 0:
+            if payload.get("ok") is False and str(payload.get("error_code") or "").strip():
+                return payload
+            return _error_payload(
+                "sdlc_cli_failed",
+                f"SDLC_Harness command failed with exit code {completed.returncode}.",
+                _process_output_summary(completed),
+            )
         return payload
 
 
@@ -243,6 +265,7 @@ def _result_from_payload(payload: dict[str, Any], action: str) -> SdlcResult:
         quality_reports=_dict_value(payload.get("quality_reports")),
         last_sync=_dict_value(payload.get("last_sync")),
         last_error=_dict_value(payload.get("last_error")),
+        workspace=_dict_value(payload.get("workspace")),
         error_code=str(payload.get("error_code") or ""),
         message=str(payload.get("message") or ""),
         raw=payload,
@@ -294,6 +317,16 @@ def _dict_value(value: Any) -> dict[str, Any]:
 
 def _safe_command_for_log(command: list[str]) -> list[str]:
     return [str(part) for part in command[:6]]
+
+
+def _process_output_summary(completed: subprocess.CompletedProcess[str]) -> str:
+    """Giữ metadata chẩn đoán mà không đưa raw stdout/stderr vào log hoặc reply."""
+
+    return (
+        f"exit_code={completed.returncode}; "
+        f"stdout_chars={len(completed.stdout or '')}; "
+        f"stderr_chars={len(completed.stderr or '')}"
+    )
 
 
 def _error_payload(error_code: str, message: str, detail: str = "") -> dict[str, Any]:
