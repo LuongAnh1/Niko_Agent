@@ -422,7 +422,20 @@ Current Telegram SDLC actions are `start`, `get_status`, and
 `cancel_run`, `resume_run`, or dynamic context invalidation until the matching
 SDLC_Harness phase exists and its JSON contract is extended. Niko should still
 surface SDLC `blocked`/sync-partial states clearly by reading `last_error` and
-`last_sync`; this is status reporting, not artifact mutation. Phase 4 code/PR is
-not open in Niko until SDLC_Harness exposes a matching checked contract.
+`last_sync`; this is status reporting, not artifact mutation. SDLC_Harness now
+has a checked `code_review_ready` contract, but Phase 4 continue/sync/approval is
+not open in Telegram until Niko has matching intent and formatter coverage.
+Before that action is exposed, SDLC_Harness must finish its documented
+worktree-per-run isolation so each run resumes the correct branch. Niko never
+checks out target-repo branches, manages worktrees, merges PRs, or enables
+auto-merge. Future Code Review approval may only request Draft -> Ready for
+review; the project owner always performs merge on GitHub.
+
+SDLC CLI commands that can write collaboration tools must receive an explicit
+`--sync-mode`. Niko owns the local switch `NIKO_SDLC_SYNC_MODE`, whose safe
+default is `mock`; use `real` only for an intentional Jira/Confluence live run.
+The client may contain `continue_run`/`sync_run` methods before Telegram exposes
+those intents. Do not advertise a Phase 4 action in chat until its formatter and
+intent contract are implemented and tested.
 <!-- NIKO_SDLC_SYNC_END -->
 

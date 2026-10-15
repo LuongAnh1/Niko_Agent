@@ -378,6 +378,14 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Chọn LLM mode khi Niko gọi SDLC_Harness. `fake` dùng cho test nhanh/offline; `deepseek` gọi API thật để sinh artifact live.",
             },
             {
+                "name": "NIKO_SDLC_SYNC_MODE",
+                "label": "SDLC tool sync mode",
+                "type": "select",
+                "default": "mock",
+                "choices": ["mock", "real", "both"],
+                "help": "`mock` chỉ ghi artifact local và là mặc định an toàn; chọn `real` khi muốn Niko cho phép SDLC_Harness cập nhật Jira/Confluence thật. `both` giữ cả mock report lẫn real sync.",
+            },
+            {
                 "name": "NIKO_JIRA_TOOLS_ENABLED",
                 "label": "Legacy Jira fixture tools",
                 "type": "bool",

@@ -7,9 +7,11 @@ from unittest.mock import patch
 
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
     SdlcClient,
     detect_sdlc_request,
 )
@@ -61,6 +63,7 @@ class SdlcClientTests(unittest.TestCase):
                 "SDLC_HARNESS_WORKDIR": temp_dir,
                 "SDLC_HARNESS_PYTHON_COMMAND": "python",
                 "SDLC_HARNESS_LLM_MODE": "fake",
+                "NIKO_SDLC_SYNC_MODE": "real",
             },
             clear=False,
         ), patch(
@@ -77,6 +80,7 @@ class SdlcClientTests(unittest.TestCase):
         self.assertIn("start-or-get-run", command)
         self.assertIn("--llm-mode", command)
         self.assertIn("fake", command)
+        self.assertEqual(command[-2:], ["--sync-mode", "real"])
 
     def test_start_from_jira_parses_cli_json(self):
         payload = (
@@ -91,6 +95,7 @@ class SdlcClientTests(unittest.TestCase):
                 "SDLC_HARNESS_WORKDIR": temp_dir,
                 "SDLC_HARNESS_PYTHON_COMMAND": "python",
                 "SDLC_HARNESS_LLM_MODE": "deepseek",
+                "NIKO_SDLC_SYNC_MODE": "real",
             },
             clear=False,
         ), patch(
@@ -106,6 +111,7 @@ class SdlcClientTests(unittest.TestCase):
         self.assertIn("SDLC-1", command)
         self.assertIn("--llm-mode", command)
         self.assertIn("deepseek", command)
+        self.assertEqual(command[-2:], ["--sync-mode", "real"])
 
     def test_get_status_parses_cli_json(self):
         payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "done"}'
@@ -137,6 +143,7 @@ class SdlcClientTests(unittest.TestCase):
                 "SDLC_HARNESS_WORKDIR": temp_dir,
                 "SDLC_HARNESS_PYTHON_COMMAND": "python",
                 "SDLC_HARNESS_LLM_MODE": "deepseek",
+                "NIKO_SDLC_SYNC_MODE": "real",
             },
             clear=False,
         ), patch(
@@ -155,6 +162,51 @@ class SdlcClientTests(unittest.TestCase):
         self.assertIn("run_20261012_120000_abcd1234", command)
         self.assertIn("--llm-mode", command)
         self.assertIn("deepseek", command)
+        self.assertEqual(command[-2:], ["--sync-mode", "real"])
+
+    def test_continue_and_sync_run_pass_explicit_sync_mode(self):
+        payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "code_review_ready"}'
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "SDLC_HARNESS_LLM_MODE": "fake",
+                "NIKO_SDLC_SYNC_MODE": "both",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            continued = SdlcClient().continue_run(run_id="run_20261012_120000_abcd1234")
+            synced = SdlcClient().sync_run(run_id="run_20261012_120000_abcd1234")
+
+        self.assertEqual(continued.action, ROUTE_SDLC_CONTINUE)
+        self.assertEqual(synced.action, ROUTE_SDLC_SYNC)
+        continue_command = run.call_args_list[0].args[0]
+        sync_command = run.call_args_list[1].args[0]
+        self.assertEqual(continue_command[-2:], ["--sync-mode", "both"])
+        self.assertEqual(sync_command[-2:], ["--sync-mode", "both"])
+
+    def test_invalid_sync_mode_falls_back_to_mock(self):
+        payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234"}'
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "NIKO_SDLC_SYNC_MODE": "unsafe",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            SdlcClient().sync_run(run_id="run_20261012_120000_abcd1234")
+
+        self.assertEqual(run.call_args.args[0][-2:], ["--sync-mode", "mock"])
 
     def test_returns_config_error_when_workdir_is_missing(self):
         with patch.dict(

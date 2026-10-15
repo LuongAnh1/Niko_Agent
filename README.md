@@ -300,9 +300,18 @@ Ranh giới hiện tại:
 - Phase 2/3 checkpoint hiện đã được Niko đọc/format ở mức status và approve
   theo `run_id`: Niko hiển thị design artifact/implementation plan, Validator
   summary, repair iterations, link Jira/Confluence, trạng thái sync partial/full
-  failure và lý do `blocked` từ `last_error`. Niko chưa hỗ trợ `request_change`,
-  context động, hoặc tự sửa artifact SDLC từ Telegram; Phase 4 tạo code/PR chưa
-  mở trong Niko.
+  failure và lý do `blocked` từ `last_error`. SDLC_Harness đã có checkpoint
+  `code_review_ready`, nhưng Niko Telegram chưa expose continue/sync/approve cho
+  Phase 4 cho tới khi có intent + formatter tương ứng.
+- Dashboard có `NIKO_SDLC_SYNC_MODE`. Mặc định `mock` để test không ghi tool thật;
+  chọn `real` chỉ khi chủ động muốn SDLC_Harness cập nhật Jira/Confluence. Niko
+  truyền mode này thành `--sync-mode` thay vì dựa ngầm vào `.env` bên SDLC.
+- Niko chưa hỗ trợ `request_change`, context động, hoặc tự sửa artifact SDLC từ
+  Telegram.
+- Trước khi mở Phase 4 approval/Phase 5 qua Telegram, SDLC_Harness phải hoàn tất
+  worktree-per-run để resume đúng branch. Niko không checkout branch, quản lý
+  worktree hoặc merge PR; approve sau này chỉ được chuyển Draft PR thành Ready
+  for review, còn merge luôn do human thực hiện trên GitHub.
 
 <!-- NIKO_SDLC_SYNC_END -->
 

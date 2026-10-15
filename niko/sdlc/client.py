@@ -3,6 +3,9 @@
 Niko giữ vai trò hội thoại và điều phối trạng thái trước người dùng. Mọi việc
 load source, tạo artifact, checkpoint và sync tool của workflow SDLC nằm ở repo
 SDLC_Harness; file này chỉ gọi CLI và chuẩn hóa JSON trả về.
+
+Các lệnh có thể ghi Jira/Confluence luôn truyền `--sync-mode` từ
+`NIKO_SDLC_SYNC_MODE`; mặc định `mock` để test Niko không vô tình ghi tool thật.
 """
 
 from __future__ import annotations
@@ -24,10 +27,13 @@ DEFAULT_SDLC_HARNESS_WORKDIR = "../SDLC_Harness"
 DEFAULT_SDLC_HARNESS_PYTHON_COMMAND = "python"
 DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS = 120
 DEFAULT_SDLC_HARNESS_LLM_MODE = "fake"
+DEFAULT_SDLC_HARNESS_SYNC_MODE = "mock"
 ROUTE_SDLC_START = "sdlc_start_or_get_run"
 ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
+ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
+ROUTE_SDLC_SYNC = "sdlc_sync_run"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
 UC1_PATTERN = re.compile(r"\b(?:uc\s*1|uc1)\b", re.IGNORECASE)
@@ -123,6 +129,7 @@ class SdlcClient:
             requested_by,
         ]
         _append_llm_mode(args)
+        _append_sync_mode(args)
         payload = self._run_json(
             args,
             event=ROUTE_SDLC_START,
@@ -138,6 +145,7 @@ class SdlcClient:
             requested_by,
         ]
         _append_llm_mode(args)
+        _append_sync_mode(args)
         payload = self._run_json(
             args,
             event=ROUTE_SDLC_START_JIRA,
@@ -151,8 +159,26 @@ class SdlcClient:
     def approve_checkpoint(self, *, run_id: str) -> SdlcResult:
         args = ["approve-checkpoint", "--run-id", run_id]
         _append_llm_mode(args)
+        _append_sync_mode(args)
         payload = self._run_json(args, event=ROUTE_SDLC_APPROVE)
         return _result_from_payload(payload, ROUTE_SDLC_APPROVE)
+
+    def continue_run(self, *, run_id: str) -> SdlcResult:
+        """Chạy bước kế tiếp; Phase 4 có thể sync checkpoint theo mode cấu hình."""
+
+        args = ["continue-run", "--run-id", run_id]
+        _append_llm_mode(args)
+        _append_sync_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_CONTINUE)
+        return _result_from_payload(payload, ROUTE_SDLC_CONTINUE)
+
+    def sync_run(self, *, run_id: str) -> SdlcResult:
+        """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""
+
+        args = ["sync-run", "--run-id", run_id]
+        _append_sync_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_SYNC)
+        return _result_from_payload(payload, ROUTE_SDLC_SYNC)
 
     def _run_json(self, args: list[str], *, event: str) -> dict[str, Any]:
         try:
@@ -251,6 +277,15 @@ def _append_llm_mode(args: list[str]) -> None:
     raw_mode = env_value("SDLC_HARNESS_LLM_MODE", DEFAULT_SDLC_HARNESS_LLM_MODE).strip()
     if raw_mode:
         args.extend(["--llm-mode", raw_mode])
+
+
+def _append_sync_mode(args: list[str]) -> None:
+    """Niko truyền rõ sync mode; không để `.env` SDLC vô tình ghi tool thật."""
+
+    raw_mode = env_value("NIKO_SDLC_SYNC_MODE", DEFAULT_SDLC_HARNESS_SYNC_MODE).strip().lower()
+    if raw_mode not in {"mock", "real", "both"}:
+        raw_mode = DEFAULT_SDLC_HARNESS_SYNC_MODE
+    args.extend(["--sync-mode", raw_mode])
 
 
 def _dict_value(value: Any) -> dict[str, Any]:
