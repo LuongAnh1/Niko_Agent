@@ -304,6 +304,10 @@ Ranh giới hiện tại:
   approval qua Telegram. Các write action chạy nền theo `run_id`; approval chỉ
   mở khi `NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1` và chỉ chuyển đúng Draft PR
   sang Ready for review.
+- Controlled live smoke ngày 2026-10-15 đã đưa run
+  `run_20261013_160421_f661babf` tới `code_review_approved`: GitHub PR #1 ở trạng
+  thái Ready/Open và chưa merge; Jira comment `10104` cùng Confluence page
+  `2129921` đã nhận kết quả sync sau approval.
 - Dashboard có `NIKO_SDLC_SYNC_MODE`. Mặc định `mock` để test không ghi tool thật;
   chọn `real` chỉ khi chủ động muốn SDLC_Harness cập nhật Jira/Confluence. Niko
   truyền mode này thành `--sync-mode` thay vì dựa ngầm vào `.env` bên SDLC.
