@@ -349,6 +349,13 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "help": "Bật route eTour UC1/status sang repo SDLC_Harness. Niko chỉ gọi workflow bên đó và nhận trạng thái, không tự kéo use case từ Jira/tool.",
             },
             {
+                "name": "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED",
+                "label": "Enable Code Review approval",
+                "type": "bool",
+                "default": "0",
+                "help": "Cho phép Telegram yêu cầu SDLC_Harness chuyển đúng Draft PR của run sang Ready for review. Không merge PR. `NIKO_SDLC_SYNC_MODE=mock` không mô phỏng hoặc chặn thao tác GitHub này.",
+            },
+            {
                 "name": "SDLC_HARNESS_WORKDIR",
                 "label": "SDLC Harness workdir",
                 "type": "text",
@@ -383,7 +390,7 @@ CONFIG_SECTIONS: list[dict[str, Any]] = [
                 "type": "select",
                 "default": "mock",
                 "choices": ["mock", "real", "both"],
-                "help": "`mock` chỉ ghi artifact local và là mặc định an toàn; chọn `real` khi muốn Niko cho phép SDLC_Harness cập nhật Jira/Confluence thật. `both` giữ cả mock report lẫn real sync.",
+                "help": "Chỉ điều khiển sync Jira/Confluence: `mock` ghi artifact local, `real` cập nhật tool thật, `both` giữ cả hai. Giá trị này không phải dry-run gate cho GitHub Code Review approval.",
             },
             {
                 "name": "NIKO_JIRA_TOOLS_ENABLED",

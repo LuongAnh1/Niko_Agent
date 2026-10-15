@@ -30,7 +30,7 @@ from niko.sdlc.client import (
     detect_sdlc_request,
     sdlc_enabled,
 )
-from niko.sdlc.control import evaluate_sdlc_preflight, preflight_notice
+from niko.sdlc.control import code_review_approval_enabled, evaluate_sdlc_preflight, preflight_notice
 from niko.sdlc.formatting import format_sdlc_reply
 from niko.sdlc.jobs import SdlcJob, SdlcJobRunner
 
@@ -244,8 +244,16 @@ class NikoApp:
             result = client.get_status(run_id=request.run_id)
         elif request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}:
             status_result = client.get_status(run_id=request.run_id)
-            preflight = evaluate_sdlc_preflight(request.action, status_result)
-            if request.action in {ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC} and preflight.allowed:
+            preflight = evaluate_sdlc_preflight(
+                request.action,
+                status_result,
+                allow_code_review_approval=code_review_approval_enabled(),
+            )
+            if (
+                request.action in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_SYNC}
+                and preflight.allowed
+                and not preflight.execute_now
+            ):
                 return self._queue_sdlc_action(
                     conversation_id,
                     request,
@@ -345,7 +353,11 @@ class NikoApp:
         status_result: SdlcResult,
         preflight_reason: str,
     ) -> str:
-        action_label = "chạy tiếp Phase 4" if request.action == ROUTE_SDLC_CONTINUE else "đồng bộ lại"
+        action_label = {
+            ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
+            ROUTE_SDLC_SYNC: "đồng bộ lại",
+            ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
+        }[request.action]
         job = SdlcJob(
             run_id=request.run_id,
             action=request.action,
@@ -358,7 +370,9 @@ class NikoApp:
         def task() -> SdlcResult:
             if request.action == ROUTE_SDLC_CONTINUE:
                 return self.sdlc_client.continue_run(run_id=request.run_id)
-            return self.sdlc_client.sync_run(run_id=request.run_id)
+            if request.action == ROUTE_SDLC_SYNC:
+                return self.sdlc_client.sync_run(run_id=request.run_id)
+            return self.sdlc_client.approve_checkpoint(run_id=request.run_id)
 
         def on_reserved() -> None:
             self._log_workflow_selected(
@@ -380,6 +394,8 @@ class NikoApp:
                 f"Dạ, em đã đưa yêu cầu {action_label} cho run `{request.run_id}` vào xử lý nền. "
                 "Em sẽ gửi kết quả khi SDLC Harness hoàn tất. Anh vẫn có thể hỏi trạng thái run trong lúc chờ."
             )
+            if request.action == ROUTE_SDLC_APPROVE:
+                queued_reply += " Thao tác này không merge PR; anh vẫn review và merge trực tiếp trên GitHub."
             self.chat_graph.finish_workflow_reply(
                 conversation_id,
                 queued_reply,

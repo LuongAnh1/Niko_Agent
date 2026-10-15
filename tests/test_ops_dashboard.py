@@ -135,14 +135,22 @@ class OpsDashboardTests(unittest.TestCase):
 
                     updated = self._json_post(
                         f"{base_url}/api/config",
-                        {"values": {"NIKO_DECISION_MODEL_ENABLED": False, "NIKO_MEMORY_TOP_K": 6}},
+                        {
+                            "values": {
+                                "NIKO_DECISION_MODEL_ENABLED": False,
+                                "NIKO_MEMORY_TOP_K": 6,
+                                "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": True,
+                            }
+                        },
                     )["config"]
                     self.assertEqual(updated["overrides"]["NIKO_DECISION_MODEL_ENABLED"], "0")
                     self.assertEqual(updated["overrides"]["NIKO_MEMORY_TOP_K"], "6")
+                    self.assertEqual(updated["overrides"]["NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED"], "1")
 
                     reset = self._json_post(f"{base_url}/api/config/reset", {"section": "decision"})["config"]
                     self.assertNotIn("NIKO_DECISION_MODEL_ENABLED", reset["overrides"])
                     self.assertEqual(reset["overrides"]["NIKO_MEMORY_TOP_K"], "6")
+                    self.assertEqual(reset["overrides"]["NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED"], "1")
                 finally:
                     server.shutdown()
                     server.server_close()
@@ -211,6 +219,21 @@ class OpsDashboardTests(unittest.TestCase):
                     )
                     self.assertEqual(sdlc_enabled["default"], "0")
                     self.assertIn("SDLC_Harness", sdlc_enabled["help"])
+                    code_review_approval = next(
+                        field
+                        for field in business["fields"]
+                        if field["name"] == "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED"
+                    )
+                    self.assertEqual(code_review_approval["type"], "bool")
+                    self.assertEqual(code_review_approval["default"], "0")
+                    self.assertIn("Ready for review", code_review_approval["help"])
+                    self.assertIn("Không merge PR", code_review_approval["help"])
+                    self.assertNotIn("secret", code_review_approval)
+                    sync_mode = next(
+                        field for field in business["fields"] if field["name"] == "NIKO_SDLC_SYNC_MODE"
+                    )
+                    self.assertIn("Jira/Confluence", sync_mode["help"])
+                    self.assertIn("GitHub", sync_mode["help"])
                     jira_enabled = next(
                         field for field in business["fields"] if field["name"] == "NIKO_JIRA_TOOLS_ENABLED"
                     )

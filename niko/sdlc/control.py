@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from niko.config import env_flag
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -57,6 +58,12 @@ PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED = "code_review_approval_disabled"
 PREFLIGHT_EXECUTE_APPROVAL = "execute_phase1_3_approval"
 
 
+def code_review_approval_enabled() -> bool:
+    """Feature gate riêng cho thao tác GitHub Draft -> Ready từ Telegram."""
+
+    return env_flag("NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED", "0")
+
+
 @dataclass(frozen=True)
 class SdlcPreflight:
     """Kết quả policy thuần, không tự gọi write action của SDLC_Harness."""
@@ -68,7 +75,12 @@ class SdlcPreflight:
     reason: str
 
 
-def evaluate_sdlc_preflight(action: str, status_result: SdlcResult) -> SdlcPreflight:
+def evaluate_sdlc_preflight(
+    action: str,
+    status_result: SdlcResult,
+    *,
+    allow_code_review_approval: bool = False,
+) -> SdlcPreflight:
     """Đánh giá action dựa hoàn toàn trên status contract của SDLC_Harness."""
 
     if not status_result.ok:
@@ -95,10 +107,12 @@ def evaluate_sdlc_preflight(action: str, status_result: SdlcResult) -> SdlcPrefl
         checkpoint_type = str(checkpoint.get("type") or "").strip()
         if status == "code_review_ready":
             if checkpoint_type == "code_review":
+                if allow_code_review_approval:
+                    return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
                 return SdlcPreflight(
                     action,
                     status_result,
-                    True,
+                    False,
                     False,
                     PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED,
                 )
@@ -116,7 +130,11 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
     run_id = preflight.status_result.run_id
     run_label = f" `{run_id}`" if run_id else " này"
     if preflight.reason == PREFLIGHT_BACKGROUND_PENDING:
-        action_label = "chạy tiếp Phase 4" if preflight.action == ROUTE_SDLC_CONTINUE else "đồng bộ lại"
+        action_label = {
+            ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
+            ROUTE_SDLC_SYNC: "đồng bộ lại",
+            ROUTE_SDLC_APPROVE: "duyệt Code Review",
+        }.get(preflight.action, "thực hiện")
         return (
             f"Dạ em đã kiểm tra run{run_label}. Lệnh {action_label} hiện chưa được bật trong Telegram, "
             "nên em chưa thay đổi run."

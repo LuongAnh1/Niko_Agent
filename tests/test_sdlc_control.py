@@ -1,5 +1,10 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+from niko.config import RUNTIME_CONFIG_ENV, update_runtime_config
 from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -15,6 +20,7 @@ from niko.sdlc.control import (
     PREFLIGHT_EXECUTE_APPROVAL,
     PREFLIGHT_PHASE4_REQUIRED,
     PREFLIGHT_STATUS_ERROR,
+    code_review_approval_enabled,
     evaluate_sdlc_preflight,
     preflight_notice,
 )
@@ -64,7 +70,7 @@ class SdlcPreflightTests(unittest.TestCase):
         self.assertEqual(accepted.reason, PREFLIGHT_BACKGROUND_PENDING)
         self.assertEqual(wrong_phase.reason, PREFLIGHT_CODE_REVIEW_REQUIRED)
 
-    def test_phase1_to_3_approval_executes_but_code_review_approval_stays_disabled(self):
+    def test_phase1_to_3_approval_executes_but_code_review_gate_defaults_off(self):
         design = evaluate_sdlc_preflight(
             ROUTE_SDLC_APPROVE,
             _status(
@@ -84,9 +90,25 @@ class SdlcPreflightTests(unittest.TestCase):
 
         self.assertTrue(design.execute_now)
         self.assertEqual(design.reason, PREFLIGHT_EXECUTE_APPROVAL)
+        self.assertFalse(code_review.allowed)
         self.assertFalse(code_review.execute_now)
         self.assertEqual(code_review.reason, PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED)
         self.assertIn("chưa duyệt Code Review", preflight_notice(code_review))
+
+    def test_code_review_approval_is_background_when_gate_is_enabled(self):
+        preflight = evaluate_sdlc_preflight(
+            ROUTE_SDLC_APPROVE,
+            _status(
+                status="code_review_ready",
+                pending_checkpoint={"type": "code_review"},
+                allowed_next_actions=["approve_checkpoint", "get_status"],
+            ),
+            allow_code_review_approval=True,
+        )
+
+        self.assertTrue(preflight.allowed)
+        self.assertFalse(preflight.execute_now)
+        self.assertEqual(preflight.reason, PREFLIGHT_BACKGROUND_PENDING)
 
     def test_code_review_approval_requires_matching_checkpoint(self):
         preflight = evaluate_sdlc_preflight(
@@ -96,10 +118,27 @@ class SdlcPreflightTests(unittest.TestCase):
                 pending_checkpoint={"type": "design_approval"},
                 allowed_next_actions=["approve_checkpoint"],
             ),
+            allow_code_review_approval=True,
         )
 
+        self.assertFalse(preflight.allowed)
         self.assertFalse(preflight.execute_now)
         self.assertEqual(preflight.reason, PREFLIGHT_ACTION_NOT_ALLOWED)
+
+    def test_code_review_approval_gate_reads_runtime_config_flag(self):
+        with patch.dict("os.environ", {"NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "0"}, clear=False):
+            self.assertFalse(code_review_approval_enabled())
+        with patch.dict("os.environ", {"NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "1"}, clear=False):
+            self.assertTrue(code_review_approval_enabled())
+
+    def test_code_review_approval_gate_reads_dashboard_runtime_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            with patch.dict(os.environ, {RUNTIME_CONFIG_ENV: str(config_path)}, clear=False):
+                os.environ.pop("NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED", None)
+                update_runtime_config({"NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": True})
+
+                self.assertTrue(code_review_approval_enabled())
 
     def test_status_error_stops_preflight(self):
         preflight = evaluate_sdlc_preflight(
