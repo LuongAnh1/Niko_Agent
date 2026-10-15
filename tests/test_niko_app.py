@@ -4,12 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from niko.app import NikoApp, _format_sdlc_reply, create_niko_app
+from niko.app import NikoApp, create_niko_app
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import ROUTE_SDLC_APPROVE, ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.formatting import format_sdlc_reply
 
 
 class FakeChatGraph:
@@ -331,7 +332,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("Jira issue `SDLC-1`", reply)
         self.assertIn("đang chờ anh duyệt requirement", reply)
@@ -369,7 +370,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("đang chờ anh review design checkpoint", reply)
         self.assertIn("design_artifact_v2", reply)
@@ -414,7 +415,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("implementation plan", reply)
         self.assertIn("implementation_plan_v3", reply)
@@ -501,7 +502,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("đang bị chặn", reply)
         self.assertIn("Đồng bộ một phần:", reply)
