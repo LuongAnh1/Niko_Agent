@@ -277,9 +277,8 @@ legacy for the SDLC direction: new use-case loading and workflow state should
 live in SDLC_Harness, while Niko calls SDLC_Harness and reports
 status/checkpoints back to the user.
 
-See `docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and
-`docs/plans/2026-10-12-niko-sdlc-upgrade-checklist.md` for the local upgrade
-plan.
+See `docs/plans/sdlc/README.md` for the dated local plan index. The current
+Phase 4 plan is `docs/plans/sdlc/2026-10-15/phase4-integration-plan.md`.
 <!-- NIKO_SDLC_SYNC_START -->
 ## SDLC Harness Integration Snapshot
 
@@ -297,21 +296,22 @@ Ranh giới hiện tại:
   Jira/Confluence.
 - Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
   test hoặc khi chưa cấu hình Atlassian.
-- Phase 2/3 checkpoint hiện đã được Niko đọc/format ở mức status và approve
-  theo `run_id`: Niko hiển thị design artifact/implementation plan, Validator
-  summary, repair iterations, link Jira/Confluence, trạng thái sync partial/full
-  failure và lý do `blocked` từ `last_error`. SDLC_Harness đã có checkpoint
-  `code_review_ready`, nhưng Niko Telegram chưa expose continue/sync/approve cho
-  Phase 4 cho tới khi có intent + formatter tương ứng.
+- Phase 2/3 checkpoint được Niko đọc/format và approve theo `run_id`: Niko hiển
+  thị design artifact/implementation plan, Validator summary, repair iterations,
+  link Jira/Confluence, trạng thái sync partial/full failure và lý do `blocked`
+  từ `last_error`.
+- Phase 4 đã hỗ trợ `continue_run`, `get_status`, `sync_run` và Code Review
+  approval qua Telegram. Các write action chạy nền theo `run_id`; approval chỉ
+  mở khi `NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1` và chỉ chuyển đúng Draft PR
+  sang Ready for review.
 - Dashboard có `NIKO_SDLC_SYNC_MODE`. Mặc định `mock` để test không ghi tool thật;
   chọn `real` chỉ khi chủ động muốn SDLC_Harness cập nhật Jira/Confluence. Niko
   truyền mode này thành `--sync-mode` thay vì dựa ngầm vào `.env` bên SDLC.
 - Niko chưa hỗ trợ `request_change`, context động, hoặc tự sửa artifact SDLC từ
   Telegram.
-- Trước khi mở Phase 4 approval/Phase 5 qua Telegram, SDLC_Harness phải hoàn tất
-  worktree-per-run để resume đúng branch. Niko không checkout branch, quản lý
-  worktree hoặc merge PR; approve sau này chỉ được chuyển Draft PR thành Ready
-  for review, còn merge luôn do human thực hiện trên GitHub.
+- SDLC_Harness sở hữu worktree-per-run và kiểm tra PR/workspace identity dưới
+  per-run lock. Niko không checkout branch, quản lý worktree hoặc merge PR;
+  merge luôn do human thực hiện trên GitHub.
 
 <!-- NIKO_SDLC_SYNC_END -->
 
