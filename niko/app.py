@@ -18,9 +18,11 @@ from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
@@ -244,9 +246,11 @@ class NikoApp:
         if request.action == ROUTE_SDLC_STATUS:
             result = client.get_status(run_id=request.run_id)
         elif request.action in {
+            ROUTE_SDLC_ANSWER_CLARIFICATION,
             ROUTE_SDLC_APPROVE,
             ROUTE_SDLC_CONTINUE,
             ROUTE_SDLC_REVALIDATE,
+            ROUTE_SDLC_REVALIDATE_PLAN,
             ROUTE_SDLC_SYNC,
         }:
             status_result = client.get_status(run_id=request.run_id)
@@ -254,10 +258,18 @@ class NikoApp:
                 request.action,
                 status_result,
                 allow_code_review_approval=code_review_approval_enabled(),
+                question_id=request.question_id,
             )
             if (
                 request.action
-                in {ROUTE_SDLC_APPROVE, ROUTE_SDLC_CONTINUE, ROUTE_SDLC_REVALIDATE, ROUTE_SDLC_SYNC}
+                in {
+                    ROUTE_SDLC_ANSWER_CLARIFICATION,
+                    ROUTE_SDLC_APPROVE,
+                    ROUTE_SDLC_CONTINUE,
+                    ROUTE_SDLC_REVALIDATE,
+                    ROUTE_SDLC_REVALIDATE_PLAN,
+                    ROUTE_SDLC_SYNC,
+                }
                 and preflight.allowed
                 and not preflight.execute_now
             ):
@@ -361,8 +373,10 @@ class NikoApp:
         preflight_reason: str,
     ) -> str:
         action_label = {
+            ROUTE_SDLC_ANSWER_CLARIFICATION: "trả lời câu hỏi làm rõ requirement",
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
+            ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
         }[request.action]
@@ -376,10 +390,19 @@ class NikoApp:
         )
 
         def task() -> SdlcResult:
+            if request.action == ROUTE_SDLC_ANSWER_CLARIFICATION:
+                return self.sdlc_client.answer_clarification(
+                    run_id=request.run_id,
+                    question_id=request.question_id,
+                    answer=request.answer,
+                    answered_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_CONTINUE:
                 return self.sdlc_client.continue_run(run_id=request.run_id)
             if request.action == ROUTE_SDLC_REVALIDATE:
                 return self.sdlc_client.revalidate_implementation(run_id=request.run_id)
+            if request.action == ROUTE_SDLC_REVALIDATE_PLAN:
+                return self.sdlc_client.revalidate_implementation_plan(run_id=request.run_id)
             if request.action == ROUTE_SDLC_SYNC:
                 return self.sdlc_client.sync_run(run_id=request.run_id)
             return self.sdlc_client.approve_checkpoint(run_id=request.run_id)
@@ -398,6 +421,7 @@ class NikoApp:
                     "error_code": status_result.error_code,
                     "preflight_reason": preflight_reason,
                     "write_dispatched": True,
+                    "question_id": request.question_id,
                 },
             )
             queued_reply = (
@@ -435,6 +459,7 @@ class NikoApp:
                     "ok": result.ok,
                     "status": result.status,
                     "error_code": result.error_code,
+                    "question_id": request.question_id,
                 },
             )
 
@@ -451,6 +476,7 @@ class NikoApp:
                 "run_id": request.run_id,
                 "preflight_reason": "duplicate_background_job",
                 "write_dispatched": False,
+                "question_id": request.question_id,
             },
         )
         duplicate_reply = (
@@ -469,6 +495,7 @@ class NikoApp:
                 "run_id": request.run_id,
                 "preflight_reason": "duplicate_background_job",
                 "write_dispatched": False,
+                "question_id": request.question_id,
             },
         )
         return request.action

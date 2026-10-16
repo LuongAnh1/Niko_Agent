@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 from niko.config import env_flag
 from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_SYNC,
     SdlcResult,
 )
@@ -17,6 +19,8 @@ from niko.sdlc.client import (
 PHASE4_STATUSES = {
     "implementation_ready",
     "implementation_writing",
+    "implementation_executing",
+    "implementation_paused",
     "implementation_written",
     "implementation_testing",
     "implementation_tested",
@@ -45,19 +49,21 @@ PHASE1_3_APPROVAL_STATUSES = {
 }
 
 _CONTRACT_ACTIONS = {
+    ROUTE_SDLC_ANSWER_CLARIFICATION: "answer_clarification",
     ROUTE_SDLC_APPROVE: "approve_checkpoint",
     ROUTE_SDLC_CONTINUE: "continue_run",
     ROUTE_SDLC_REVALIDATE: "revalidate_implementation",
+    ROUTE_SDLC_REVALIDATE_PLAN: "revalidate_implementation_plan",
     ROUTE_SDLC_SYNC: "sync_run",
 }
 
 PREFLIGHT_STATUS_ERROR = "status_error"
 PREFLIGHT_ACTION_NOT_ALLOWED = "action_not_allowed"
 PREFLIGHT_PHASE4_REQUIRED = "phase4_required"
-PREFLIGHT_CODE_REVIEW_REQUIRED = "code_review_required"
 PREFLIGHT_BACKGROUND_PENDING = "background_execution_pending"
 PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED = "code_review_approval_disabled"
 PREFLIGHT_EXECUTE_APPROVAL = "execute_phase1_3_approval"
+PREFLIGHT_QUESTION_NOT_CURRENT = "clarification_question_not_current"
 
 
 def code_review_approval_enabled() -> bool:
@@ -82,6 +88,7 @@ def evaluate_sdlc_preflight(
     status_result: SdlcResult,
     *,
     allow_code_review_approval: bool = False,
+    question_id: str = "",
 ) -> SdlcPreflight:
     """Đánh giá action dựa hoàn toàn trên status contract của SDLC_Harness."""
 
@@ -94,17 +101,30 @@ def evaluate_sdlc_preflight(
     if contract_action not in allowed_actions:
         return SdlcPreflight(action, status_result, False, False, PREFLIGHT_ACTION_NOT_ALLOWED)
 
+    if action == ROUTE_SDLC_ANSWER_CLARIFICATION:
+        checkpoint = status_result.pending_checkpoint if isinstance(status_result.pending_checkpoint, dict) else {}
+        current_question = checkpoint.get("current_question")
+        current_id = str(current_question.get("id") or "") if isinstance(current_question, dict) else ""
+        if status != "waiting_requirement_clarification" or checkpoint.get("type") != "requirement_clarification":
+            return SdlcPreflight(action, status_result, False, False, PREFLIGHT_ACTION_NOT_ALLOWED)
+        if not question_id or current_id.casefold() != question_id.casefold():
+            return SdlcPreflight(action, status_result, False, False, PREFLIGHT_QUESTION_NOT_CURRENT)
+        return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
+
     if action == ROUTE_SDLC_CONTINUE:
-        if status not in PHASE4_STATUSES:
+        phase = (status_result.current_phase or "").strip()
+        recoverable_phase4_block = status == "blocked" and phase.startswith(("implementation", "qa_"))
+        if status not in PHASE4_STATUSES and not recoverable_phase4_block:
             return SdlcPreflight(action, status_result, False, False, PREFLIGHT_PHASE4_REQUIRED)
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
     if action == ROUTE_SDLC_REVALIDATE:
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
+    if action == ROUTE_SDLC_REVALIDATE_PLAN:
+        return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
+
     if action == ROUTE_SDLC_SYNC:
-        if not status.startswith("code_review_"):
-            return SdlcPreflight(action, status_result, False, False, PREFLIGHT_CODE_REVIEW_REQUIRED)
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
     if action == ROUTE_SDLC_APPROVE:
@@ -136,8 +156,10 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
     run_label = f" `{run_id}`" if run_id else " này"
     if preflight.reason == PREFLIGHT_BACKGROUND_PENDING:
         action_label = {
+            ROUTE_SDLC_ANSWER_CLARIFICATION: "gửi câu trả lời làm rõ requirement",
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
+            ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review",
         }.get(preflight.action, "thực hiện")
@@ -145,6 +167,12 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
             f"Dạ em đã kiểm tra run{run_label}. Lệnh {action_label} hiện chưa được bật trong Telegram, "
             "nên em chưa thay đổi run."
         )
+    if preflight.reason == PREFLIGHT_QUESTION_NOT_CURRENT:
+        checkpoint = preflight.status_result.pending_checkpoint
+        question = checkpoint.get("current_question") if isinstance(checkpoint, dict) else None
+        current_id = str(question.get("id") or "") if isinstance(question, dict) else ""
+        current_label = f" Câu hiện tại là `{current_id}`." if current_id else ""
+        return f"Dạ câu hỏi làm rõ của run{run_label} đã thay đổi hoặc không còn hiện hành.{current_label} Em chưa gửi câu trả lời."
     if preflight.reason == PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED:
         return (
             f"Dạ em chưa duyệt Code Review cho run{run_label}. Chức năng chuyển Draft PR sang "
@@ -152,8 +180,6 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
         )
     if preflight.reason == PREFLIGHT_PHASE4_REQUIRED:
         return f"Dạ run{run_label} chưa ở trạng thái Phase 4 có thể chạy tiếp; em chưa thay đổi run."
-    if preflight.reason == PREFLIGHT_CODE_REVIEW_REQUIRED:
-        return f"Dạ run{run_label} chưa ở trạng thái Code Review có thể đồng bộ lại; em chưa thay đổi run."
     if preflight.reason == PREFLIGHT_ACTION_NOT_ALLOWED:
         return f"Dạ trạng thái hiện tại của run{run_label} không cho phép lệnh này; em chưa thay đổi run."
     return ""

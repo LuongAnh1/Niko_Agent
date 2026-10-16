@@ -7,8 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
@@ -19,6 +22,38 @@ from niko.sdlc.client import (
 
 
 class SdlcClientTests(unittest.TestCase):
+    def test_detects_explicit_requirement_clarification_answer(self):
+        request = detect_sdlc_request(
+            "Trả lời Q-4 cho run_20261012_120000_abcd1234: Dùng mã địa điểm và tên chuẩn hóa để phát hiện trùng."
+        )
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request.action, ROUTE_SDLC_ANSWER_CLARIFICATION)
+        self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
+        self.assertEqual(request.question_id, "Q-4")
+        self.assertEqual(request.answer, "Dùng mã địa điểm và tên chuẩn hóa để phát hiện trùng.")
+
+    def test_clarification_answer_has_precedence_over_approval_words(self):
+        request = detect_sdlc_request(
+            "Trả lời q-4 cho run_20261012_120000_abcd1234: Anh đồng ý dùng chính sách này và approve kết quả."
+        )
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request.action, ROUTE_SDLC_ANSWER_CLARIFICATION)
+        self.assertEqual(request.question_id, "Q-4")
+
+    def test_incomplete_clarification_syntax_does_not_fall_through_to_other_control_routes(self):
+        prompts = (
+            "Trả lời Q-4: đồng ý",
+            "Trả lời Q-4 cho run_20261012_120000_abcd1234",
+            "Trả lời cho run_20261012_120000_abcd1234: approve",
+            "Trả lời Q-4 cho run_20261012_120000_abcd1234:   ",
+        )
+
+        for prompt in prompts:
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(detect_sdlc_request(prompt))
+
     def test_detects_etour_uc1_start_request(self):
         request = detect_sdlc_request("Niko, thuc hien eTour UC1 giup anh")
 
@@ -55,6 +90,15 @@ class SdlcClientTests(unittest.TestCase):
                 self.assertIsNotNone(request)
                 self.assertEqual(request.action, expected_action)
                 self.assertEqual(request.run_id, "run_20261012_120000_abcd1234")
+
+    def test_detects_plan_revalidation_before_phase4_revalidation(self):
+        run_id = "run_20261012_120000_abcd1234"
+
+        plan_request = detect_sdlc_request(f"rà soát lại implementation plan {run_id}")
+        code_request = detect_sdlc_request(f"chạy lại validator {run_id}")
+
+        self.assertEqual(plan_request.action, ROUTE_SDLC_REVALIDATE_PLAN)
+        self.assertEqual(code_request.action, ROUTE_SDLC_REVALIDATE)
 
     def test_control_intents_require_explicit_run_id(self):
         for prompt in ("chạy tiếp giúp anh", "đồng bộ lại giúp anh", "status giúp anh", "duyệt giúp anh"):
@@ -223,6 +267,42 @@ class SdlcClientTests(unittest.TestCase):
         self.assertIn("deepseek", command)
         self.assertEqual(command[-2:], ["--sync-mode", "real"])
 
+    def test_answer_clarification_passes_exact_contract_fields(self):
+        payload = (
+            '{"ok": true, "run_id": "run_20261012_120000_abcd1234", '
+            '"status": "waiting_requirement_clarification"}'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "SDLC_HARNESS_LLM_MODE": "deepseek",
+                "NIKO_SDLC_SYNC_MODE": "real",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            result = SdlcClient().answer_clarification(
+                run_id="run_20261012_120000_abcd1234",
+                question_id="Q-4",
+                answer="Use normalized location code and name.",
+                answered_by="telegram:1",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.action, ROUTE_SDLC_ANSWER_CLARIFICATION)
+        command = run.call_args.args[0]
+        self.assertIn("answer-clarification", command)
+        self.assertEqual(command[command.index("--run-id") + 1], "run_20261012_120000_abcd1234")
+        self.assertEqual(command[command.index("--question-id") + 1], "Q-4")
+        self.assertEqual(command[command.index("--answer") + 1], "Use normalized location code and name.")
+        self.assertEqual(command[command.index("--answered-by") + 1], "telegram:1")
+        self.assertEqual(command[-4:], ["--llm-mode", "deepseek", "--sync-mode", "real"])
+
     def test_continue_and_sync_run_pass_explicit_sync_mode(self):
         payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "code_review_ready"}'
 
@@ -248,6 +328,30 @@ class SdlcClientTests(unittest.TestCase):
         sync_command = run.call_args_list[1].args[0]
         self.assertEqual(continue_command[-2:], ["--sync-mode", "both"])
         self.assertEqual(sync_command[-2:], ["--sync-mode", "both"])
+
+    def test_revalidate_plan_passes_llm_and_sync_modes(self):
+        payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "waiting_implementation_plan_review"}'
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "SDLC_HARNESS_LLM_MODE": "deepseek",
+                "NIKO_SDLC_SYNC_MODE": "real",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            result = SdlcClient().revalidate_implementation_plan(
+                run_id="run_20261012_120000_abcd1234"
+            )
+
+        self.assertEqual(result.action, ROUTE_SDLC_REVALIDATE_PLAN)
+        command = run.call_args.args[0]
+        self.assertIn("revalidate-implementation-plan", command)
+        self.assertEqual(command[-4:], ["--llm-mode", "deepseek", "--sync-mode", "real"])
 
     def test_invalid_sync_mode_falls_back_to_mock(self):
         payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234"}'

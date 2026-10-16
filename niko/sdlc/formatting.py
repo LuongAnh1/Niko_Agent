@@ -6,7 +6,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from niko.sdlc.client import ROUTE_SDLC_APPROVE, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import ROUTE_SDLC_ANSWER_CLARIFICATION, ROUTE_SDLC_APPROVE, ROUTE_SDLC_STATUS, SdlcResult
 
 
 _PHASE4_PASSED_VERIFICATION = {
@@ -47,16 +47,28 @@ def format_sdlc_reply(result: SdlcResult) -> str:
         return f"Dạ SDLC_Harness đang lỗi: {detail}"
 
     status_key = (result.status or result.current_phase or "").strip()
-    status_label = _format_sdlc_status(result.current_phase, result.status)
+    status_label = _format_sdlc_status(
+        result.current_phase,
+        result.status,
+        repair_source=_implementation_repair_source(result),
+    )
     source_label = _format_sdlc_source(result.source_ref)
     sync_lines = _format_sync_targets(result.last_sync)
     failure_lines = _format_failure_reason(result)
     quality_lines = _format_quality_summary(result)
-    action_lines = _format_action_suggestions(result.allowed_next_actions, status_key)
+    developer_progress_lines = _format_developer_progress(result)
+    action_lines = _format_action_suggestions(
+        result.allowed_next_actions,
+        status_key,
+        run_id=result.run_id,
+        pending_checkpoint=result.pending_checkpoint,
+    )
     pr_url = _resolve_pr_url(result)
 
     if result.action == ROUTE_SDLC_STATUS:
         lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
+    elif result.action == ROUTE_SDLC_ANSWER_CLARIFICATION:
+        lines = ["Dạ SDLC_Harness đã nhận câu trả lời làm rõ requirement rồi anh."]
     elif result.action == ROUTE_SDLC_APPROVE:
         lines = ["Dạ em đã gửi lệnh duyệt checkpoint sang SDLC_Harness rồi anh."]
     else:
@@ -88,6 +100,10 @@ def format_sdlc_reply(result: SdlcResult) -> str:
         lines.append("")
         lines.extend(failure_lines)
 
+    if developer_progress_lines:
+        lines.extend(("", "Tiến độ Developer:"))
+        lines.extend(developer_progress_lines)
+
     checkpoint = _format_checkpoint(result.pending_checkpoint)
     if checkpoint:
         lines.extend(("", checkpoint))
@@ -113,12 +129,13 @@ def format_sdlc_reply(result: SdlcResult) -> str:
     return "\n".join(lines)
 
 
-def _format_sdlc_status(current_phase: str, status: str) -> str:
+def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str = "") -> str:
     """Dịch phase/status kỹ thuật thành trạng thái dễ đọc trên Telegram."""
 
     status_key = (status or current_phase or "").strip()
     labels = {
         "requirement_drafting": "đang chuẩn hóa requirement",
+        "waiting_requirement_clarification": "đang chờ anh trả lời câu hỏi làm rõ requirement",
         "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
         "design_drafting": "đang tạo design artifact",
         "design_validating": "đang kiểm tra traceability của design",
@@ -126,13 +143,16 @@ def _format_sdlc_status(current_phase: str, status: str) -> str:
         "waiting_design_approval": "đang chờ anh review design checkpoint",
         "design_review": "đang chờ anh review design checkpoint",
         "implementation_planning": "đang lập implementation plan",
+        "implementation_plan_revalidating": "đang tạo version mới và kiểm tra lại implementation plan",
         "waiting_implementation_plan_review": "đang chờ anh review implementation plan trước khi sang code/PR",
         "implementation_ready": "đã sẵn sàng bắt đầu triển khai code trong workspace của run",
         "implementation_writing": "đang viết và chỉnh sửa code trong workspace của run",
+        "implementation_executing": "Developer đang triển khai từng work item trong workspace của run",
+        "implementation_paused": "Developer đã tạm dừng an toàn và có thể tiếp tục từ work item chưa xong",
         "implementation_written": "đã tạo code, đang chờ chạy verification",
         "implementation_testing": "đang chạy compile và unit verification",
         "implementation_tested": "verification đã pass, đang chờ kiểm tra traceability",
-        "implementation_repair_needed": "Validator yêu cầu sửa code hoặc test trước khi chạy tiếp",
+        "implementation_repair_needed": "Verification hoặc Validator yêu cầu Developer sửa code/test trước khi chạy tiếp",
         "implementation_repair_blocked": "repair implementation đang bị chặn và cần người review",
         "implementation_traced": "verification và traceability đã pass, đang chờ QA",
         "qa_testing": "đang chạy QA acceptance và system test",
@@ -153,6 +173,11 @@ def _format_sdlc_status(current_phase: str, status: str) -> str:
         "done": "đã hoàn tất",
         "cancelled": "đã hủy",
     }
+    if status_key == "implementation_repair_needed":
+        if repair_source == "verification":
+            labels[status_key] = "Verification yêu cầu Developer sửa code/test trước khi chạy tiếp"
+        elif repair_source == "validator_code_trace":
+            labels[status_key] = "Validator yêu cầu Developer sửa code/test trước khi chạy tiếp"
     label = labels.get(status_key)
     if not label and current_phase and status and current_phase != status:
         label = f"{current_phase} / {status}"
@@ -224,13 +249,21 @@ def _format_sync_header(last_sync: dict[str, Any]) -> str:
 
 def _format_failure_reason(result: SdlcResult) -> list[str]:
     status = (result.status or result.current_phase or "").strip()
-    is_failure = status == "blocked" or status.endswith("_failed") or status.endswith("_blocked")
+    is_failure = (
+        status == "blocked"
+        or status == "implementation_paused"
+        or status.endswith("_failed")
+        or status.endswith("_blocked")
+    )
     if not is_failure:
         return []
     error = result.last_error if isinstance(result.last_error, dict) else {}
     code = str(error.get("error_code") or "").strip()
     message = str(error.get("message") or "").strip()
-    label = "Lý do chặn" if status == "blocked" or status.endswith("_blocked") else "Lý do lỗi"
+    if status == "implementation_paused":
+        label = "Lý do tạm dừng"
+    else:
+        label = "Lý do chặn" if status == "blocked" or status.endswith("_blocked") else "Lý do lỗi"
     if code and message:
         return [f"{label}: `{_inline_code(code)}` - {_clip_text(message, 220)}"]
     if message:
@@ -240,12 +273,63 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     return []
 
 
+def _format_developer_progress(result: SdlcResult) -> list[str]:
+    raw = result.raw if isinstance(result.raw, dict) else {}
+    progress = raw.get("developer_execution")
+    if not isinstance(progress, dict) or not progress:
+        return []
+    completed = progress.get("completed_items")
+    total = progress.get("total_items")
+    remaining = progress.get("remaining_items")
+    current = str(progress.get("current_item") or "").strip()
+    lines: list[str] = []
+    if isinstance(completed, int) and isinstance(total, int):
+        line = f"- Work items: {completed}/{total} hoàn thành"
+        if isinstance(remaining, int):
+            line += f"; còn {remaining}"
+        lines.append(line + ".")
+    if current:
+        lines.append(f"- Work item hiện tại: `{_inline_code(_clip_text(current, 80))}`.")
+    self_check = progress.get("self_check")
+    if isinstance(self_check, dict):
+        check_status = str(self_check.get("status") or "").strip()
+        attempts = self_check.get("attempts")
+        if check_status:
+            line = f"- Developer self-check: {_clip_text(check_status, 40)}"
+            if isinstance(attempts, int):
+                line += f"; attempt={attempts}"
+            lines.append(line + ".")
+    if result.status == "implementation_paused" and "continue_run" in result.allowed_next_actions:
+        lines.append("- Journal đã giữ các work item hoàn thành; lần chạy tiếp chỉ làm lại work item đang dở.")
+    return lines[:4]
+
+
+def _implementation_repair_source(result: SdlcResult) -> str:
+    quality_reports = result.quality_reports if isinstance(result.quality_reports, dict) else {}
+    repair = quality_reports.get("implementation_repair")
+    if not isinstance(repair, dict):
+        return ""
+    return str(repair.get("feedback_source") or "").strip()
+
+
 def _format_checkpoint(checkpoint: dict[str, Any]) -> str:
     if not isinstance(checkpoint, dict):
         return ""
     title = str(checkpoint.get("title") or checkpoint.get("name") or "").strip()
     artifact_ref = str(checkpoint.get("artifact_ref") or "").strip()
     checkpoint_type = str(checkpoint.get("type") or "").strip()
+    if checkpoint_type == "requirement_clarification":
+        current_question = checkpoint.get("current_question")
+        if not isinstance(current_question, dict):
+            return "Checkpoint đang chờ câu trả lời làm rõ requirement."
+        question_id = str(current_question.get("id") or "").strip()
+        question_text = _clip_text(str(current_question.get("text") or "").strip(), 260)
+        remaining = checkpoint.get("remaining_blocking_count")
+        label = f"`{_inline_code(question_id)}`" if question_id else "Câu hỏi hiện tại"
+        line = f"Câu hỏi làm rõ requirement {label}: {question_text}" if question_text else f"Câu hỏi làm rõ requirement: {label}."
+        if isinstance(remaining, int):
+            line += f"\nSố câu hỏi blocking còn lại: {remaining}."
+        return line
     if title:
         return f"Checkpoint cần anh duyệt: {_clip_text(title, 160)}."
     if checkpoint_type == "implementation_plan_review" and artifact_ref:
@@ -319,7 +403,21 @@ def _format_quality_summary(result: SdlcResult) -> list[str]:
     if phase4:
         lines: list[str] = []
         has_test_report = isinstance(result.latest_artifacts, dict) and "test_report" in result.latest_artifacts
-        if has_test_report and status in _PHASE4_PASSED_VERIFICATION:
+        verification = quality_reports.get("verification")
+        if isinstance(verification, dict):
+            verification_status = str(verification.get("status") or "").strip()
+            verdict = "passed" if verification.get("ok") is True else verification_status or "chưa pass"
+            details = [verdict]
+            if verification.get("attempt") is not None:
+                details.append(f"attempt={verification.get('attempt')}")
+            if verification.get("repair_iteration") is not None:
+                details.append(f"repair={verification.get('repair_iteration')}")
+            if verification.get("repairable") is True:
+                details.append("có thể giao Developer repair")
+            reason = _clip_text(str(verification.get("reason") or ""), 120)
+            line = "- Verification: " + "; ".join(details)
+            lines.append(f"{line}; {reason}" if reason else line + ".")
+        elif has_test_report and status in _PHASE4_PASSED_VERIFICATION:
             lines.append("- Verification: passed; test report đã có.")
         elif status in {"implementation_testing", "implementation_written"}:
             lines.append("- Verification: đang chờ kết quả compile/unit test.")
@@ -392,14 +490,32 @@ def _format_quality_summary(result: SdlcResult) -> list[str]:
     return lines[:2]
 
 
-def _format_action_suggestions(actions: list[str], status: str = "") -> list[str]:
+def _format_action_suggestions(
+    actions: list[str],
+    status: str = "",
+    *,
+    run_id: str = "",
+    pending_checkpoint: dict[str, Any] | None = None,
+) -> list[str]:
     action_set = {str(action) for action in actions if action}
+    if "answer_clarification" in action_set and status == "waiting_requirement_clarification":
+        checkpoint = pending_checkpoint if isinstance(pending_checkpoint, dict) else {}
+        question = checkpoint.get("current_question")
+        question_id = str(question.get("id") or "") if isinstance(question, dict) else ""
+        if question_id and run_id:
+            return [f"- Trả lời bằng cú pháp: `Trả lời {question_id} cho {run_id}: <nội dung trả lời>`"]
+        return ["- Anh trả lời câu hỏi làm rõ hiện tại để workflow cập nhật requirement."]
     if status == "code_review_approval_sync_failed":
         return ["- Retry đồng bộ cho đúng mã run; không chạy lại GitHub approval."]
     if status == "code_review_approved":
         return ["- Anh review PR và quyết định merge trực tiếp trên GitHub."]
 
     suggestions: list[str] = []
+    if "revalidate_implementation_plan" in action_set and status in {
+        "waiting_implementation_plan_review",
+        "blocked",
+    }:
+        suggestions.append("- Nếu plan còn lỗi hoặc xung đột với repo, yêu cầu em rà soát lại implementation plan kèm mã run.")
     if "approve_checkpoint" in action_set:
         if status == "code_review_ready":
             suggestions.append("- Anh review Draft PR và evidence của checkpoint Code Review.")
@@ -416,7 +532,10 @@ def _format_action_suggestions(actions: list[str], status: str = "") -> list[str
     if "sync_run" in action_set and not suggestions:
         suggestions.append("- Bước tiếp theo của workflow là retry đồng bộ cho đúng mã run.")
     if "continue_run" in action_set and not suggestions:
-        suggestions.append("- Bước tiếp theo của workflow là chạy tiếp Phase 4 cho mã run này.")
+        if status == "implementation_paused":
+            suggestions.append("- Chạy tiếp Phase 4 để resume từ work item Developer chưa hoàn thành.")
+        else:
+            suggestions.append("- Bước tiếp theo của workflow là chạy tiếp Phase 4 cho mã run này.")
     if not suggestions and "get_status" in action_set:
         suggestions.append("- Anh có thể hỏi lại mã run để xem tiến độ.")
     return suggestions[:4]
@@ -442,6 +561,7 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "implementation_plan": "implementation plan",
         "implementation_plan_structured": "implementation plan structured data",
         "implementation_plan_review": "implementation plan review",
+        "effective_design_contract": "effective design contract",
         "developer_work_packet": "developer work packet",
         "run_workspace": "run workspace",
         "code_change_report": "code change report",

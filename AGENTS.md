@@ -417,10 +417,12 @@ the SDLC_Harness contract first, then adapt `niko/sdlc/`. The old read-only Jira
 fixture workflow in Niko is only for issue analysis, not the SDLC requirement
 pipeline.
 
-Current Telegram SDLC actions are `start`, `get_status`, Phase 1/2/3
-`approve_checkpoint`, Phase 4 `continue_run`/`sync_run`, and gated Code Review
-approval, all with an explicit `run_id`. Phase 4 write actions run in the
-background and return queued plus final replies. Code Review approval requires
+Current Telegram SDLC actions are `start`, `get_status`, Phase 1 V2
+`answer_clarification`, Phase 1/2/3 `approve_checkpoint`, Phase 4
+`continue_run`/`sync_run`, and gated Code Review approval. Control actions use
+an explicit `run_id`; clarification answers also include the current question
+ID so stale replies cannot answer a later question. Long-running write actions
+run in the background and return queued plus final replies. Code Review approval requires
 `NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1`, whose safe default is `0`, and may
 only request Draft -> Ready for review. Niko should surface SDLC
 `blocked`/sync-partial states clearly by reading `last_error` and `last_sync`;

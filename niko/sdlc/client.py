@@ -32,14 +32,24 @@ ROUTE_SDLC_START = "sdlc_start_or_get_run"
 ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
+ROUTE_SDLC_ANSWER_CLARIFICATION = "sdlc_answer_clarification"
 ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
 ROUTE_SDLC_REVALIDATE = "sdlc_revalidate_implementation"
+ROUTE_SDLC_REVALIDATE_PLAN = "sdlc_revalidate_implementation_plan"
 ROUTE_SDLC_SYNC = "sdlc_sync_run"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
 USE_CASE_PATTERN = re.compile(r"\buc\s*(\d+)\b", re.IGNORECASE)
 ETOUR_PATTERN = re.compile(r"\betour\b", re.IGNORECASE)
 JIRA_ISSUE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
+CLARIFICATION_ANSWER_PATTERN = re.compile(
+    r"^\s*(?:trả\s+lời|tra\s+loi)\s+"
+    r"(?P<question_id>Q-\d+)\s+cho\s+"
+    r"(?P<run_id>run_\d{8}_\d{6}_[a-f0-9]+)\s*:\s*"
+    r"(?P<answer>\S(?:.*\S)?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+CLARIFICATION_PREFIX_PATTERN = re.compile(r"^\s*(?:trả\s+lời|tra\s+loi)\b", re.IGNORECASE)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
 START_WORDS = ("thuc hien", "thực hiện", "chay", "chạy", "lam", "làm", "xu ly", "xử lý")
 SYNC_WORDS = ("dong bo lai", "đồng bộ lại", "sync lai", "sync lại", "resync", "retry sync")
@@ -63,6 +73,16 @@ REVALIDATE_WORDS = (
     "kiem tra lai validator",
     "kiểm tra lại validator",
 )
+REVALIDATE_PLAN_WORDS = (
+    "revalidate implementation plan",
+    "revalidate plan",
+    "rà soát lại implementation plan",
+    "ra soat lai implementation plan",
+    "tạo lại implementation plan",
+    "tao lai implementation plan",
+    "kiểm tra lại implementation plan",
+    "kiem tra lai implementation plan",
+)
 APPROVE_WORDS = (
     "duyet",
     "duyệt",
@@ -85,6 +105,8 @@ class SdlcRequest:
     use_case: str = "UC1"
     issue_key: str = ""
     run_id: str = ""
+    question_id: str = ""
+    answer: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,7 +143,21 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
 
     text = str(prompt or "").strip()
     lowered = text.lower()
+    clarification_match = CLARIFICATION_ANSWER_PATTERN.match(text)
+    if clarification_match:
+        return SdlcRequest(
+            action=ROUTE_SDLC_ANSWER_CLARIFICATION,
+            run_id=clarification_match.group("run_id"),
+            question_id=clarification_match.group("question_id").upper(),
+            answer=clarification_match.group("answer").strip(),
+        )
+    if CLARIFICATION_PREFIX_PATTERN.match(text):
+        return None
+
     run_match = RUN_ID_PATTERN.search(text)
+    if run_match and any(word in lowered for word in REVALIDATE_PLAN_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_REVALIDATE_PLAN, run_id=run_match.group(0))
+
     if run_match and any(word in lowered for word in REVALIDATE_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_REVALIDATE, run_id=run_match.group(0))
 
@@ -196,6 +232,32 @@ class SdlcClient:
         payload = self._run_json(args, event=ROUTE_SDLC_APPROVE)
         return _result_from_payload(payload, ROUTE_SDLC_APPROVE)
 
+    def answer_clarification(
+        self,
+        *,
+        run_id: str,
+        question_id: str,
+        answer: str,
+        answered_by: str,
+    ) -> SdlcResult:
+        """Trả lời đúng câu hỏi requirement hiện hành của một run V2."""
+
+        args = [
+            "answer-clarification",
+            "--run-id",
+            run_id,
+            "--question-id",
+            question_id,
+            "--answer",
+            answer,
+            "--answered-by",
+            answered_by,
+        ]
+        _append_llm_mode(args)
+        _append_sync_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_ANSWER_CLARIFICATION)
+        return _result_from_payload(payload, ROUTE_SDLC_ANSWER_CLARIFICATION)
+
     def continue_run(self, *, run_id: str) -> SdlcResult:
         """Chạy bước kế tiếp; Phase 4 có thể sync checkpoint theo mode cấu hình."""
 
@@ -212,6 +274,15 @@ class SdlcClient:
         _append_llm_mode(args)
         payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE)
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE)
+
+    def revalidate_implementation_plan(self, *, run_id: str) -> SdlcResult:
+        """Tạo version plan mới từ input đã khóa và chạy lại Validator Phase 3."""
+
+        args = ["revalidate-implementation-plan", "--run-id", run_id]
+        _append_llm_mode(args)
+        _append_sync_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE_PLAN)
+        return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_PLAN)
 
     def sync_run(self, *, run_id: str) -> SdlcResult:
         """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""
