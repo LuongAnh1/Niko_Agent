@@ -147,8 +147,8 @@ def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str =
         "waiting_implementation_plan_review": "đang chờ anh review implementation plan trước khi sang code/PR",
         "implementation_ready": "đã sẵn sàng bắt đầu triển khai code trong workspace của run",
         "implementation_writing": "đang viết và chỉnh sửa code trong workspace của run",
-        "implementation_executing": "Developer đang triển khai từng work item trong workspace của run",
-        "implementation_paused": "Developer đã tạm dừng an toàn và có thể tiếp tục từ work item chưa xong",
+        "implementation_executing": "Developer đang triển khai một lát công việc trong workspace của run",
+        "implementation_paused": "Developer đã tạm dừng an toàn và có thể tiếp tục lát công việc chưa xong",
         "implementation_written": "đã tạo code, đang chờ chạy verification",
         "implementation_testing": "đang chạy compile và unit verification",
         "implementation_tested": "verification đã pass, đang chờ kiểm tra traceability",
@@ -284,23 +284,14 @@ def _format_developer_progress(result: SdlcResult) -> list[str]:
     current = str(progress.get("current_item") or "").strip()
     lines: list[str] = []
     if isinstance(completed, int) and isinstance(total, int):
-        line = f"- Work items: {completed}/{total} hoàn thành"
+        line = f"- Lượt Developer: {completed}/{total} hoàn thành"
         if isinstance(remaining, int):
             line += f"; còn {remaining}"
         lines.append(line + ".")
     if current:
-        lines.append(f"- Work item hiện tại: `{_inline_code(_clip_text(current, 80))}`.")
-    self_check = progress.get("self_check")
-    if isinstance(self_check, dict):
-        check_status = str(self_check.get("status") or "").strip()
-        attempts = self_check.get("attempts")
-        if check_status:
-            line = f"- Developer self-check: {_clip_text(check_status, 40)}"
-            if isinstance(attempts, int):
-                line += f"; attempt={attempts}"
-            lines.append(line + ".")
+        lines.append(f"- Lượt triển khai hiện tại: `{_inline_code(_clip_text(current, 80))}`.")
     if result.status == "implementation_paused" and "continue_run" in result.allowed_next_actions:
-        lines.append("- Journal đã giữ các work item hoàn thành; lần chạy tiếp chỉ làm lại work item đang dở.")
+        lines.append("- Journal đã giữ lượt triển khai đã hoàn thành; lần chạy tiếp tiếp tục từ task đang dở.")
     return lines[:4]
 
 
@@ -533,7 +524,7 @@ def _format_action_suggestions(
         suggestions.append("- Bước tiếp theo của workflow là retry đồng bộ cho đúng mã run.")
     if "continue_run" in action_set and not suggestions:
         if status == "implementation_paused":
-            suggestions.append("- Chạy tiếp Phase 4 để resume từ work item Developer chưa hoàn thành.")
+            suggestions.append("- Chạy tiếp Phase 4 để tiếp tục lát công việc Developer chưa hoàn thành.")
         else:
             suggestions.append("- Bước tiếp theo của workflow là chạy tiếp Phase 4 cho mã run này.")
     if not suggestions and "get_status" in action_set:

@@ -313,25 +313,6 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
         self.assertIn("Trạng thái: Validator yêu cầu Developer sửa code/test", reply)
         self.assertNotIn("Verification hoặc Validator", reply)
 
-    def test_formats_developer_self_check_progress(self):
-        reply = format_sdlc_reply(
-            _result(
-                status="implementation_executing",
-                current_phase="implementation_writing",
-                raw={
-                    "developer_execution": {
-                        "status": "running",
-                        "completed_items": 2,
-                        "total_items": 3,
-                        "remaining_items": 1,
-                        "self_check": {"status": "repairing", "attempts": 1},
-                    },
-                },
-            )
-        )
-
-        self.assertIn("Developer self-check: repairing; attempt=1", reply)
-
     def test_sync_failure_shows_error_and_failed_target(self):
         reply = format_sdlc_reply(
             _result(
