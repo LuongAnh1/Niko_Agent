@@ -67,6 +67,15 @@ CONTINUE_WORDS = (
 )
 REVALIDATE_WORDS = (
     "revalidate",
+    "revalidate implementation",
+    "chay kiem tra lai implementation",
+    "chạy kiểm tra lại implementation",
+    "kiem tra lai implementation",
+    "kiểm tra lại implementation",
+    "chay lai verification",
+    "chạy lại verification",
+    "kiem tra lai verification",
+    "kiểm tra lại verification",
     "chay lai validator",
     "chạy lại validator",
     "validate lai",
