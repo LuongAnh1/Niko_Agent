@@ -419,7 +419,7 @@ pipeline.
 
 Current Telegram SDLC actions are `start`, `get_status`, Phase 1 V2
 `answer_clarification`, Phase 1/2/3 `approve_checkpoint`, Phase 4
-`continue_run`/`sync_run`, and gated Code Review approval. Control actions use
+`continue_run`/`sync_run`, Phase 2 `revalidate_design`, and gated Code Review approval. Control actions use
 an explicit `run_id`; clarification answers also include the current question
 ID so stale replies cannot answer a later question. Long-running write actions
 run in the background and return queued plus final replies. Code Review approval requires
@@ -427,6 +427,12 @@ run in the background and return queued plus final replies. Code Review approval
 only request Draft -> Ready for review. Niko should surface SDLC
 `blocked`/sync-partial states clearly by reading `last_error` and `last_sync`;
 approval sync failure must retry `sync_run` instead of approving GitHub again.
+`revalidate_design` rereads the frozen Requirement V2 and the latest Phase 2
+design, then runs the hybrid V2 validator in a bounded current-version repair
+loop. Each version receives deterministic traceability/parser/cross-diagram
+checks plus one semantic review; only blockers feed the next Designer repair.
+Warnings do not block approval, zero blockers create the checkpoint, and a
+repeated blocker set stops the loop as stalled.
 
 Do not expose `request_change`, `cancel_run`, `resume_run`, dynamic context
 invalidation, merge, or auto-merge until the matching SDLC_Harness phase and

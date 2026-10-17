@@ -22,6 +22,7 @@ from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
@@ -250,6 +251,7 @@ class NikoApp:
             ROUTE_SDLC_APPROVE,
             ROUTE_SDLC_CONTINUE,
             ROUTE_SDLC_REVALIDATE,
+            ROUTE_SDLC_REVALIDATE_DESIGN,
             ROUTE_SDLC_REVALIDATE_PLAN,
             ROUTE_SDLC_SYNC,
         }:
@@ -267,6 +269,7 @@ class NikoApp:
                     ROUTE_SDLC_APPROVE,
                     ROUTE_SDLC_CONTINUE,
                     ROUTE_SDLC_REVALIDATE,
+                    ROUTE_SDLC_REVALIDATE_DESIGN,
                     ROUTE_SDLC_REVALIDATE_PLAN,
                     ROUTE_SDLC_SYNC,
                 }
@@ -376,6 +379,7 @@ class NikoApp:
             ROUTE_SDLC_ANSWER_CLARIFICATION: "trả lời câu hỏi làm rõ requirement",
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
+            ROUTE_SDLC_REVALIDATE_DESIGN: "tạo version mới và chạy lại Design Validator",
             ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
@@ -401,6 +405,8 @@ class NikoApp:
                 return self.sdlc_client.continue_run(run_id=request.run_id)
             if request.action == ROUTE_SDLC_REVALIDATE:
                 return self.sdlc_client.revalidate_implementation(run_id=request.run_id)
+            if request.action == ROUTE_SDLC_REVALIDATE_DESIGN:
+                return self.sdlc_client.revalidate_design(run_id=request.run_id)
             if request.action == ROUTE_SDLC_REVALIDATE_PLAN:
                 return self.sdlc_client.revalidate_implementation_plan(run_id=request.run_id)
             if request.action == ROUTE_SDLC_SYNC:

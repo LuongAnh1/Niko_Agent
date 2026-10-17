@@ -11,6 +11,7 @@ from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
@@ -99,6 +100,14 @@ class SdlcClientTests(unittest.TestCase):
 
         self.assertEqual(plan_request.action, ROUTE_SDLC_REVALIDATE_PLAN)
         self.assertEqual(code_request.action, ROUTE_SDLC_REVALIDATE)
+
+    def test_detects_design_revalidation_before_generic_validator_request(self):
+        run_id = "run_20261012_120000_abcd1234"
+
+        request = detect_sdlc_request(f"revalidate design {run_id}")
+
+        self.assertEqual(request.action, ROUTE_SDLC_REVALIDATE_DESIGN)
+        self.assertEqual(request.run_id, run_id)
 
     def test_control_intents_require_explicit_run_id(self):
         for prompt in ("chạy tiếp giúp anh", "đồng bộ lại giúp anh", "status giúp anh", "duyệt giúp anh"):
@@ -351,6 +360,28 @@ class SdlcClientTests(unittest.TestCase):
         self.assertEqual(result.action, ROUTE_SDLC_REVALIDATE_PLAN)
         command = run.call_args.args[0]
         self.assertIn("revalidate-implementation-plan", command)
+        self.assertEqual(command[-4:], ["--llm-mode", "deepseek", "--sync-mode", "real"])
+
+    def test_revalidate_design_passes_llm_and_sync_modes(self):
+        payload = '{"ok": true, "run_id": "run_20261012_120000_abcd1234", "status": "waiting_design_approval"}'
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "SDLC_HARNESS_WORKDIR": temp_dir,
+                "SDLC_HARNESS_PYTHON_COMMAND": "python",
+                "SDLC_HARNESS_LLM_MODE": "deepseek",
+                "NIKO_SDLC_SYNC_MODE": "real",
+            },
+            clear=False,
+        ), patch(
+            "niko.sdlc.client.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=payload, stderr=""),
+        ) as run:
+            result = SdlcClient().revalidate_design(run_id="run_20261012_120000_abcd1234")
+
+        self.assertEqual(result.action, ROUTE_SDLC_REVALIDATE_DESIGN)
+        command = run.call_args.args[0]
+        self.assertIn("revalidate-design", command)
         self.assertEqual(command[-4:], ["--llm-mode", "deepseek", "--sync-mode", "real"])
 
     def test_invalid_sync_mode_falls_back_to_mock(self):

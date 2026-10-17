@@ -138,8 +138,9 @@ def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str =
         "waiting_requirement_clarification": "đang chờ anh trả lời câu hỏi làm rõ requirement",
         "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
         "design_drafting": "đang tạo design artifact",
-        "design_validating": "đang kiểm tra traceability của design",
-        "design_repairing": "đang repair design theo Validator",
+        "design_validating": "đang kiểm tra traceability và tính nhất quán của design",
+        "design_revalidating": "đang chạy lại Design Validator hybrid",
+        "design_repairing": "Designer đang sửa các blocker của design",
         "waiting_design_approval": "đang chờ anh review design checkpoint",
         "design_review": "đang chờ anh review design checkpoint",
         "implementation_planning": "đang lập implementation plan",
@@ -469,6 +470,22 @@ def _format_quality_summary(result: SdlcResult) -> list[str]:
             lines.append(f"- Implementation plan open issues: {plan_review.get('issue_count')}")
         return lines[:3]
 
+    design_validation = quality_reports.get("design_validation")
+    if isinstance(design_validation, dict):
+        blockers = design_validation.get("blocking_count")
+        warnings = design_validation.get("warning_count")
+        status_label = "passed" if design_validation.get("ok") else "chưa pass"
+        detail = f"- Design Validator: {status_label}"
+        if isinstance(blockers, int):
+            detail += f"; blockers={blockers}"
+        if isinstance(warnings, int):
+            detail += f"; warnings={warnings}"
+        lines.append(detail)
+        versions = design_validation.get("versions") or []
+        if isinstance(versions, list) and versions:
+            lines.append(f"- Design version: {versions[-1]}; repair iterations: {max(0, len(versions) - 1)}")
+        return lines[:2]
+
     design_trace = quality_reports.get("design_traceability")
     if not isinstance(design_trace, dict):
         return []
@@ -502,6 +519,8 @@ def _format_action_suggestions(
         return ["- Anh review PR và quyết định merge trực tiếp trên GitHub."]
 
     suggestions: list[str] = []
+    if "revalidate_design" in action_set and status in {"waiting_design_approval", "blocked"}:
+        suggestions.append("- Có thể yêu cầu em `revalidate design` kèm mã run để tạo version mới và chạy lại hybrid validator.")
     if "revalidate_implementation_plan" in action_set and status in {
         "waiting_implementation_plan_review",
         "blocked",
@@ -548,6 +567,7 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "design_artifact": "design artifact",
         "requirement_design_trace": "requirement-design trace",
         "missing_design_links": "missing design links",
+        "design_validation_report": "design validation report",
         "design_quality_report": "design quality report",
         "implementation_plan": "implementation plan",
         "implementation_plan_structured": "implementation plan structured data",

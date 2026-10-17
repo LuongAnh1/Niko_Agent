@@ -10,6 +10,7 @@ from niko.sdlc.client import (
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_SYNC,
     SdlcResult,
@@ -53,6 +54,7 @@ _CONTRACT_ACTIONS = {
     ROUTE_SDLC_APPROVE: "approve_checkpoint",
     ROUTE_SDLC_CONTINUE: "continue_run",
     ROUTE_SDLC_REVALIDATE: "revalidate_implementation",
+    ROUTE_SDLC_REVALIDATE_DESIGN: "revalidate_design",
     ROUTE_SDLC_REVALIDATE_PLAN: "revalidate_implementation_plan",
     ROUTE_SDLC_SYNC: "sync_run",
 }
@@ -121,6 +123,9 @@ def evaluate_sdlc_preflight(
     if action == ROUTE_SDLC_REVALIDATE:
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
+    if action == ROUTE_SDLC_REVALIDATE_DESIGN:
+        return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
+
     if action == ROUTE_SDLC_REVALIDATE_PLAN:
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
@@ -159,6 +164,7 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
             ROUTE_SDLC_ANSWER_CLARIFICATION: "gửi câu trả lời làm rõ requirement",
             ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
+            ROUTE_SDLC_REVALIDATE_DESIGN: "tạo version mới và chạy lại Design Validator",
             ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review",

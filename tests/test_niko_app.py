@@ -13,6 +13,7 @@ from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
@@ -454,6 +455,13 @@ class NikoAppTests(unittest.TestCase):
 
     def test_continue_and_sync_queue_background_action_after_preflight(self):
         cases = [
+            (
+                "revalidate design run_20261012_120000_abcd1234",
+                ROUTE_SDLC_REVALIDATE_DESIGN,
+                "waiting_design_approval",
+                ["revalidate_design", "get_status"],
+                "revalidate_design",
+            ),
             (
                 "rà soát lại implementation plan run_20261012_120000_abcd1234",
                 ROUTE_SDLC_REVALIDATE_PLAN,

@@ -9,6 +9,7 @@ from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_STATUS,
     ROUTE_SDLC_SYNC,
@@ -173,6 +174,20 @@ class SdlcPreflightTests(unittest.TestCase):
         self.assertEqual(accepted.reason, PREFLIGHT_BACKGROUND_PENDING)
         self.assertFalse(accepted.execute_now)
         self.assertEqual(rejected.reason, PREFLIGHT_ACTION_NOT_ALLOWED)
+
+    def test_design_revalidation_runs_in_background_when_contract_exposes_it(self):
+        result = evaluate_sdlc_preflight(
+            ROUTE_SDLC_REVALIDATE_DESIGN,
+            _status(
+                current_phase="design_review",
+                status="waiting_design_approval",
+                allowed_next_actions=["revalidate_design", "get_status"],
+            ),
+        )
+
+        self.assertTrue(result.allowed)
+        self.assertFalse(result.execute_now)
+        self.assertEqual(result.reason, PREFLIGHT_BACKGROUND_PENDING)
 
     def test_phase1_to_3_approval_executes_but_code_review_gate_defaults_off(self):
         design = evaluate_sdlc_preflight(

@@ -239,6 +239,27 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
         self.assertIn("GitHub: PR Draft; commit=abcdef123456", reply)
         self.assertNotIn("private-path", reply)
 
+    def test_formats_hybrid_design_validation_summary(self):
+        reply = format_sdlc_reply(
+            _result(
+                status="waiting_design_approval",
+                current_phase="design_review",
+                quality_reports={
+                    "design_validation": {
+                        "ok": True,
+                        "blocking_count": 0,
+                        "warning_count": 1,
+                        "versions": ["v1", "v2"],
+                    }
+                },
+                allowed_next_actions=["approve_checkpoint", "revalidate_design", "get_status"],
+            )
+        )
+
+        self.assertIn("Design Validator: passed; blockers=0; warnings=1", reply)
+        self.assertIn("Design version: v2; repair iterations: 1", reply)
+        self.assertIn("revalidate design", reply)
+
     def test_repair_states_do_not_claim_failed_stage_passed(self):
         implementation_reply = format_sdlc_reply(
             _result(

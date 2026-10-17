@@ -36,6 +36,7 @@ ROUTE_SDLC_ANSWER_CLARIFICATION = "sdlc_answer_clarification"
 ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
 ROUTE_SDLC_REVALIDATE = "sdlc_revalidate_implementation"
 ROUTE_SDLC_REVALIDATE_PLAN = "sdlc_revalidate_implementation_plan"
+ROUTE_SDLC_REVALIDATE_DESIGN = "sdlc_revalidate_design"
 ROUTE_SDLC_SYNC = "sdlc_sync_run"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
@@ -82,6 +83,15 @@ REVALIDATE_PLAN_WORDS = (
     "tao lai implementation plan",
     "kiểm tra lại implementation plan",
     "kiem tra lai implementation plan",
+)
+REVALIDATE_DESIGN_WORDS = (
+    "revalidate design",
+    "validate lai design",
+    "validate lại design",
+    "kiem tra lai design",
+    "kiểm tra lại design",
+    "ra soat lai design",
+    "rà soát lại design",
 )
 APPROVE_WORDS = (
     "duyet",
@@ -157,6 +167,9 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
     run_match = RUN_ID_PATTERN.search(text)
     if run_match and any(word in lowered for word in REVALIDATE_PLAN_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_REVALIDATE_PLAN, run_id=run_match.group(0))
+
+    if run_match and any(word in lowered for word in REVALIDATE_DESIGN_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_REVALIDATE_DESIGN, run_id=run_match.group(0))
 
     if run_match and any(word in lowered for word in REVALIDATE_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_REVALIDATE, run_id=run_match.group(0))
@@ -283,6 +296,15 @@ class SdlcClient:
         _append_sync_mode(args)
         payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE_PLAN)
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_PLAN)
+
+    def revalidate_design(self, *, run_id: str) -> SdlcResult:
+        """Chạy lại Design Validator từ Requirement V2 đã khóa."""
+
+        args = ["revalidate-design", "--run-id", run_id]
+        _append_llm_mode(args)
+        _append_sync_mode(args)
+        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE_DESIGN)
+        return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_DESIGN)
 
     def sync_run(self, *, run_id: str) -> SdlcResult:
         """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""
