@@ -531,7 +531,8 @@ class NikoAppTests(unittest.TestCase):
                 self.assertIn("code_review_ready", delivered[1])
                 self.assertEqual(graph.normal_calls, [])
                 getattr(client_class.return_value, client_method).assert_called_once_with(
-                    run_id="run_20261012_120000_abcd1234"
+                    run_id="run_20261012_120000_abcd1234",
+                    requested_by="telegram:1",
                 )
                 self.assertEqual(graph.finished[0][2], "sdlc_job_queued")
                 self.assertEqual(graph.background_finished[0][2], "sdlc_job_final")
@@ -713,7 +714,8 @@ class NikoAppTests(unittest.TestCase):
         self.assertEqual(len(delivered), 2)
         self.assertIn("code_review_approved", delivered[1])
         client_class.return_value.approve_checkpoint.assert_called_once_with(
-            run_id="run_20261012_120000_abcd1234"
+            run_id="run_20261012_120000_abcd1234",
+            requested_by="telegram:1",
         )
         client_class.return_value.sync_run.assert_not_called()
         self.assertEqual(graph.finished[0][2], "sdlc_job_queued")
@@ -796,7 +798,10 @@ class NikoAppTests(unittest.TestCase):
             runner.complete()
 
         self.assertEqual(route, ROUTE_SDLC_SYNC)
-        client_class.return_value.sync_run.assert_called_once_with(run_id=failed.run_id)
+        client_class.return_value.sync_run.assert_called_once_with(
+            run_id=failed.run_id,
+            requested_by="telegram:1",
+        )
         client_class.return_value.approve_checkpoint.assert_not_called()
         self.assertIn("code_review_approved", delivered[-1])
 
@@ -875,7 +880,10 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("repair iterations: 1", delivered[0])
         self.assertIn("design_artifact_v2", delivered[0])
         self.assertNotIn("muốn sửa", delivered[0])
-        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
+        client_class.return_value.approve_checkpoint.assert_called_once_with(
+            run_id="run_20261012_120000_abcd1234",
+            requested_by="telegram:1",
+        )
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
@@ -1047,7 +1055,10 @@ class NikoAppTests(unittest.TestCase):
         self.assertEqual(route, ROUTE_SDLC_APPROVE)
         self.assertIn("implementation plan", delivered[0])
         self.assertIn("Phase 4", delivered[0])
-        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
+        client_class.return_value.approve_checkpoint.assert_called_once_with(
+            run_id="run_20261013_143231_8e1a39d4",
+            requested_by="telegram:1",
+        )
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
         self.assertEqual(graph.normal_calls, [])
 

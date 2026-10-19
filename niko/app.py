@@ -286,7 +286,10 @@ class NikoApp:
                     preflight.reason,
                 )
             if preflight.execute_now:
-                result = client.approve_checkpoint(run_id=request.run_id)
+                result = client.approve_checkpoint(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             else:
                 result = status_result
         elif request.action == ROUTE_SDLC_START_JIRA:
@@ -402,16 +405,34 @@ class NikoApp:
                     answered_by=_user_key(gateway_message),
                 )
             if request.action == ROUTE_SDLC_CONTINUE:
-                return self.sdlc_client.continue_run(run_id=request.run_id)
+                return self.sdlc_client.continue_run(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_REVALIDATE:
-                return self.sdlc_client.revalidate_implementation(run_id=request.run_id)
+                return self.sdlc_client.revalidate_implementation(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_REVALIDATE_DESIGN:
-                return self.sdlc_client.revalidate_design(run_id=request.run_id)
+                return self.sdlc_client.revalidate_design(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_REVALIDATE_PLAN:
-                return self.sdlc_client.revalidate_implementation_plan(run_id=request.run_id)
+                return self.sdlc_client.revalidate_implementation_plan(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_SYNC:
-                return self.sdlc_client.sync_run(run_id=request.run_id)
-            return self.sdlc_client.approve_checkpoint(run_id=request.run_id)
+                return self.sdlc_client.sync_run(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            return self.sdlc_client.approve_checkpoint(
+                run_id=request.run_id,
+                requested_by=_user_key(gateway_message),
+            )
 
         def on_reserved() -> None:
             self._log_workflow_selected(

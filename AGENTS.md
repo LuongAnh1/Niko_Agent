@@ -404,7 +404,7 @@ edit SDLC artifacts or handle change requests yet. Keep this boundary strict:
 ```text
 Telegram/user prompt
   -> Niko detects an SDLC intent
-  -> Niko calls SDLC_Harness CLI JSON
+  -> Niko calls SDLC_Harness CLI JSON or HTTP API through one client facade
   -> SDLC_Harness loads Jira/fixture source, refines requirements, validates,
      writes runtime artifacts, syncs Jira/Confluence, and returns a compact
      machine-readable result
@@ -427,6 +427,10 @@ run in the background and return queued plus final replies. Code Review approval
 only request Draft -> Ready for review. Niko should surface SDLC
 `blocked`/sync-partial states clearly by reading `last_error` and `last_sync`;
 approval sync failure must retry `sync_run` instead of approving GitHub again.
+Slice 7 adds dual transport behind `NIKO_SDLC_TRANSPORT=cli|api`; CLI remains the
+default until Slice 8 cutover evidence passes. HTTP writes use durable operations,
+idempotency and polling. Niko must never auto-fallback an API write to CLI after
+an ambiguous submit or timeout because that can execute the workflow twice.
 `revalidate_design` rereads the frozen Requirement V2 and the latest Phase 2
 design, then runs the hybrid V2 validator in a bounded current-version repair
 loop. Each version receives deterministic traceability/parser/cross-diagram

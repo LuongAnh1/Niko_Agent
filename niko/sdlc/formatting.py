@@ -38,6 +38,16 @@ def format_sdlc_reply(result: SdlcResult) -> str:
 
     if not result.ok:
         detail = _clip_text(result.message or "SDLC_Harness chưa xử lý được yêu cầu này.", 260)
+        if result.error_code == "sdlc_operation_pending" and result.operation_id:
+            lines = [
+                "Dạ tác vụ đã được SDLC_Harness nhận và vẫn đang xử lý anh.",
+                f"Chi tiết: {detail}",
+                f"Mã operation: `{_inline_code(result.operation_id)}`",
+            ]
+            if result.run_id:
+                lines.append(f"Mã run: `{_inline_code(result.run_id)}`")
+            lines.append("Niko không chạy lại tác vụ bằng CLI để tránh thực thi trùng.")
+            return "\n".join(lines)
         if result.error_code:
             return (
                 f"Dạ SDLC_Harness đang lỗi `{_inline_code(result.error_code)}`.\n"
@@ -148,7 +158,7 @@ def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str =
         "waiting_implementation_plan_review": "đang chờ anh review implementation plan trước khi sang code/PR",
         "implementation_ready": "đã sẵn sàng bắt đầu triển khai code trong workspace của run",
         "implementation_writing": "đang viết và chỉnh sửa code trong workspace của run",
-        "implementation_executing": "Developer đang triển khai một lát công việc trong workspace của run",
+        "implementation_executing": "Developer đang triển khai từng work item trong workspace của run",
         "implementation_paused": "Developer đã tạm dừng an toàn và có thể tiếp tục lát công việc chưa xong",
         "implementation_written": "đã tạo code, đang chờ chạy verification",
         "implementation_testing": "đang chạy compile và unit verification",
@@ -292,7 +302,7 @@ def _format_developer_progress(result: SdlcResult) -> list[str]:
     if current:
         lines.append(f"- Lượt triển khai hiện tại: `{_inline_code(_clip_text(current, 80))}`.")
     if result.status == "implementation_paused" and "continue_run" in result.allowed_next_actions:
-        lines.append("- Journal đã giữ lượt triển khai đã hoàn thành; lần chạy tiếp tiếp tục từ task đang dở.")
+        lines.append("- Journal đã giữ các work item hoàn thành; lần chạy tiếp sẽ resume từ work item đang dở.")
     return lines[:4]
 
 

@@ -287,8 +287,9 @@ Phase 4 plan is `docs/plans/sdlc/2026-10-15/phase4-integration-plan.md`.
 
 Niko hiện là lớp hội thoại/điều phối cho SDLC_Harness, không phải nơi tự xử lý
 pipeline requirement. Khi người dùng yêu cầu chạy use case hoặc Jira issue đã
-cấu hình, Niko nhận diện intent, gọi CLI JSON của `../SDLC_Harness`, rồi format
-kết quả ngắn gọn để trả về Telegram.
+cấu hình, Niko nhận diện intent, gọi CLI JSON hoặc HTTP API của
+`../SDLC_Harness`, rồi format kết quả ngắn gọn để trả về Telegram. Slice 7 giữ
+`NIKO_SDLC_TRANSPORT=cli` làm mặc định trong giai đoạn dual transport.
 
 Ranh giới hiện tại:
 
@@ -307,13 +308,16 @@ Ranh giới hiện tại:
   approval qua Telegram. Các write action chạy nền theo `run_id`; approval chỉ
   mở khi `NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1` và chỉ chuyển đúng Draft PR
   sang Ready for review.
+- HTTP transport dùng operation `202` bền vững, idempotency key và polling. Khi
+  API timeout hoặc lỗi, Niko không tự fallback write action sang CLI để tránh
+  thực thi trùng; operation quá thời gian theo dõi được báo lại bằng operation ID.
 - Controlled live smoke ngày 2026-10-15 đã đưa run
   `run_20261013_160421_f661babf` tới `code_review_approved`: GitHub PR #1 ở trạng
   thái Ready/Open và chưa merge; Jira comment `10104` cùng Confluence page
   `2129921` đã nhận kết quả sync sau approval.
 - Dashboard có `NIKO_SDLC_SYNC_MODE`. Mặc định `mock` để test không ghi tool thật;
   chọn `real` chỉ khi chủ động muốn SDLC_Harness cập nhật Jira/Confluence. Niko
-  truyền mode này thành `--sync-mode` thay vì dựa ngầm vào `.env` bên SDLC.
+  truyền mode này rõ ràng qua CLI hoặc API thay vì dựa ngầm vào `.env` bên SDLC.
 - Niko chưa hỗ trợ `request_change`, context động, hoặc tự sửa artifact SDLC từ
   Telegram.
 - SDLC_Harness sở hữu worktree-per-run và kiểm tra PR/workspace identity dưới
