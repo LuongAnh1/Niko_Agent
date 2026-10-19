@@ -1,4 +1,4 @@
-"""Định dạng contract SDLC_Harness thành phản hồi ngắn, an toàn cho chat."""
+"""Định dạng response API của SDLC_Harness thành phản hồi chat có thể hành động."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def format_sdlc_reply(result: SdlcResult) -> str:
             ]
             if result.run_id:
                 lines.append(f"Mã run: `{_inline_code(result.run_id)}`")
-            lines.append("Niko không chạy lại tác vụ bằng CLI để tránh thực thi trùng.")
+            lines.append("Niko không tự tạo operation mới để tránh thực thi trùng.")
             return "\n".join(lines)
         if result.error_code:
             return (

@@ -163,7 +163,6 @@ class SdlcHttpTransportTests(unittest.TestCase):
         self.environment = patch.dict(
             os.environ,
             {
-                "NIKO_SDLC_TRANSPORT": "api",
                 "NIKO_SDLC_API_BASE_URL": f"http://{host}:{port}",
                 "NIKO_SDLC_API_TOKEN": "fixture-token",
                 "NIKO_SDLC_API_REQUEST_TIMEOUT_SECONDS": "1",
@@ -269,17 +268,15 @@ class SdlcHttpTransportTests(unittest.TestCase):
         self.assertEqual(result.operation_id, "op_fixture_1")
         self.assertEqual(result.run_id, self.server.run_id)
 
-    def test_interrupted_operation_is_preserved_without_cli_replay(self) -> None:
+    def test_interrupted_operation_is_preserved_without_new_submit(self) -> None:
         self.server.operation_mode = "interrupted"
 
-        with patch("niko.sdlc.client.subprocess.run") as cli_run:
-            result = SdlcClient().continue_run(run_id=self.server.run_id, requested_by="telegram:7")
+        result = SdlcClient().continue_run(run_id=self.server.run_id, requested_by="telegram:7")
 
         self.assertFalse(result.ok)
         self.assertEqual(result.error_code, "operation_interrupted")
         self.assertEqual(result.operation_id, "op_fixture_1")
         self.assertEqual(result.run_id, self.server.run_id)
-        cli_run.assert_not_called()
 
     def test_http_error_json_is_preserved_for_supported_statuses(self) -> None:
         transport = HttpSdlcTransport()
@@ -312,29 +309,34 @@ class SdlcHttpTransportTests(unittest.TestCase):
         self.assertEqual(invalid["error_code"], "sdlc_invalid_json")
         self.assertEqual(unavailable["error_code"], "sdlc_api_unavailable")
 
-    def test_poll_timeout_reports_pending_without_cli_fallback(self) -> None:
+    def test_poll_timeout_reports_pending_without_new_operation(self) -> None:
         self.server.operation_mode = "pending"
         os.environ["NIKO_SDLC_API_OPERATION_TIMEOUT_SECONDS"] = "0.1"
 
-        with patch("niko.sdlc.client.subprocess.run") as subprocess_run:
-            result = SdlcClient().sync_run(run_id=self.server.run_id, requested_by="telegram:7")
+        result = SdlcClient().sync_run(run_id=self.server.run_id, requested_by="telegram:7")
 
         self.assertFalse(result.ok)
         self.assertEqual(result.error_code, "sdlc_operation_pending")
         self.assertEqual(result.operation_id, "op_fixture_1")
-        subprocess_run.assert_not_called()
         reply = format_sdlc_reply(result)
         self.assertIn("op_fixture_1", reply)
-        self.assertIn("không chạy lại", reply)
+        self.assertIn("không tự tạo operation mới", reply)
 
-    def test_config_snapshot_masks_api_token_and_keeps_cli_default(self) -> None:
+    def test_config_snapshot_exposes_only_api_transport_settings(self) -> None:
         snapshot = config_snapshot()
         business = next(section for section in snapshot["sections"] if section["id"] == "business")
         fields = {field["name"]: field for field in business["fields"]}
 
         self.assertEqual(fields["NIKO_SDLC_API_TOKEN"]["value"], MASKED_SECRET_VALUE)
-        self.assertEqual(fields["NIKO_SDLC_TRANSPORT"]["value"], "api")
-        self.assertEqual(config_field_index()["NIKO_SDLC_TRANSPORT"]["default"], "cli")
+        self.assertNotIn("NIKO_SDLC_TRANSPORT", fields)
+        for removed in (
+            "SDLC_HARNESS_WORKDIR",
+            "SDLC_HARNESS_PYTHON_COMMAND",
+            "SDLC_HARNESS_TIMEOUT_SECONDS",
+            "SDLC_HARNESS_LLM_MODE",
+        ):
+            self.assertNotIn(removed, fields)
+            self.assertNotIn(removed, config_field_index())
 
 
 class SdlcHttpRetryTests(unittest.TestCase):
@@ -381,55 +383,30 @@ class SdlcHttpRetryTests(unittest.TestCase):
         self.assertEqual(len(submit_keys), 2)
         self.assertEqual(submit_keys[0], submit_keys[1])
 
-    def test_facade_reloads_transport_setting_and_never_falls_back(self) -> None:
-        cli = MagicMock()
-        cli.run.return_value = {"ok": True, "run_id": "run_cli", "status": "done"}
-        http = MagicMock()
-        http.get_status.return_value = {
-            "ok": False,
-            "error_code": "sdlc_api_unavailable",
-            "message": "offline",
-        }
-        client = SdlcClient(cli_transport=cli, http_transport=http)
-
-        with patch.dict(os.environ, {"NIKO_SDLC_TRANSPORT": "cli"}, clear=False):
-            cli_result = client.get_status(run_id="run_cli")
-        with patch.dict(os.environ, {"NIKO_SDLC_TRANSPORT": "api"}, clear=False):
-            api_result = client.get_status(run_id="run_api")
-
-        self.assertTrue(cli_result.ok)
-        self.assertEqual(api_result.error_code, "sdlc_api_unavailable")
-        cli.run.assert_called_once()
-        http.get_status.assert_called_once_with(run_id="run_api")
-
-    def test_cli_and_http_payloads_have_result_contract_parity(self) -> None:
-        payload = {
+    def test_deprecated_cli_environment_does_not_change_api_client(self) -> None:
+        transport = MagicMock()
+        transport.get_status.return_value = {
             "ok": True,
-            "run_id": "run_parity",
-            "source_ref": "dataset_use_case:eTour:UC1",
-            "current_phase": "design_review",
-            "status": "waiting_design_approval",
-            "summary_for_user": "Design ready.",
-            "pending_checkpoint": {"type": "design_approval"},
-            "allowed_next_actions": ["approve_checkpoint", "get_status"],
-            "latest_artifacts": {"design_artifact": {"url": "/artifact"}},
-            "quality_reports": {"design_validation": {"ok": True}},
-            "last_sync": {"status": "mock_synced"},
-            "last_error": None,
-            "workspace": {},
+            "run_id": "run_api",
+            "status": "done",
         }
-        cli = MagicMock()
-        cli.run.return_value = payload
-        http = MagicMock()
-        http.get_status.return_value = payload
-        client = SdlcClient(cli_transport=cli, http_transport=http)
+        client = SdlcClient(transport=transport)
 
-        with patch.dict(os.environ, {"NIKO_SDLC_TRANSPORT": "cli"}, clear=False):
-            cli_result = client.get_status(run_id="run_parity")
-        with patch.dict(os.environ, {"NIKO_SDLC_TRANSPORT": "api"}, clear=False):
-            api_result = client.get_status(run_id="run_parity")
+        with patch.dict(
+            os.environ,
+            {
+                "NIKO_SDLC_TRANSPORT": "cli",
+                "SDLC_HARNESS_WORKDIR": "missing-workdir",
+                "SDLC_HARNESS_PYTHON_COMMAND": "missing-python",
+                "SDLC_HARNESS_TIMEOUT_SECONDS": "1",
+                "SDLC_HARNESS_LLM_MODE": "fake",
+            },
+            clear=False,
+        ):
+            result = client.get_status(run_id="run_api")
 
-        self.assertEqual(cli_result, api_result)
+        self.assertTrue(result.ok)
+        transport.get_status.assert_called_once_with(run_id="run_api")
 
 
 if __name__ == "__main__":

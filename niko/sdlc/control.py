@@ -1,4 +1,4 @@
-"""Policy preflight cho các lệnh điều khiển SDLC trước khi gọi CLI ghi."""
+"""Policy preflight trước khi Niko gửi write action tới SDLC HTTP API."""
 
 from __future__ import annotations
 

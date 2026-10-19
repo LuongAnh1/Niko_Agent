@@ -1,7 +1,7 @@
-"""Client tích hợp SDLC_Harness cho Niko.
+"""Ranh giới HTTP API giữa Niko và SDLC_Harness.
 
-Package này là ranh giới mỏng: Niko chỉ gọi CLI/API và đọc JSON, không tự
-load fixture/Jira/dataset của workflow SDLC.
+Niko chỉ gửi action và đọc JSON trạng thái. Việc load source, chạy workflow,
+ghi artifact, quản lý workspace và sync tool luôn thuộc SDLC_Harness.
 """
 
 from niko.sdlc.client import (
@@ -15,8 +15,6 @@ from niko.sdlc.client import (
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
     ROUTE_SDLC_SYNC,
-    CliSdlcTransport,
-    HttpSdlcTransport,
     SdlcClient,
     SdlcRequest,
     SdlcResult,
@@ -37,8 +35,6 @@ __all__ = [
     "ROUTE_SDLC_START_JIRA",
     "ROUTE_SDLC_STATUS",
     "ROUTE_SDLC_SYNC",
-    "CliSdlcTransport",
-    "HttpSdlcTransport",
     "SdlcClient",
     "SdlcRequest",
     "SdlcResult",

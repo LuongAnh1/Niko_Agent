@@ -1,4 +1,4 @@
-"""Background job lifecycle for long-running SDLC_Harness actions."""
+"""Vòng đời background job khi Niko chờ SDLC HTTP operation dài."""
 
 from __future__ import annotations
 

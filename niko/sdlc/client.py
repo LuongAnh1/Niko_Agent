@@ -1,23 +1,19 @@
-"""Adapter transport từ Niko sang SDLC_Harness.
+"""HTTP API client từ Niko sang SDLC_Harness.
 
-Niko giữ vai trò hội thoại và điều phối trạng thái trước người dùng. Mọi việc
-load source, tạo artifact, checkpoint và sync tool của workflow SDLC nằm ở repo
-SDLC_Harness; file này chỉ gọi CLI/HTTP và chuẩn hóa JSON trả về.
+Niko giữ hội thoại và điều phối trạng thái trước người dùng. SDLC_Harness sở hữu
+source loading, artifact, checkpoint, workflow state và tool sync. Module này chỉ
+gửi HTTP JSON, theo dõi operation bền vững và chuẩn hóa response cho Niko.
 
-Các lệnh có thể ghi Jira/Confluence luôn truyền `--sync-mode` từ
-`NIKO_SDLC_SYNC_MODE`; mặc định `mock` để test Niko không vô tình ghi tool thật.
+Mọi write request truyền rõ `NIKO_SDLC_SYNC_MODE`; mặc định là `mock`. Khi submit
+có kết quả chưa xác định, client không tạo operation mới bằng một đường khác.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from pathlib import Path
 import re
 import socket
-import shlex
-import shutil
-import subprocess
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -25,16 +21,11 @@ from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from niko.config import env_flag, env_value, resolve_project_path
+from niko.config import env_flag, env_value
 from niko.harness.runtime_log import default_runtime_logger
 
 
-DEFAULT_SDLC_HARNESS_WORKDIR = "../SDLC_Harness"
-DEFAULT_SDLC_HARNESS_PYTHON_COMMAND = "python"
-DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS = 120
-DEFAULT_SDLC_HARNESS_LLM_MODE = "fake"
-DEFAULT_SDLC_HARNESS_SYNC_MODE = "mock"
-DEFAULT_SDLC_TRANSPORT = "cli"
+DEFAULT_SDLC_SYNC_MODE = "mock"
 DEFAULT_SDLC_API_BASE_URL = "http://127.0.0.1:7788"
 DEFAULT_SDLC_API_REQUEST_TIMEOUT_SECONDS = 10.0
 DEFAULT_SDLC_API_OPERATION_TIMEOUT_SECONDS = 1800.0
@@ -220,79 +211,6 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
     return None
 
 
-class CliSdlcTransport:
-    """CLI subprocess transport giữ nguyên contract JSON lịch sử."""
-
-    def run(self, args: list[str], *, event: str) -> dict[str, Any]:
-        try:
-            command = [*_python_command(), "-m", "sdlc_harness.cli", *args]
-            workdir = _sdlc_workdir()
-            timeout_seconds = _timeout_seconds()
-            default_runtime_logger().event(
-                "sdlc",
-                event,
-                f"Goi SDLC_Harness: {args[0]}",
-                data={
-                    "transport": "cli",
-                    "workdir": str(workdir),
-                    "command": _safe_command_for_log(command),
-                    "timeout_seconds": timeout_seconds,
-                },
-            )
-            completed = subprocess.run(
-                command,
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except RuntimeError as exc:
-            return _error_payload("sdlc_config_error", str(exc), str(exc))
-        except subprocess.TimeoutExpired as exc:
-            return _error_payload("sdlc_timeout", f"SDLC_Harness chay qua lau: {timeout_seconds}s", str(exc))
-        except FileNotFoundError as exc:
-            return _error_payload("sdlc_command_not_found", f"Khong tim thay command SDLC: {command[0]}", str(exc))
-        except OSError as exc:
-            return _error_payload("sdlc_process_error", f"Khong chay duoc SDLC_Harness: {exc}", str(exc))
-
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError:
-            if completed.returncode != 0:
-                return _error_payload(
-                    "sdlc_cli_failed",
-                    f"SDLC_Harness command failed with exit code {completed.returncode}.",
-                    _process_output_summary(completed),
-                )
-            return _error_payload(
-                "sdlc_invalid_json",
-                "SDLC_Harness khong tra JSON hop le.",
-                _process_output_summary(completed),
-            )
-
-        if not isinstance(payload, dict):
-            error_code = "sdlc_cli_failed" if completed.returncode != 0 else "sdlc_invalid_json"
-            message = (
-                f"SDLC_Harness command failed with exit code {completed.returncode}."
-                if completed.returncode != 0
-                else "SDLC_Harness JSON khong phai object."
-            )
-            return _error_payload(error_code, message, _process_output_summary(completed))
-
-        if completed.returncode != 0:
-            if payload.get("ok") is False and str(payload.get("error_code") or "").strip():
-                return payload
-            return _error_payload(
-                "sdlc_cli_failed",
-                f"SDLC_Harness command failed with exit code {completed.returncode}.",
-                _process_output_summary(completed),
-            )
-        return payload
-
-
 class HttpSdlcTransport:
     """HTTP JSON transport với operation polling và idempotency an toàn."""
 
@@ -378,7 +296,7 @@ class HttpSdlcTransport:
         if receipt.get("error_code") in {"sdlc_api_request_timeout", "sdlc_api_unavailable"}:
             return _error_payload(
                 "sdlc_api_submit_unknown",
-                "Chua xac dinh duoc SDLC API da nhan tac vu hay chua; khong fallback sang CLI.",
+                "Chua xac dinh duoc SDLC API da nhan tac vu hay chua; khong tao operation moi de tranh thuc thi trung.",
                 f"path={path}; attempts=2",
             )
         if receipt.get("ok") is not True:
@@ -570,87 +488,44 @@ class HttpSdlcTransport:
 
 
 class SdlcClient:
-    """Facade nghiệp vụ giữ contract chung cho CLI và HTTP transport."""
+    """Facade nghiệp vụ API-only giữ contract ổn định cho Niko."""
 
     def __init__(
         self,
         *,
-        cli_transport: CliSdlcTransport | None = None,
-        http_transport: HttpSdlcTransport | None = None,
+        transport: HttpSdlcTransport | None = None,
     ) -> None:
-        self._cli_transport = cli_transport or CliSdlcTransport()
-        self._http_transport = http_transport or HttpSdlcTransport()
+        self._transport = transport or HttpSdlcTransport()
 
     def start_or_get_run(self, *, dataset: str, use_case: str, requested_by: str) -> SdlcResult:
-        if _transport_name() == "api":
-            payload = self._http_transport.create_run(
-                source={"type": "dataset", "dataset": dataset, "use_case": use_case},
-                requested_by=requested_by,
-                event=ROUTE_SDLC_START,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_START)
-        args = [
-            "start-or-get-run",
-            "--dataset",
-            dataset,
-            "--use-case",
-            use_case,
-            "--requested-by",
-            requested_by,
-        ]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(
-            args,
+        payload = self._transport.create_run(
+            source={"type": "dataset", "dataset": dataset, "use_case": use_case},
+            requested_by=requested_by,
             event=ROUTE_SDLC_START,
         )
         return _result_from_payload(payload, ROUTE_SDLC_START)
 
     def start_from_jira(self, *, issue_key: str, requested_by: str) -> SdlcResult:
-        if _transport_name() == "api":
-            payload = self._http_transport.create_run(
-                source={"type": "jira", "issue_key": issue_key},
-                requested_by=requested_by,
-                event=ROUTE_SDLC_START_JIRA,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_START_JIRA)
-        args = [
-            "start-from-jira",
-            "--issue-key",
-            issue_key,
-            "--requested-by",
-            requested_by,
-        ]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(
-            args,
+        payload = self._transport.create_run(
+            source={"type": "jira", "issue_key": issue_key},
+            requested_by=requested_by,
             event=ROUTE_SDLC_START_JIRA,
         )
         return _result_from_payload(payload, ROUTE_SDLC_START_JIRA)
 
     def get_status(self, *, run_id: str) -> SdlcResult:
-        if _transport_name() == "api":
-            return _result_from_payload(
-                self._http_transport.get_status(run_id=run_id),
-                ROUTE_SDLC_STATUS,
-            )
-        payload = self._run_json(["get-status", "--run-id", run_id], event=ROUTE_SDLC_STATUS)
-        return _result_from_payload(payload, ROUTE_SDLC_STATUS)
+        return _result_from_payload(
+            self._transport.get_status(run_id=run_id),
+            ROUTE_SDLC_STATUS,
+        )
 
     def approve_checkpoint(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="approve_checkpoint",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_APPROVE,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_APPROVE)
-        args = ["approve-checkpoint", "--run-id", run_id]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_APPROVE)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="approve_checkpoint",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_APPROVE,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_APPROVE)
 
     def answer_clarification(
@@ -663,121 +538,73 @@ class SdlcClient:
     ) -> SdlcResult:
         """Trả lời đúng câu hỏi requirement hiện hành của một run V2."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="answer_clarification",
-                requested_by=answered_by,
-                event=ROUTE_SDLC_ANSWER_CLARIFICATION,
-                arguments={
-                    "question_id": question_id,
-                    "answer": answer,
-                    "answered_by": answered_by,
-                },
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_ANSWER_CLARIFICATION)
-
-        args = [
-            "answer-clarification",
-            "--run-id",
-            run_id,
-            "--question-id",
-            question_id,
-            "--answer",
-            answer,
-            "--answered-by",
-            answered_by,
-        ]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_ANSWER_CLARIFICATION)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="answer_clarification",
+            requested_by=answered_by,
+            event=ROUTE_SDLC_ANSWER_CLARIFICATION,
+            arguments={
+                "question_id": question_id,
+                "answer": answer,
+                "answered_by": answered_by,
+            },
+        )
         return _result_from_payload(payload, ROUTE_SDLC_ANSWER_CLARIFICATION)
 
     def continue_run(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Chạy bước kế tiếp; Phase 4 có thể sync checkpoint theo mode cấu hình."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="continue_run",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_CONTINUE,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_CONTINUE)
-        args = ["continue-run", "--run-id", run_id]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_CONTINUE)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="continue_run",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_CONTINUE,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_CONTINUE)
 
     def revalidate_implementation(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Chạy lại Verification Runner và Validator mà không sửa code."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="revalidate_implementation",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_REVALIDATE,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE)
-        args = ["revalidate-implementation", "--run-id", run_id]
-        _append_llm_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="revalidate_implementation",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_REVALIDATE,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE)
 
     def revalidate_implementation_plan(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Tạo version plan mới từ input đã khóa và chạy lại Validator Phase 3."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="revalidate_implementation_plan",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_REVALIDATE_PLAN,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_PLAN)
-        args = ["revalidate-implementation-plan", "--run-id", run_id]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE_PLAN)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="revalidate_implementation_plan",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_REVALIDATE_PLAN,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_PLAN)
 
     def revalidate_design(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Chạy lại Design Validator từ Requirement V2 đã khóa."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="revalidate_design",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_REVALIDATE_DESIGN,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_DESIGN)
-        args = ["revalidate-design", "--run-id", run_id]
-        _append_llm_mode(args)
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_REVALIDATE_DESIGN)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="revalidate_design",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_REVALIDATE_DESIGN,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_DESIGN)
 
     def sync_run(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""
 
-        if _transport_name() == "api":
-            payload = self._http_transport.run_action(
-                run_id=run_id,
-                action="sync_run",
-                requested_by=requested_by,
-                event=ROUTE_SDLC_SYNC,
-            )
-            return _result_from_payload(payload, ROUTE_SDLC_SYNC)
-        args = ["sync-run", "--run-id", run_id]
-        _append_sync_mode(args)
-        payload = self._run_json(args, event=ROUTE_SDLC_SYNC)
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="sync_run",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_SYNC,
+        )
         return _result_from_payload(payload, ROUTE_SDLC_SYNC)
-
-    def _run_json(self, args: list[str], *, event: str) -> dict[str, Any]:
-        return self._cli_transport.run(args, event=event)
 
 
 def _result_from_payload(payload: dict[str, Any], action: str) -> SdlcResult:
@@ -801,11 +628,6 @@ def _result_from_payload(payload: dict[str, Any], action: str) -> SdlcResult:
         operation_id=str(payload.get("operation_id") or ""),
         raw=payload,
     )
-
-
-def _transport_name() -> str:
-    value = env_value("NIKO_SDLC_TRANSPORT", DEFAULT_SDLC_TRANSPORT).strip().lower()
-    return value if value in {"cli", "api"} else DEFAULT_SDLC_TRANSPORT
 
 
 def _api_base_url() -> str:
@@ -856,8 +678,8 @@ def _api_poll_interval_seconds() -> float:
 
 
 def _sync_mode() -> str:
-    value = env_value("NIKO_SDLC_SYNC_MODE", DEFAULT_SDLC_HARNESS_SYNC_MODE).strip().lower()
-    return value if value in {"mock", "real", "both"} else DEFAULT_SDLC_HARNESS_SYNC_MODE
+    value = env_value("NIKO_SDLC_SYNC_MODE", DEFAULT_SDLC_SYNC_MODE).strip().lower()
+    return value if value in {"mock", "real", "both"} else DEFAULT_SDLC_SYNC_MODE
 
 
 def _decode_api_json(raw: bytes) -> dict[str, Any] | None:
@@ -870,58 +692,8 @@ def _decode_api_json(raw: bytes) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _python_command() -> list[str]:
-    raw_command = env_value("SDLC_HARNESS_PYTHON_COMMAND", DEFAULT_SDLC_HARNESS_PYTHON_COMMAND).strip()
-    args = shlex.split(raw_command, posix=False)
-    if args:
-        args[0] = shutil.which(args[0]) or args[0]
-    return args or [DEFAULT_SDLC_HARNESS_PYTHON_COMMAND]
-
-
-def _sdlc_workdir() -> Path:
-    raw_path = env_value("SDLC_HARNESS_WORKDIR", DEFAULT_SDLC_HARNESS_WORKDIR).strip() or DEFAULT_SDLC_HARNESS_WORKDIR
-    path = resolve_project_path(raw_path)
-    if not path.exists():
-        raise RuntimeError(f"Khong tim thay SDLC_Harness workdir: {path}")
-    return path
-
-
-def _timeout_seconds() -> int:
-    raw_value = env_value("SDLC_HARNESS_TIMEOUT_SECONDS", str(DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS)).strip()
-    try:
-        return max(1, int(raw_value))
-    except ValueError:
-        return DEFAULT_SDLC_HARNESS_TIMEOUT_SECONDS
-
-
-def _append_llm_mode(args: list[str]) -> None:
-    raw_mode = env_value("SDLC_HARNESS_LLM_MODE", DEFAULT_SDLC_HARNESS_LLM_MODE).strip()
-    if raw_mode:
-        args.extend(["--llm-mode", raw_mode])
-
-
-def _append_sync_mode(args: list[str]) -> None:
-    """Niko truyền rõ sync mode; không để `.env` SDLC vô tình ghi tool thật."""
-
-    args.extend(["--sync-mode", _sync_mode()])
-
-
 def _dict_value(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
-
-
-def _safe_command_for_log(command: list[str]) -> list[str]:
-    return [str(part) for part in command[:6]]
-
-
-def _process_output_summary(completed: subprocess.CompletedProcess[str]) -> str:
-    """Giữ metadata chẩn đoán mà không đưa raw stdout/stderr vào log hoặc reply."""
-
-    return (
-        f"exit_code={completed.returncode}; "
-        f"stdout_chars={len(completed.stdout or '')}; "
-        f"stderr_chars={len(completed.stderr or '')}"
-    )
 
 
 def _error_payload(error_code: str, message: str, detail: str = "") -> dict[str, Any]:

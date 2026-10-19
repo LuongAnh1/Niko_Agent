@@ -120,7 +120,6 @@ class SdlcApiProcessIntegrationTests(unittest.TestCase):
             {
                 "NIKO_AGENT_MODE": "two_agent",
                 "NIKO_SDLC_HARNESS_ENABLED": "1",
-                "NIKO_SDLC_TRANSPORT": "api",
                 "NIKO_SDLC_API_BASE_URL": f"http://127.0.0.1:{self.port}",
                 "NIKO_SDLC_API_TOKEN": self.token,
                 "NIKO_SDLC_API_REQUEST_TIMEOUT_SECONDS": "2",
@@ -130,7 +129,6 @@ class SdlcApiProcessIntegrationTests(unittest.TestCase):
                 "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "0",
                 "NIKO_RUNTIME_CONFIG_FILE": str(self.temp_path / "niko-config.json"),
                 "NIKO_RUNTIME_LOG_ENABLED": "0",
-                "SDLC_HARNESS_WORKDIR": str(self.temp_path / "missing-cli-workdir"),
             },
             clear=False,
         )
@@ -154,18 +152,16 @@ class SdlcApiProcessIntegrationTests(unittest.TestCase):
         message = SimpleNamespace(chat_id="slice-8-chat", user=SimpleNamespace(key="telegram:slice-8"))
         delivered: list[str] = []
 
-        with patch("niko.sdlc.client.subprocess.run") as cli_run:
-            route = app.handle_message("Niko thực hiện eTour UC1", message, delivered.append)
-            self.assertEqual(route, ROUTE_SDLC_START)
-            run_id = str(graph.finished[-1][4]["run_id"])
-            self.assertRegex(run_id, r"^run_\d{8}_\d{6}_[a-f0-9]+$")
+        route = app.handle_message("Niko thực hiện eTour UC1", message, delivered.append)
+        self.assertEqual(route, ROUTE_SDLC_START)
+        run_id = str(graph.finished[-1][4]["run_id"])
+        self.assertRegex(run_id, r"^run_\d{8}_\d{6}_[a-f0-9]+$")
 
-            route = app.handle_message(f"status {run_id}", message, delivered.append)
-            self.assertEqual(route, ROUTE_SDLC_STATUS)
+        route = app.handle_message(f"status {run_id}", message, delivered.append)
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
 
-            route = app.handle_message(f"duyệt {run_id}", message, delivered.append)
-            self.assertEqual(route, ROUTE_SDLC_APPROVE)
-            cli_run.assert_not_called()
+        route = app.handle_message(f"duyệt {run_id}", message, delivered.append)
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
 
         state = json.loads((self.runtime_root / "runs" / run_id / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["status"], "waiting_design_approval")

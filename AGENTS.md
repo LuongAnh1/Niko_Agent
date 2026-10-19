@@ -151,8 +151,8 @@ owner explicitly changes direction.
 - `niko/tools/<domain>/`: Loop tool adapters such as memory and Jira.
 - `niko/memory/`: SQLite chat memory baseline and correction/consolidation
   runtime.
-- `niko/sdlc/`: adapter từ Niko sang repo `../SDLC_Harness`; Niko chỉ gọi CLI/API
-  workflow và nhận JSON trạng thái, không tự kéo use case từ Jira.
+- `niko/sdlc/`: HTTP API client từ Niko sang repo `../SDLC_Harness`; Niko chỉ gửi
+  action và nhận JSON trạng thái, không tự kéo use case từ Jira.
 - `niko/runtime.py`: DeepSeek runtime cho Deep agent chính; Claude/FCC CLI helper
   là legacy fallback/debug.
 - `niko/harness/` and `niko/ops/`: traces, runtime logs, dashboard, config, bot
@@ -404,7 +404,7 @@ edit SDLC artifacts or handle change requests yet. Keep this boundary strict:
 ```text
 Telegram/user prompt
   -> Niko detects an SDLC intent
-  -> Niko calls SDLC_Harness CLI JSON or HTTP API through one client facade
+  -> Niko calls the SDLC_Harness HTTP API through one client facade
   -> SDLC_Harness loads Jira/fixture source, refines requirements, validates,
      writes runtime artifacts, syncs Jira/Confluence, and returns a compact
      machine-readable result
@@ -427,10 +427,12 @@ run in the background and return queued plus final replies. Code Review approval
 only request Draft -> Ready for review. Niko should surface SDLC
 `blocked`/sync-partial states clearly by reading `last_error` and `last_sync`;
 approval sync failure must retry `sync_run` instead of approving GitHub again.
-Slice 7 adds dual transport behind `NIKO_SDLC_TRANSPORT=cli|api`; CLI remains the
-default until Slice 8 cutover evidence passes. HTTP writes use durable operations,
-idempotency and polling. Niko must never auto-fallback an API write to CLI after
-an ambiguous submit or timeout because that can execute the workflow twice.
+Slice 8 cutover passed with live run `run_20261019_034156_05cfbb93` on
+2026-10-19. Niko is API-only for SDLC integration; its subprocess transport,
+transport selector and CLI-specific config were removed. HTTP writes use durable
+operations, idempotency and polling. After an ambiguous submit or timeout, Niko
+must not create a new operation through another path because that can execute
+the workflow twice. The standalone SDLC_Harness CLI remains an operator/debug tool.
 `revalidate_design` rereads the frozen Requirement V2 and the latest Phase 2
 design, then runs the hybrid V2 validator in a bounded current-version repair
 loop. Each version receives deterministic traceability/parser/cross-diagram
@@ -444,9 +446,9 @@ JSON contract exist. SDLC_Harness owns worktree-per-run identity and locking.
 Niko never checks out target-repo branches, manages worktrees, merges PRs, or
 enables auto-merge; the project owner always performs merge on GitHub.
 
-SDLC CLI commands that can write collaboration tools must receive an explicit
-`--sync-mode`. Niko owns the local switch `NIKO_SDLC_SYNC_MODE`, whose safe
-default is `mock`; use `real` only for an intentional Jira/Confluence live run.
+Niko owns the local switch `NIKO_SDLC_SYNC_MODE`, whose safe default is `mock`,
+and sends it explicitly in API requests; use `real` only for an intentional
+Jira/Confluence live run. SDLC_Harness owns its LLM and server runtime config.
 Phase 4 intent, formatter, background runner, integration fixture and controlled
 live smoke have passed. Keep approval default-off and require an intentional
 live run before enabling it.
