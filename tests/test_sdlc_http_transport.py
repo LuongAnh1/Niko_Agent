@@ -74,6 +74,24 @@ class _ApiFixtureHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            if self.server.operation_mode == "interrupted":
+                self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "operation_id": operation_id,
+                        "operation_status": "interrupted",
+                        "run_id": self.server.run_id,
+                        "result": None,
+                        "error": {
+                            "ok": False,
+                            "error_code": "operation_interrupted",
+                            "message": "Operation was interrupted by API restart.",
+                            "run_id": self.server.run_id,
+                        },
+                    },
+                )
+                return
             status = "running" if self.server.poll_count == 1 else "succeeded"
             self._send(
                 200,
@@ -250,6 +268,18 @@ class SdlcHttpTransportTests(unittest.TestCase):
         self.assertEqual(result.error_code, "invalid_run_action")
         self.assertEqual(result.operation_id, "op_fixture_1")
         self.assertEqual(result.run_id, self.server.run_id)
+
+    def test_interrupted_operation_is_preserved_without_cli_replay(self) -> None:
+        self.server.operation_mode = "interrupted"
+
+        with patch("niko.sdlc.client.subprocess.run") as cli_run:
+            result = SdlcClient().continue_run(run_id=self.server.run_id, requested_by="telegram:7")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "operation_interrupted")
+        self.assertEqual(result.operation_id, "op_fixture_1")
+        self.assertEqual(result.run_id, self.server.run_id)
+        cli_run.assert_not_called()
 
     def test_http_error_json_is_preserved_for_supported_statuses(self) -> None:
         transport = HttpSdlcTransport()
