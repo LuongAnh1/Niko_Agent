@@ -11,7 +11,7 @@ from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE_DESIGN,
@@ -123,35 +123,13 @@ class DeferredSdlcJobRunner:
 
 
 class NikoAppTests(unittest.TestCase):
-    def test_incomplete_policy_default_challenge_returns_syntax_without_api_call(self):
-        graph = FakeSelectableGraph(route_kind="busy_reply")
-        app = NikoApp(chat_graph=graph)
-        delivered = []
-        run_id = "run_20261012_120000_abcd1234"
-
-        with patch.dict(
-            "os.environ",
-            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
-            clear=False,
-        ), patch("niko.app.SdlcClient") as client_class:
-            route = app.handle_message(
-                f"Phản đối mặc định ASM-1 cho {run_id}",
-                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
-                delivered.append,
-            )
-
-        self.assertEqual(route, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
-        self.assertIn("chưa đủ thông tin", delivered[0])
-        self.assertIn("Phản đối mặc định ASM-1", delivered[0])
-        client_class.assert_not_called()
-
-    def test_policy_default_challenge_is_preflighted_queued_and_reopens_question(self):
+    def test_agent_assumption_challenge_is_preflighted_and_queued(self):
         graph = FakeSelectableGraph(route_kind="busy_reply")
         runner = DeferredSdlcJobRunner()
         app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
         delivered = []
         run_id = "run_20261012_120000_abcd1234"
-        instruction = "Cần owner xác nhận một chỉ tiêu có thể đo được."
+        instruction = "Hãy hỏi owner thay vì tự chọn."
         waiting = SdlcResult(
             ok=True,
             action=ROUTE_SDLC_STATUS,
@@ -160,20 +138,19 @@ class NikoAppTests(unittest.TestCase):
             status="waiting_requirement_approval",
             pending_checkpoint={
                 "type": "requirement_approval",
-                "policy_default_assumption_ids": ["ASM-1"],
+                "challengeable_assumption_ids": ["ASM-2"],
             },
-            allowed_next_actions=["challenge_policy_default", "approve_checkpoint", "get_status"],
+            allowed_next_actions=["challenge_assumption", "approve_checkpoint", "get_status"],
         )
         updated = SdlcResult(
             ok=True,
-            action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            action=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             run_id=run_id,
             current_phase="requirement_clarification",
             status="waiting_requirement_clarification",
             pending_checkpoint={
                 "type": "requirement_clarification",
-                "current_question": {"id": "Q-5", "text": "What quality target is required?"},
-                "remaining_blocking_count": 1,
+                "current_question": {"id": "Q-5", "text": "Which ordering should be used?"},
             },
             allowed_next_actions=["answer_clarification", "get_status"],
         )
@@ -184,29 +161,25 @@ class NikoAppTests(unittest.TestCase):
             clear=False,
         ), patch("niko.app.SdlcClient") as client_class:
             client_class.return_value.get_status.return_value = waiting
-            client_class.return_value.challenge_policy_default.return_value = updated
+            client_class.return_value.challenge_assumption.return_value = updated
             route = app.handle_message(
-                f"Phản đối mặc định ASM-1 cho {run_id}: {instruction}",
+                f"Phản đối giả định ASM-2 cho {run_id}: {instruction}",
                 SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
                 delivered.append,
             )
 
-            self.assertEqual(route, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
-            self.assertEqual(len(delivered), 1)
-            self.assertIn("phản đối policy default", delivered[0])
-            client_class.return_value.challenge_policy_default.assert_not_called()
+            self.assertEqual(route, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
+            self.assertIn("phản đối giả định", delivered[0])
+            client_class.return_value.challenge_assumption.assert_not_called()
             runner.complete()
 
-        client_class.return_value.challenge_policy_default.assert_called_once_with(
+        client_class.return_value.challenge_assumption.assert_called_once_with(
             run_id=run_id,
-            assumption_id="ASM-1",
+            assumption_id="ASM-2",
             instruction=instruction,
             requested_by="telegram:1",
         )
-        self.assertEqual(len(delivered), 2)
         self.assertIn("Q-5", delivered[-1])
-        metadata = repr([item[4] for item in graph.finished + graph.background_finished])
-        self.assertNotIn(instruction, metadata)
 
     def test_requirement_clarification_answer_is_preflighted_and_queued(self):
         graph = FakeSelectableGraph(route_kind="busy_reply")

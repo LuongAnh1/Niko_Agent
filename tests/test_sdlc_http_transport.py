@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from niko.ops.config_schema import MASKED_SECRET_VALUE, config_field_index, config_snapshot
 from niko.sdlc.client import (
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_START_JIRA,
     HttpSdlcTransport,
     SdlcClient,
@@ -232,26 +232,23 @@ class SdlcHttpTransportTests(unittest.TestCase):
             },
         )
 
-    def test_policy_default_challenge_uses_outer_actor_and_minimal_arguments(self) -> None:
-        result = SdlcClient().challenge_policy_default(
+    def test_agent_assumption_challenge_uses_generic_api_action(self) -> None:
+        result = SdlcClient().challenge_assumption(
             run_id=self.server.run_id,
-            assumption_id="ASM-1",
-            instruction="Ask the owner for a measurable target.",
+            assumption_id="ASM-2",
+            instruction="Ask the owner instead.",
             requested_by="telegram:9",
         )
 
         self.assertTrue(result.ok)
-        self.assertEqual(result.action, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
+        self.assertEqual(result.action, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
         _, path, _, body = self.server.requests[0]
         self.assertEqual(path, f"/api/v1/runs/{self.server.run_id}/actions")
-        self.assertEqual(body["action"], "challenge_policy_default")
+        self.assertEqual(body["action"], "challenge_assumption")
         self.assertEqual(body["requested_by"], "telegram:9")
         self.assertEqual(
             body["arguments"],
-            {
-                "assumption_id": "ASM-1",
-                "instruction": "Ask the owner for a measurable target.",
-            },
+            {"assumption_id": "ASM-2", "instruction": "Ask the owner instead."},
         )
 
     def test_all_supported_control_methods_map_to_api_actions(self) -> None:

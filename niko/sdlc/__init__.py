@@ -6,7 +6,7 @@ ghi artifact, quản lý workspace và sync tool luôn thuộc SDLC_Harness.
 
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -29,7 +29,7 @@ from niko.sdlc.control import code_review_approval_enabled
 
 __all__ = [
     "ROUTE_SDLC_ANSWER_CLARIFICATION",
-    "ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT",
+    "ROUTE_SDLC_CHALLENGE_ASSUMPTION",
     "ROUTE_SDLC_CLARIFY_MORE",
     "ROUTE_SDLC_APPROVE",
     "ROUTE_SDLC_CONTINUE",

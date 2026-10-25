@@ -37,7 +37,7 @@ ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
 ROUTE_SDLC_ANSWER_CLARIFICATION = "sdlc_answer_clarification"
-ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT = "sdlc_challenge_policy_default"
+ROUTE_SDLC_CHALLENGE_ASSUMPTION = "sdlc_challenge_assumption"
 ROUTE_SDLC_CLARIFY_MORE = "sdlc_clarify_more"
 ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
 ROUTE_SDLC_REVALIDATE = "sdlc_revalidate_implementation"
@@ -58,15 +58,15 @@ CLARIFICATION_ANSWER_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 CLARIFICATION_PREFIX_PATTERN = re.compile(r"^\s*(?:trả\s+lời|tra\s+loi)\b", re.IGNORECASE)
-POLICY_DEFAULT_CHALLENGE_PATTERN = re.compile(
-    r"^\s*(?:phản\s+đối\s+mặc\s+định|phan\s+doi\s+mac\s+dinh|challenge\s+policy\s+default)\s+"
+ASSUMPTION_CHALLENGE_PATTERN = re.compile(
+    r"^\s*(?:phản\s+đối\s+giả\s+định|phan\s+doi\s+gia\s+dinh|challenge\s+assumption)\s+"
     r"(?P<assumption_id>ASM-\d+)\s+(?:cho|for)\s+"
     r"(?P<run_id>run_\d{8}_\d{6}_[a-f0-9]+)\s*:\s*"
     r"(?P<instruction>\S(?:.*\S)?)\s*$",
     re.IGNORECASE | re.DOTALL,
 )
-POLICY_DEFAULT_CHALLENGE_PREFIX_PATTERN = re.compile(
-    r"^\s*(?:phản\s+đối\s+mặc\s+định|phan\s+doi\s+mac\s+dinh|challenge\s+policy\s+default)\b",
+ASSUMPTION_CHALLENGE_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:phản\s+đối\s+giả\s+định|phan\s+doi\s+gia\s+dinh|challenge\s+assumption)\b",
     re.IGNORECASE,
 )
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
@@ -202,25 +202,24 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
 
     text = str(prompt or "").strip()
     lowered = text.lower()
-    policy_challenge_match = POLICY_DEFAULT_CHALLENGE_PATTERN.match(text)
-    if policy_challenge_match:
+    assumption_challenge_match = ASSUMPTION_CHALLENGE_PATTERN.match(text)
+    if assumption_challenge_match:
         return SdlcRequest(
-            action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
-            run_id=policy_challenge_match.group("run_id"),
-            assumption_id=policy_challenge_match.group("assumption_id").upper(),
-            instruction=policy_challenge_match.group("instruction").strip(),
+            action=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+            run_id=assumption_challenge_match.group("run_id"),
+            assumption_id=assumption_challenge_match.group("assumption_id").upper(),
+            instruction=assumption_challenge_match.group("instruction").strip(),
         )
-    if POLICY_DEFAULT_CHALLENGE_PREFIX_PATTERN.match(text):
+    if ASSUMPTION_CHALLENGE_PREFIX_PATTERN.match(text):
         run_match = RUN_ID_PATTERN.search(text)
         assumption_match = re.search(r"\bASM-\d+\b", text, re.IGNORECASE)
         _, separator, trailing = text.partition(":")
         return SdlcRequest(
-            action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            action=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             run_id=run_match.group(0) if run_match else "",
             assumption_id=assumption_match.group(0).upper() if assumption_match else "",
             instruction=trailing.strip() if separator else "",
         )
-
     clarification_match = CLARIFICATION_ANSWER_PATTERN.match(text)
     if clarification_match:
         return SdlcRequest(
@@ -611,7 +610,7 @@ class SdlcClient:
         )
         return _result_from_payload(payload, ROUTE_SDLC_ANSWER_CLARIFICATION)
 
-    def challenge_policy_default(
+    def challenge_assumption(
         self,
         *,
         run_id: str,
@@ -619,19 +618,19 @@ class SdlcClient:
         instruction: str,
         requested_by: str,
     ) -> SdlcResult:
-        """Thu hồi một reviewed default rồi mở lại câu hỏi requirement nguồn."""
+        """Thu hồi một giả định do agent tự chọn rồi mở lại câu hỏi nguồn."""
 
         payload = self._transport.run_action(
             run_id=run_id,
-            action="challenge_policy_default",
+            action="challenge_assumption",
             requested_by=requested_by,
-            event=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            event=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             arguments={
                 "assumption_id": assumption_id,
                 "instruction": instruction,
             },
         )
-        return _result_from_payload(payload, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
+        return _result_from_payload(payload, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
 
     def continue_run(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Chạy bước kế tiếp; Phase 4 có thể sync checkpoint theo mode cấu hình."""

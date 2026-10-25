@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from niko.config import env_flag
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -54,7 +54,7 @@ PHASE1_3_APPROVAL_STATUSES = {
 
 _CONTRACT_ACTIONS = {
     ROUTE_SDLC_ANSWER_CLARIFICATION: "answer_clarification",
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT: "challenge_policy_default",
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION: "challenge_assumption",
     ROUTE_SDLC_CLARIFY_MORE: "clarify_more",
     ROUTE_SDLC_APPROVE: "approve_checkpoint",
     ROUTE_SDLC_CONTINUE: "continue_run",
@@ -72,7 +72,7 @@ PREFLIGHT_BACKGROUND_PENDING = "background_execution_pending"
 PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED = "code_review_approval_disabled"
 PREFLIGHT_EXECUTE_APPROVAL = "execute_phase1_3_approval"
 PREFLIGHT_QUESTION_NOT_CURRENT = "clarification_question_not_current"
-PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT = "policy_default_not_current"
+PREFLIGHT_ASSUMPTION_NOT_CURRENT = "assumption_not_current"
 
 
 def code_review_approval_enabled() -> bool:
@@ -121,16 +121,16 @@ def evaluate_sdlc_preflight(
             return SdlcPreflight(action, status_result, False, False, PREFLIGHT_QUESTION_NOT_CURRENT)
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
-    if action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT:
+    if action == ROUTE_SDLC_CHALLENGE_ASSUMPTION:
         checkpoint = status_result.pending_checkpoint if isinstance(status_result.pending_checkpoint, dict) else {}
-        active_ids = checkpoint.get("policy_default_assumption_ids")
+        active_ids = checkpoint.get("challengeable_assumption_ids")
         normalized_active_ids = {
             str(item).upper() for item in active_ids or [] if str(item).strip()
         } if isinstance(active_ids, list) else set()
         if status != "waiting_requirement_approval" or checkpoint.get("type") != "requirement_approval":
             return SdlcPreflight(action, status_result, False, False, PREFLIGHT_ACTION_NOT_ALLOWED)
         if not assumption_id or assumption_id.upper() not in normalized_active_ids:
-            return SdlcPreflight(action, status_result, False, False, PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT)
+            return SdlcPreflight(action, status_result, False, False, PREFLIGHT_ASSUMPTION_NOT_CURRENT)
         return SdlcPreflight(action, status_result, True, False, PREFLIGHT_BACKGROUND_PENDING)
 
     if action == ROUTE_SDLC_CLARIFY_MORE:
@@ -192,7 +192,7 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
     if preflight.reason == PREFLIGHT_BACKGROUND_PENDING:
         action_label = {
             ROUTE_SDLC_ANSWER_CLARIFICATION: "gửi câu trả lời làm rõ requirement",
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT: "phản đối policy default",
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION: "phản đối giả định của agent",
             ROUTE_SDLC_CLARIFY_MORE: "mở thêm một lượt làm rõ requirement",
             ROUTE_SDLC_CONTINUE: "chạy tiếp workflow",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
@@ -212,13 +212,13 @@ def preflight_notice(preflight: SdlcPreflight) -> str:
         current_id = str(question.get("id") or "") if isinstance(question, dict) else ""
         current_label = f" Câu hiện tại là `{current_id}`." if current_id else ""
         return f"Dạ câu hỏi làm rõ của run{run_label} đã thay đổi hoặc không còn hiện hành.{current_label} Em chưa gửi câu trả lời."
-    if preflight.reason == PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT:
+    if preflight.reason == PREFLIGHT_ASSUMPTION_NOT_CURRENT:
         checkpoint = preflight.status_result.pending_checkpoint
-        active_ids = checkpoint.get("policy_default_assumption_ids") if isinstance(checkpoint, dict) else None
+        active_ids = checkpoint.get("challengeable_assumption_ids") if isinstance(checkpoint, dict) else None
         active = [str(item) for item in active_ids or [] if str(item).strip()] if isinstance(active_ids, list) else []
-        active_label = f" Các default hiện hành: {', '.join(f'`{item}`' for item in active)}." if active else ""
+        active_label = f" Các giả định hiện hành: {', '.join(f'`{item}`' for item in active)}." if active else ""
         return (
-            f"Dạ policy default của run{run_label} đã thay đổi hoặc không còn hiện hành."
+            f"Dạ giả định của run{run_label} đã thay đổi hoặc không còn hiện hành."
             f"{active_label} Em chưa gửi lệnh phản đối."
         )
     if preflight.reason == PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED:

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -21,37 +21,28 @@ from niko.sdlc.client import (
 
 
 class SdlcClientTests(unittest.TestCase):
-    def test_detects_explicit_policy_default_challenge(self):
+    def test_detects_explicit_agent_assumption_challenge(self):
         run_id = "run_20261012_120000_abcd1234"
 
         for prompt in (
-            f"Phản đối mặc định asm-1 cho {run_id}: Cần người dùng xác nhận chỉ tiêu hiệu năng.",
-            f"phan doi mac dinh ASM-1 cho {run_id}: Can hoi lai owner.",
-            f"challenge policy default ASM-1 for {run_id}: Ask the owner instead.",
+            f"Phản đối giả định asm-1 cho {run_id}: Hãy hỏi người dùng thay vì tự chọn.",
+            f"phan doi gia dinh ASM-1 cho {run_id}: Can hoi lai owner.",
+            f"challenge assumption ASM-1 for {run_id}: Ask the owner instead.",
         ):
             with self.subTest(prompt=prompt):
                 request = detect_sdlc_request(prompt)
                 self.assertIsNotNone(request)
-                self.assertEqual(request.action, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
+                self.assertEqual(request.action, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
                 self.assertEqual(request.run_id, run_id)
                 self.assertEqual(request.assumption_id, "ASM-1")
                 self.assertTrue(request.instruction)
 
-    def test_incomplete_policy_challenge_stays_on_safe_control_route(self):
-        run_id = "run_20261012_120000_abcd1234"
-        prompts = (
-            f"Phản đối mặc định ASM-1 cho {run_id}",
-            f"Phản đối mặc định cho {run_id}: approve",
-            "Phản đối mặc định ASM-1: đồng ý",
-            f"Phản đối mặc định ASM-1 cho {run_id}:   ",
-        )
+    def test_incomplete_assumption_challenge_stays_on_safe_control_route(self):
+        request = detect_sdlc_request("Phản đối giả định ASM-1: hỏi lại người dùng")
 
-        for prompt in prompts:
-            with self.subTest(prompt=prompt):
-                request = detect_sdlc_request(prompt)
-                self.assertIsNotNone(request)
-                self.assertEqual(request.action, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
-                self.assertFalse(request.run_id and request.assumption_id and request.instruction)
+        self.assertIsNotNone(request)
+        self.assertEqual(request.action, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
+        self.assertFalse(request.run_id and request.assumption_id and request.instruction)
 
     def test_detects_explicit_requirement_clarification_answer(self):
         request = detect_sdlc_request(

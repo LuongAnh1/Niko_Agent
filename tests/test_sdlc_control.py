@@ -7,7 +7,7 @@ from unittest.mock import patch
 from niko.config import RUNTIME_CONFIG_ENV, update_runtime_config
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -20,11 +20,11 @@ from niko.sdlc.client import (
 )
 from niko.sdlc.control import (
     PREFLIGHT_ACTION_NOT_ALLOWED,
+    PREFLIGHT_ASSUMPTION_NOT_CURRENT,
     PREFLIGHT_BACKGROUND_PENDING,
     PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED,
     PREFLIGHT_EXECUTE_APPROVAL,
     PREFLIGHT_PHASE4_REQUIRED,
-    PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT,
     PREFLIGHT_QUESTION_NOT_CURRENT,
     PREFLIGHT_STATUS_ERROR,
     code_review_approval_enabled,
@@ -47,24 +47,24 @@ def _status(**overrides):
 
 
 class SdlcPreflightTests(unittest.TestCase):
-    def test_policy_default_challenge_requires_current_approval_assumption(self):
+    def test_agent_assumption_challenge_requires_current_approval_assumption(self):
         status = _status(
             current_phase="waiting_requirement_approval",
             status="waiting_requirement_approval",
             pending_checkpoint={
                 "type": "requirement_approval",
-                "policy_default_assumption_ids": ["ASM-1"],
+                "challengeable_assumption_ids": ["ASM-2"],
             },
-            allowed_next_actions=["challenge_policy_default", "approve_checkpoint", "get_status"],
+            allowed_next_actions=["challenge_assumption", "approve_checkpoint", "get_status"],
         )
 
         current = evaluate_sdlc_preflight(
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             status,
-            assumption_id="asm-1",
+            assumption_id="asm-2",
         )
         stale = evaluate_sdlc_preflight(
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             status,
             assumption_id="ASM-9",
         )
@@ -72,26 +72,8 @@ class SdlcPreflightTests(unittest.TestCase):
         self.assertTrue(current.allowed)
         self.assertEqual(current.reason, PREFLIGHT_BACKGROUND_PENDING)
         self.assertFalse(stale.allowed)
-        self.assertEqual(stale.reason, PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT)
-        self.assertIn("ASM-1", preflight_notice(stale))
-
-    def test_policy_default_challenge_rejects_wrong_checkpoint(self):
-        result = evaluate_sdlc_preflight(
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
-            _status(
-                current_phase="requirement_clarification",
-                status="waiting_requirement_clarification",
-                pending_checkpoint={
-                    "type": "requirement_clarification",
-                    "policy_default_assumption_ids": ["ASM-1"],
-                },
-                allowed_next_actions=["challenge_policy_default"],
-            ),
-            assumption_id="ASM-1",
-        )
-
-        self.assertFalse(result.allowed)
-        self.assertEqual(result.reason, PREFLIGHT_ACTION_NOT_ALLOWED)
+        self.assertEqual(stale.reason, PREFLIGHT_ASSUMPTION_NOT_CURRENT)
+        self.assertIn("ASM-2", preflight_notice(stale))
 
     def test_clarification_answer_requires_current_question_and_contract_action(self):
         clarification = _status(

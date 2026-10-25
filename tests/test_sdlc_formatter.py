@@ -2,7 +2,7 @@ import unittest
 
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_STATUS,
     SdlcResult,
 )
@@ -24,7 +24,7 @@ def _result(**overrides):
 
 
 class SdlcFormatterPhase4Tests(unittest.TestCase):
-    def test_formats_active_policy_default_and_copyable_challenge_command(self):
+    def test_formats_agent_assumption_and_copyable_challenge_command(self):
         run_id = "run_20261013_160421_f661babf"
         reply = format_sdlc_reply(
             _result(
@@ -33,35 +33,31 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
                 status="waiting_requirement_approval",
                 pending_checkpoint={
                     "type": "requirement_approval",
-                    "policy_default_assumption_ids": ["ASM-1"],
+                    "challengeable_assumption_ids": ["ASM-2"],
                 },
-                allowed_next_actions=["challenge_policy_default", "approve_checkpoint", "get_status"],
+                allowed_next_actions=["challenge_assumption", "approve_checkpoint", "get_status"],
             )
         )
 
-        self.assertIn("Policy default hiện hành: `ASM-1`", reply)
-        self.assertIn(f"Phản đối mặc định ASM-1 cho {run_id}: <lý do hoặc chỉ dẫn>", reply)
+        self.assertIn("Giả định do agent tự chọn, có thể phản đối: `ASM-2`", reply)
+        self.assertIn(f"Phản đối giả định ASM-2 cho {run_id}: <lý do hoặc chỉ dẫn>", reply)
 
-    def test_formats_challenge_result_as_reopened_clarification(self):
-        run_id = "run_20261013_160421_f661babf"
+    def test_formats_agent_assumption_challenge_as_reopened_clarification(self):
         reply = format_sdlc_reply(
             _result(
-                action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
-                run_id=run_id,
+                action=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
                 current_phase="requirement_clarification",
                 status="waiting_requirement_clarification",
                 pending_checkpoint={
                     "type": "requirement_clarification",
-                    "current_question": {"id": "Q-5", "text": "What quality target is required?"},
-                    "remaining_blocking_count": 1,
+                    "current_question": {"id": "Q-5", "text": "Which ordering should be used?"},
                 },
                 allowed_next_actions=["answer_clarification", "get_status"],
             )
         )
 
-        self.assertIn("đã thu hồi policy default", reply)
-        self.assertIn("Q-5", reply)
-        self.assertIn(f"Trả lời Q-5 cho {run_id}: <nội dung trả lời>", reply)
+        self.assertIn("đã thu hồi giả định của agent", reply)
+        self.assertIn("Trả lời Q-5", reply)
 
     def test_waiting_plan_can_suggest_revalidation_and_show_effective_contract(self):
         result = SdlcResult(

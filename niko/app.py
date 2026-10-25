@@ -19,7 +19,7 @@ from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
@@ -239,12 +239,12 @@ class NikoApp:
         if request is None:
             return ""
 
-        if request.action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT and not (
+        if request.action == ROUTE_SDLC_CHALLENGE_ASSUMPTION and not (
             request.run_id and request.assumption_id and request.instruction
         ):
             reply = (
-                "Dạ lệnh phản đối policy default chưa đủ thông tin nên em chưa thay đổi run.\n"
-                "Anh dùng cú pháp: `Phản đối mặc định ASM-1 cho run_...: <lý do hoặc chỉ dẫn>`."
+                "Dạ lệnh phản đối giả định chưa đủ thông tin nên em chưa thay đổi run.\n"
+                "Anh dùng cú pháp: `Phản đối giả định ASM-1 cho run_...: <lý do hoặc chỉ dẫn>`."
             )
             self._log_workflow_selected(
                 "sdlc_harness",
@@ -254,7 +254,7 @@ class NikoApp:
                 {
                     "run_id": request.run_id,
                     "assumption_id": request.assumption_id,
-                    "preflight_reason": "invalid_policy_default_challenge_syntax",
+                    "preflight_reason": "invalid_assumption_challenge_syntax",
                     "write_dispatched": False,
                 },
             )
@@ -268,7 +268,7 @@ class NikoApp:
                 meta={
                     "run_id": request.run_id,
                     "assumption_id": request.assumption_id,
-                    "preflight_reason": "invalid_policy_default_challenge_syntax",
+                    "preflight_reason": "invalid_assumption_challenge_syntax",
                     "write_dispatched": False,
                 },
             )
@@ -285,7 +285,7 @@ class NikoApp:
             result = client.get_status(run_id=request.run_id)
         elif request.action in {
             ROUTE_SDLC_ANSWER_CLARIFICATION,
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION,
             ROUTE_SDLC_CLARIFY_MORE,
             ROUTE_SDLC_APPROVE,
             ROUTE_SDLC_CONTINUE,
@@ -307,7 +307,7 @@ class NikoApp:
                 request.action
                 in {
                     ROUTE_SDLC_ANSWER_CLARIFICATION,
-                    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+                    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
                     ROUTE_SDLC_CLARIFY_MORE,
                     ROUTE_SDLC_APPROVE,
                     ROUTE_SDLC_CONTINUE,
@@ -427,7 +427,7 @@ class NikoApp:
     ) -> str:
         action_label = {
             ROUTE_SDLC_ANSWER_CLARIFICATION: "trả lời câu hỏi làm rõ requirement",
-            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT: "phản đối policy default của requirement",
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION: "phản đối giả định của agent trong requirement",
             ROUTE_SDLC_CLARIFY_MORE: "mở thêm một lượt làm rõ requirement, tối đa 5 câu",
             ROUTE_SDLC_CONTINUE: "chạy tiếp workflow",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
@@ -454,8 +454,8 @@ class NikoApp:
                     answer=request.answer,
                     answered_by=_user_key(gateway_message),
                 )
-            if request.action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT:
-                return self.sdlc_client.challenge_policy_default(
+            if request.action == ROUTE_SDLC_CHALLENGE_ASSUMPTION:
+                return self.sdlc_client.challenge_assumption(
                     run_id=request.run_id,
                     assumption_id=request.assumption_id,
                     instruction=request.instruction,

@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
     ROUTE_SDLC_APPROVE,
-    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
     ROUTE_SDLC_STATUS,
     SdlcResult,
 )
@@ -85,8 +85,8 @@ def format_sdlc_reply(result: SdlcResult) -> str:
         lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
     elif result.action == ROUTE_SDLC_ANSWER_CLARIFICATION:
         lines = ["Dạ SDLC_Harness đã nhận câu trả lời làm rõ requirement rồi anh."]
-    elif result.action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT:
-        lines = ["Dạ SDLC_Harness đã thu hồi policy default và mở lại câu hỏi requirement rồi anh."]
+    elif result.action == ROUTE_SDLC_CHALLENGE_ASSUMPTION:
+        lines = ["Dạ SDLC_Harness đã thu hồi giả định của agent và mở lại câu hỏi requirement rồi anh."]
     elif result.action == ROUTE_SDLC_APPROVE:
         lines = ["Dạ em đã gửi lệnh duyệt checkpoint sang SDLC_Harness rồi anh."]
     else:
@@ -555,22 +555,22 @@ def _format_action_suggestions(
         return ["- Anh review PR và quyết định merge trực tiếp trên GitHub."]
 
     suggestions: list[str] = []
-    if "challenge_policy_default" in action_set and status == "waiting_requirement_approval":
+    if "challenge_assumption" in action_set and status == "waiting_requirement_approval":
         checkpoint = pending_checkpoint if isinstance(pending_checkpoint, dict) else {}
-        assumption_ids = checkpoint.get("policy_default_assumption_ids")
+        assumption_ids = checkpoint.get("challengeable_assumption_ids")
         active_ids = [str(item) for item in assumption_ids or [] if str(item).strip()] if isinstance(assumption_ids, list) else []
         if active_ids and run_id:
             suggestions.append(
-                "- Policy default hiện hành: "
+                "- Giả định do agent tự chọn, có thể phản đối: "
                 + ", ".join(f"`{_inline_code(item)}`" for item in active_ids)
                 + "."
             )
             suggestions.append(
                 "- Phản đối bằng cú pháp: "
-                f"`Phản đối mặc định {active_ids[0]} cho {run_id}: <lý do hoặc chỉ dẫn>`"
+                f"`Phản đối giả định {active_ids[0]} cho {run_id}: <lý do hoặc chỉ dẫn>`"
             )
         else:
-            suggestions.append("- Anh có thể phản đối policy default hiện hành trước khi duyệt requirement.")
+            suggestions.append("- Anh có thể phản đối giả định của agent trước khi duyệt requirement.")
     if "clarify_more" in action_set and status in {
         "waiting_requirement_approval",
         "waiting_requirement_clarification_continue",
