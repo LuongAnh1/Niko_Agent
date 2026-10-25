@@ -418,8 +418,9 @@ fixture workflow in Niko is only for issue analysis, not the SDLC requirement
 pipeline.
 
 Current Telegram SDLC actions are `start`, `get_status`, Phase 1 V2
-`answer_clarification`, Phase 1/2/3 `approve_checkpoint`, Phase 4
-`continue_run`/`sync_run`, Phase 2 `revalidate_design`, and gated Code Review approval. Control actions use
+`answer_clarification`/`clarify_more`/`challenge_policy_default`/deterministic-only `revalidate_requirement`,
+Phase 1/2/3 `approve_checkpoint`, Phase 4 `continue_run`/`sync_run`, Phase 2
+`revalidate_design`, and gated Code Review approval. Control actions use
 an explicit `run_id`; clarification answers also include the current question
 ID so stale replies cannot answer a later question. Long-running write actions
 run in the background and return queued plus final replies. Code Review approval requires

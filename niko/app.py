@@ -19,10 +19,13 @@ from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
+    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE,
     ROUTE_SDLC_REVALIDATE_DESIGN,
+    ROUTE_SDLC_REVALIDATE_REQUIREMENT,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
@@ -236,6 +239,40 @@ class NikoApp:
         if request is None:
             return ""
 
+        if request.action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT and not (
+            request.run_id and request.assumption_id and request.instruction
+        ):
+            reply = (
+                "Dạ lệnh phản đối policy default chưa đủ thông tin nên em chưa thay đổi run.\n"
+                "Anh dùng cú pháp: `Phản đối mặc định ASM-1 cho run_...: <lý do hoặc chỉ dẫn>`."
+            )
+            self._log_workflow_selected(
+                "sdlc_harness",
+                request.action,
+                conversation_id,
+                trace_id,
+                {
+                    "run_id": request.run_id,
+                    "assumption_id": request.assumption_id,
+                    "preflight_reason": "invalid_policy_default_challenge_syntax",
+                    "write_dispatched": False,
+                },
+            )
+            return self.chat_graph.finish_workflow_reply(
+                conversation_id,
+                reply,
+                gateway_message,
+                deliver_reply,
+                route=request.action,
+                trace_id=trace_id,
+                meta={
+                    "run_id": request.run_id,
+                    "assumption_id": request.assumption_id,
+                    "preflight_reason": "invalid_policy_default_challenge_syntax",
+                    "write_dispatched": False,
+                },
+            )
+
         if notify_working is not None:
             try:
                 notify_working()
@@ -248,10 +285,13 @@ class NikoApp:
             result = client.get_status(run_id=request.run_id)
         elif request.action in {
             ROUTE_SDLC_ANSWER_CLARIFICATION,
+            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            ROUTE_SDLC_CLARIFY_MORE,
             ROUTE_SDLC_APPROVE,
             ROUTE_SDLC_CONTINUE,
             ROUTE_SDLC_REVALIDATE,
             ROUTE_SDLC_REVALIDATE_DESIGN,
+            ROUTE_SDLC_REVALIDATE_REQUIREMENT,
             ROUTE_SDLC_REVALIDATE_PLAN,
             ROUTE_SDLC_SYNC,
         }:
@@ -261,15 +301,19 @@ class NikoApp:
                 status_result,
                 allow_code_review_approval=code_review_approval_enabled(),
                 question_id=request.question_id,
+                assumption_id=request.assumption_id,
             )
             if (
                 request.action
                 in {
                     ROUTE_SDLC_ANSWER_CLARIFICATION,
+                    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+                    ROUTE_SDLC_CLARIFY_MORE,
                     ROUTE_SDLC_APPROVE,
                     ROUTE_SDLC_CONTINUE,
                     ROUTE_SDLC_REVALIDATE,
                     ROUTE_SDLC_REVALIDATE_DESIGN,
+                    ROUTE_SDLC_REVALIDATE_REQUIREMENT,
                     ROUTE_SDLC_REVALIDATE_PLAN,
                     ROUTE_SDLC_SYNC,
                 }
@@ -321,6 +365,7 @@ class NikoApp:
                 "error_code": result.error_code,
                 "preflight_reason": preflight.reason if preflight else "",
                 "write_dispatched": write_dispatched,
+                "assumption_id": request.assumption_id,
             },
         )
         try:
@@ -342,6 +387,7 @@ class NikoApp:
                     "error_code": result.error_code,
                     "preflight_reason": preflight.reason if preflight else "",
                     "write_dispatched": write_dispatched,
+                    "assumption_id": request.assumption_id,
                 },
             )
         except Exception:
@@ -365,6 +411,7 @@ class NikoApp:
                 "error_code": result.error_code,
                 "preflight_reason": preflight.reason if preflight else "",
                 "write_dispatched": write_dispatched,
+                "assumption_id": request.assumption_id,
             },
         )
 
@@ -380,9 +427,12 @@ class NikoApp:
     ) -> str:
         action_label = {
             ROUTE_SDLC_ANSWER_CLARIFICATION: "trả lời câu hỏi làm rõ requirement",
-            ROUTE_SDLC_CONTINUE: "chạy tiếp Phase 4",
+            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT: "phản đối policy default của requirement",
+            ROUTE_SDLC_CLARIFY_MORE: "mở thêm một lượt làm rõ requirement, tối đa 5 câu",
+            ROUTE_SDLC_CONTINUE: "chạy tiếp workflow",
             ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
             ROUTE_SDLC_REVALIDATE_DESIGN: "tạo version mới và chạy lại Design Validator",
+            ROUTE_SDLC_REVALIDATE_REQUIREMENT: "kiểm tra tất định requirement hiện tại",
             ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
             ROUTE_SDLC_SYNC: "đồng bộ lại",
             ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
@@ -404,6 +454,18 @@ class NikoApp:
                     answer=request.answer,
                     answered_by=_user_key(gateway_message),
                 )
+            if request.action == ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT:
+                return self.sdlc_client.challenge_policy_default(
+                    run_id=request.run_id,
+                    assumption_id=request.assumption_id,
+                    instruction=request.instruction,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_CLARIFY_MORE:
+                return self.sdlc_client.clarify_more(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
             if request.action == ROUTE_SDLC_CONTINUE:
                 return self.sdlc_client.continue_run(
                     run_id=request.run_id,
@@ -416,6 +478,11 @@ class NikoApp:
                 )
             if request.action == ROUTE_SDLC_REVALIDATE_DESIGN:
                 return self.sdlc_client.revalidate_design(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_REVALIDATE_REQUIREMENT:
+                return self.sdlc_client.revalidate_requirement(
                     run_id=request.run_id,
                     requested_by=_user_key(gateway_message),
                 )
@@ -449,6 +516,7 @@ class NikoApp:
                     "preflight_reason": preflight_reason,
                     "write_dispatched": True,
                     "question_id": request.question_id,
+                    "assumption_id": request.assumption_id,
                 },
             )
             queued_reply = (
@@ -487,6 +555,7 @@ class NikoApp:
                     "status": result.status,
                     "error_code": result.error_code,
                     "question_id": request.question_id,
+                    "assumption_id": request.assumption_id,
                 },
             )
 
@@ -504,6 +573,7 @@ class NikoApp:
                 "preflight_reason": "duplicate_background_job",
                 "write_dispatched": False,
                 "question_id": request.question_id,
+                "assumption_id": request.assumption_id,
             },
         )
         duplicate_reply = (
@@ -523,6 +593,7 @@ class NikoApp:
                 "preflight_reason": "duplicate_background_job",
                 "write_dispatched": False,
                 "question_id": request.question_id,
+                "assumption_id": request.assumption_id,
             },
         )
         return request.action

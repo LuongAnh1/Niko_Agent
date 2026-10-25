@@ -1,6 +1,11 @@
 import unittest
 
-from niko.sdlc.client import ROUTE_SDLC_ANSWER_CLARIFICATION, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
+    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_STATUS,
+    SdlcResult,
+)
 from niko.sdlc.formatting import format_sdlc_reply
 
 
@@ -19,6 +24,45 @@ def _result(**overrides):
 
 
 class SdlcFormatterPhase4Tests(unittest.TestCase):
+    def test_formats_active_policy_default_and_copyable_challenge_command(self):
+        run_id = "run_20261013_160421_f661babf"
+        reply = format_sdlc_reply(
+            _result(
+                run_id=run_id,
+                current_phase="waiting_requirement_approval",
+                status="waiting_requirement_approval",
+                pending_checkpoint={
+                    "type": "requirement_approval",
+                    "policy_default_assumption_ids": ["ASM-1"],
+                },
+                allowed_next_actions=["challenge_policy_default", "approve_checkpoint", "get_status"],
+            )
+        )
+
+        self.assertIn("Policy default hiện hành: `ASM-1`", reply)
+        self.assertIn(f"Phản đối mặc định ASM-1 cho {run_id}: <lý do hoặc chỉ dẫn>", reply)
+
+    def test_formats_challenge_result_as_reopened_clarification(self):
+        run_id = "run_20261013_160421_f661babf"
+        reply = format_sdlc_reply(
+            _result(
+                action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+                run_id=run_id,
+                current_phase="requirement_clarification",
+                status="waiting_requirement_clarification",
+                pending_checkpoint={
+                    "type": "requirement_clarification",
+                    "current_question": {"id": "Q-5", "text": "What quality target is required?"},
+                    "remaining_blocking_count": 1,
+                },
+                allowed_next_actions=["answer_clarification", "get_status"],
+            )
+        )
+
+        self.assertIn("đã thu hồi policy default", reply)
+        self.assertIn("Q-5", reply)
+        self.assertIn(f"Trả lời Q-5 cho {run_id}: <nội dung trả lời>", reply)
+
     def test_waiting_plan_can_suggest_revalidation_and_show_effective_contract(self):
         result = SdlcResult(
             ok=True,
@@ -58,6 +102,28 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
             "Trả lời Q-4 cho run_20261013_160421_f661babf: <nội dung trả lời>",
             reply,
         )
+
+    def test_formats_legacy_label_multiple_choice_option(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="requirement_clarification",
+                status="waiting_requirement_clarification",
+                pending_checkpoint={
+                    "type": "requirement_clarification",
+                    "current_question": {
+                        "id": "Q-6",
+                        "text": "Which behavior applies?",
+                        "options": [
+                            {"key": "notification_only", "label": "Notification only"}
+                        ],
+                    },
+                    "remaining_blocking_count": 1,
+                },
+                allowed_next_actions=["answer_clarification", "get_status"],
+            )
+        )
+
+        self.assertIn("notification_only. Notification only", reply)
 
     def test_formats_every_phase4_status(self):
         expected = {

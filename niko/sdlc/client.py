@@ -37,10 +37,13 @@ ROUTE_SDLC_START_JIRA = "sdlc_start_from_jira"
 ROUTE_SDLC_STATUS = "sdlc_get_status"
 ROUTE_SDLC_APPROVE = "sdlc_approve_checkpoint"
 ROUTE_SDLC_ANSWER_CLARIFICATION = "sdlc_answer_clarification"
+ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT = "sdlc_challenge_policy_default"
+ROUTE_SDLC_CLARIFY_MORE = "sdlc_clarify_more"
 ROUTE_SDLC_CONTINUE = "sdlc_continue_run"
 ROUTE_SDLC_REVALIDATE = "sdlc_revalidate_implementation"
 ROUTE_SDLC_REVALIDATE_PLAN = "sdlc_revalidate_implementation_plan"
 ROUTE_SDLC_REVALIDATE_DESIGN = "sdlc_revalidate_design"
+ROUTE_SDLC_REVALIDATE_REQUIREMENT = "sdlc_revalidate_requirement"
 ROUTE_SDLC_SYNC = "sdlc_sync_run"
 
 RUN_ID_PATTERN = re.compile(r"\brun_\d{8}_\d{6}_[a-f0-9]+\b", re.IGNORECASE)
@@ -55,6 +58,17 @@ CLARIFICATION_ANSWER_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 CLARIFICATION_PREFIX_PATTERN = re.compile(r"^\s*(?:trả\s+lời|tra\s+loi)\b", re.IGNORECASE)
+POLICY_DEFAULT_CHALLENGE_PATTERN = re.compile(
+    r"^\s*(?:phản\s+đối\s+mặc\s+định|phan\s+doi\s+mac\s+dinh|challenge\s+policy\s+default)\s+"
+    r"(?P<assumption_id>ASM-\d+)\s+(?:cho|for)\s+"
+    r"(?P<run_id>run_\d{8}_\d{6}_[a-f0-9]+)\s*:\s*"
+    r"(?P<instruction>\S(?:.*\S)?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+POLICY_DEFAULT_CHALLENGE_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:phản\s+đối\s+mặc\s+định|phan\s+doi\s+mac\s+dinh|challenge\s+policy\s+default)\b",
+    re.IGNORECASE,
+)
 STATUS_WORDS = ("status", "trang thai", "trạng thái", "đến đâu", "den dau", "tien do", "tiến độ")
 START_WORDS = ("thuc hien", "thực hiện", "chay", "chạy", "lam", "làm", "xu ly", "xử lý")
 SYNC_WORDS = ("dong bo lai", "đồng bộ lại", "sync lai", "sync lại", "resync", "retry sync")
@@ -106,6 +120,25 @@ REVALIDATE_DESIGN_WORDS = (
     "ra soat lai design",
     "rà soát lại design",
 )
+REVALIDATE_REQUIREMENT_WORDS = (
+    "revalidate requirement",
+    "validate lai requirement",
+    "validate lại requirement",
+    "kiem tra lai requirement",
+    "kiểm tra lại requirement",
+    "ra soat lai requirement",
+    "rà soát lại requirement",
+)
+CLARIFY_MORE_WORDS = (
+    "clarify more",
+    "clarify requirement more",
+    "lam ro them requirement",
+    "làm rõ thêm requirement",
+    "lam ro lai requirement",
+    "làm rõ lại requirement",
+    "hoi them requirement",
+    "hỏi thêm requirement",
+)
 APPROVE_WORDS = (
     "duyet",
     "duyệt",
@@ -130,6 +163,8 @@ class SdlcRequest:
     run_id: str = ""
     question_id: str = ""
     answer: str = ""
+    assumption_id: str = ""
+    instruction: str = ""
 
 
 @dataclass(frozen=True)
@@ -167,6 +202,25 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
 
     text = str(prompt or "").strip()
     lowered = text.lower()
+    policy_challenge_match = POLICY_DEFAULT_CHALLENGE_PATTERN.match(text)
+    if policy_challenge_match:
+        return SdlcRequest(
+            action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            run_id=policy_challenge_match.group("run_id"),
+            assumption_id=policy_challenge_match.group("assumption_id").upper(),
+            instruction=policy_challenge_match.group("instruction").strip(),
+        )
+    if POLICY_DEFAULT_CHALLENGE_PREFIX_PATTERN.match(text):
+        run_match = RUN_ID_PATTERN.search(text)
+        assumption_match = re.search(r"\bASM-\d+\b", text, re.IGNORECASE)
+        _, separator, trailing = text.partition(":")
+        return SdlcRequest(
+            action=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            run_id=run_match.group(0) if run_match else "",
+            assumption_id=assumption_match.group(0).upper() if assumption_match else "",
+            instruction=trailing.strip() if separator else "",
+        )
+
     clarification_match = CLARIFICATION_ANSWER_PATTERN.match(text)
     if clarification_match:
         return SdlcRequest(
@@ -184,6 +238,12 @@ def detect_sdlc_request(prompt: str) -> SdlcRequest | None:
 
     if run_match and any(word in lowered for word in REVALIDATE_DESIGN_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_REVALIDATE_DESIGN, run_id=run_match.group(0))
+
+    if run_match and any(word in lowered for word in CLARIFY_MORE_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_CLARIFY_MORE, run_id=run_match.group(0))
+
+    if run_match and any(word in lowered for word in REVALIDATE_REQUIREMENT_WORDS):
+        return SdlcRequest(action=ROUTE_SDLC_REVALIDATE_REQUIREMENT, run_id=run_match.group(0))
 
     if run_match and any(word in lowered for word in REVALIDATE_WORDS):
         return SdlcRequest(action=ROUTE_SDLC_REVALIDATE, run_id=run_match.group(0))
@@ -551,6 +611,28 @@ class SdlcClient:
         )
         return _result_from_payload(payload, ROUTE_SDLC_ANSWER_CLARIFICATION)
 
+    def challenge_policy_default(
+        self,
+        *,
+        run_id: str,
+        assumption_id: str,
+        instruction: str,
+        requested_by: str,
+    ) -> SdlcResult:
+        """Thu hồi một reviewed default rồi mở lại câu hỏi requirement nguồn."""
+
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="challenge_policy_default",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            arguments={
+                "assumption_id": assumption_id,
+                "instruction": instruction,
+            },
+        )
+        return _result_from_payload(payload, ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT)
+
     def continue_run(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Chạy bước kế tiếp; Phase 4 có thể sync checkpoint theo mode cấu hình."""
 
@@ -594,6 +676,28 @@ class SdlcClient:
             event=ROUTE_SDLC_REVALIDATE_DESIGN,
         )
         return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_DESIGN)
+
+    def revalidate_requirement(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
+        """Chạy lại validator tất định cho Requirement V2 hiện tại."""
+
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="revalidate_requirement",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_REVALIDATE_REQUIREMENT,
+        )
+        return _result_from_payload(payload, ROUTE_SDLC_REVALIDATE_REQUIREMENT)
+
+    def clarify_more(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
+        """Yêu cầu SDLC mở thêm một lượt semantic clarification tối đa năm câu."""
+
+        payload = self._transport.run_action(
+            run_id=run_id,
+            action="clarify_more",
+            requested_by=requested_by,
+            event=ROUTE_SDLC_CLARIFY_MORE,
+        )
+        return _result_from_payload(payload, ROUTE_SDLC_CLARIFY_MORE)
 
     def sync_run(self, *, run_id: str, requested_by: str = "niko") -> SdlcResult:
         """Yêu cầu SDLC_Harness re-sync checkpoint hiện tại."""

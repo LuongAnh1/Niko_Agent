@@ -7,9 +7,12 @@ from unittest.mock import patch
 from niko.config import RUNTIME_CONFIG_ENV, update_runtime_config
 from niko.sdlc.client import (
     ROUTE_SDLC_ANSWER_CLARIFICATION,
+    ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+    ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
     ROUTE_SDLC_CONTINUE,
     ROUTE_SDLC_REVALIDATE_DESIGN,
+    ROUTE_SDLC_REVALIDATE_REQUIREMENT,
     ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_STATUS,
     ROUTE_SDLC_SYNC,
@@ -21,6 +24,7 @@ from niko.sdlc.control import (
     PREFLIGHT_CODE_REVIEW_APPROVAL_DISABLED,
     PREFLIGHT_EXECUTE_APPROVAL,
     PREFLIGHT_PHASE4_REQUIRED,
+    PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT,
     PREFLIGHT_QUESTION_NOT_CURRENT,
     PREFLIGHT_STATUS_ERROR,
     code_review_approval_enabled,
@@ -43,6 +47,52 @@ def _status(**overrides):
 
 
 class SdlcPreflightTests(unittest.TestCase):
+    def test_policy_default_challenge_requires_current_approval_assumption(self):
+        status = _status(
+            current_phase="waiting_requirement_approval",
+            status="waiting_requirement_approval",
+            pending_checkpoint={
+                "type": "requirement_approval",
+                "policy_default_assumption_ids": ["ASM-1"],
+            },
+            allowed_next_actions=["challenge_policy_default", "approve_checkpoint", "get_status"],
+        )
+
+        current = evaluate_sdlc_preflight(
+            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            status,
+            assumption_id="asm-1",
+        )
+        stale = evaluate_sdlc_preflight(
+            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            status,
+            assumption_id="ASM-9",
+        )
+
+        self.assertTrue(current.allowed)
+        self.assertEqual(current.reason, PREFLIGHT_BACKGROUND_PENDING)
+        self.assertFalse(stale.allowed)
+        self.assertEqual(stale.reason, PREFLIGHT_POLICY_DEFAULT_NOT_CURRENT)
+        self.assertIn("ASM-1", preflight_notice(stale))
+
+    def test_policy_default_challenge_rejects_wrong_checkpoint(self):
+        result = evaluate_sdlc_preflight(
+            ROUTE_SDLC_CHALLENGE_POLICY_DEFAULT,
+            _status(
+                current_phase="requirement_clarification",
+                status="waiting_requirement_clarification",
+                pending_checkpoint={
+                    "type": "requirement_clarification",
+                    "policy_default_assumption_ids": ["ASM-1"],
+                },
+                allowed_next_actions=["challenge_policy_default"],
+            ),
+            assumption_id="ASM-1",
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, PREFLIGHT_ACTION_NOT_ALLOWED)
+
     def test_clarification_answer_requires_current_question_and_contract_action(self):
         clarification = _status(
             current_phase="requirement_clarification",
@@ -188,6 +238,27 @@ class SdlcPreflightTests(unittest.TestCase):
         self.assertTrue(result.allowed)
         self.assertFalse(result.execute_now)
         self.assertEqual(result.reason, PREFLIGHT_BACKGROUND_PENDING)
+
+    def test_requirement_revalidation_and_clarify_more_use_separate_advertised_actions(self):
+        revalidate = evaluate_sdlc_preflight(
+            ROUTE_SDLC_REVALIDATE_REQUIREMENT,
+            _status(
+                current_phase="requirement_clarification",
+                status="waiting_requirement_clarification_continue",
+                allowed_next_actions=["revalidate_requirement", "clarify_more", "get_status"],
+            ),
+        )
+        clarified = evaluate_sdlc_preflight(
+            ROUTE_SDLC_CLARIFY_MORE,
+            _status(
+                current_phase="requirement_clarification",
+                status="waiting_requirement_clarification_continue",
+                allowed_next_actions=["clarify_more", "get_status"],
+            ),
+        )
+
+        self.assertEqual(revalidate.reason, PREFLIGHT_BACKGROUND_PENDING)
+        self.assertEqual(clarified.reason, PREFLIGHT_BACKGROUND_PENDING)
 
     def test_phase1_to_3_approval_executes_but_code_review_gate_defaults_off(self):
         design = evaluate_sdlc_preflight(
