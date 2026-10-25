@@ -4,12 +4,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from niko.app import NikoApp, _format_sdlc_reply, create_niko_app
+from niko.app import NikoApp, create_niko_app
 from niko.harness.runtime_log import default_runtime_logger
 from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
-from niko.sdlc.client import ROUTE_SDLC_APPROVE, ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA, ROUTE_SDLC_STATUS, SdlcResult
+from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+    ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
+    ROUTE_SDLC_REVALIDATE_PLAN,
+    ROUTE_SDLC_START,
+    ROUTE_SDLC_START_JIRA,
+    ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
+    SdlcResult,
+)
+from niko.sdlc.formatting import format_sdlc_reply
 
 
 class FakeChatGraph:
@@ -52,6 +65,7 @@ class FakeSelectableGraph:
         self.trace_logger = object()
         self.route_kind = route_kind
         self.finished = []
+        self.background_finished = []
         self.normal_calls = []
         self.last_two_agent_route = None
 
@@ -77,13 +91,196 @@ class FakeSelectableGraph:
         deliver_reply(reply)
         return route
 
+    def finish_background_workflow_reply(
+        self, conversation_id, reply, gateway_message, deliver_reply, *, route, trace_id, meta=None
+    ):
+        self.background_finished.append((conversation_id, reply, route, trace_id, meta))
+        deliver_reply(reply)
+
     def handle_two_agent_message(self, prompt, gateway_message, deliver_reply, notify_working=None, trace_turn=None, route=None):
         self.last_two_agent_route = route
         self.normal_calls.append(("two_agent", prompt))
         return "normal_chat"
 
 
+class DeferredSdlcJobRunner:
+    def __init__(self, accept=True) -> None:
+        self.accept = accept
+        self.calls = []
+        self.pending = None
+
+    def submit(self, job, task, on_reserved, on_complete):
+        self.calls.append(job)
+        if not self.accept:
+            return False
+        on_reserved()
+        self.pending = (task, on_complete)
+        return True
+
+    def complete(self):
+        task, on_complete = self.pending
+        on_complete(task())
+
+
 class NikoAppTests(unittest.TestCase):
+    def test_agent_assumption_challenge_is_preflighted_and_queued(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        run_id = "run_20261012_120000_abcd1234"
+        instruction = "Hãy hỏi owner thay vì tự chọn."
+        waiting = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id=run_id,
+            current_phase="waiting_requirement_approval",
+            status="waiting_requirement_approval",
+            pending_checkpoint={
+                "type": "requirement_approval",
+                "challengeable_assumption_ids": ["ASM-2"],
+            },
+            allowed_next_actions=["challenge_assumption", "approve_checkpoint", "get_status"],
+        )
+        updated = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+            run_id=run_id,
+            current_phase="requirement_clarification",
+            status="waiting_requirement_clarification",
+            pending_checkpoint={
+                "type": "requirement_clarification",
+                "current_question": {"id": "Q-5", "text": "Which ordering should be used?"},
+            },
+            allowed_next_actions=["answer_clarification", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = waiting
+            client_class.return_value.challenge_assumption.return_value = updated
+            route = app.handle_message(
+                f"Phản đối giả định ASM-2 cho {run_id}: {instruction}",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+            self.assertEqual(route, ROUTE_SDLC_CHALLENGE_ASSUMPTION)
+            self.assertIn("phản đối giả định", delivered[0])
+            client_class.return_value.challenge_assumption.assert_not_called()
+            runner.complete()
+
+        client_class.return_value.challenge_assumption.assert_called_once_with(
+            run_id=run_id,
+            assumption_id="ASM-2",
+            instruction=instruction,
+            requested_by="telegram:1",
+        )
+        self.assertIn("Q-5", delivered[-1])
+
+    def test_requirement_clarification_answer_is_preflighted_and_queued(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        run_id = "run_20261012_120000_abcd1234"
+        waiting = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id=run_id,
+            current_phase="requirement_clarification",
+            status="waiting_requirement_clarification",
+            pending_checkpoint={
+                "type": "requirement_clarification",
+                "current_question": {"id": "Q-4", "text": "Which fields define a duplicate?"},
+                "remaining_blocking_count": 2,
+            },
+            allowed_next_actions=["answer_clarification", "get_status"],
+        )
+        updated = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_ANSWER_CLARIFICATION,
+            run_id=run_id,
+            current_phase="requirement_clarification",
+            status="waiting_requirement_clarification",
+            pending_checkpoint={
+                "type": "requirement_clarification",
+                "current_question": {"id": "Q-1", "text": "Should empty search text be allowed?"},
+                "remaining_blocking_count": 1,
+            },
+            allowed_next_actions=["answer_clarification", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = waiting
+            client_class.return_value.answer_clarification.return_value = updated
+            route = app.handle_message(
+                f"Trả lời Q-4 cho {run_id}: Dùng mã địa điểm và tên chuẩn hóa.",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+            self.assertEqual(route, ROUTE_SDLC_ANSWER_CLARIFICATION)
+            self.assertEqual(len(delivered), 1)
+            self.assertIn("trả lời câu hỏi làm rõ requirement", delivered[0])
+            client_class.return_value.answer_clarification.assert_not_called()
+            runner.complete()
+
+        client_class.return_value.answer_clarification.assert_called_once_with(
+            run_id=run_id,
+            question_id="Q-4",
+            answer="Dùng mã địa điểm và tên chuẩn hóa.",
+            answered_by="telegram:1",
+        )
+        self.assertEqual(len(delivered), 2)
+        self.assertIn("Q-1", delivered[-1])
+        self.assertEqual(graph.finished[0][2], "sdlc_job_queued")
+        self.assertEqual(graph.background_finished[0][2], "sdlc_job_final")
+
+    def test_stale_requirement_question_is_rejected_before_write(self):
+        graph = FakeSelectableGraph()
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        run_id = "run_20261012_120000_abcd1234"
+        waiting = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id=run_id,
+            current_phase="requirement_clarification",
+            status="waiting_requirement_clarification",
+            pending_checkpoint={
+                "type": "requirement_clarification",
+                "current_question": {"id": "Q-4", "text": "Which fields define a duplicate?"},
+            },
+            allowed_next_actions=["answer_clarification", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = waiting
+            route = app.handle_message(
+                f"Trả lời Q-1 cho {run_id}: Có.",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_ANSWER_CLARIFICATION)
+        self.assertIn("Câu hiện tại là `Q-4`", delivered[0])
+        self.assertEqual(runner.calls, [])
+        client_class.return_value.answer_clarification.assert_not_called()
+        self.assertFalse(graph.finished[0][4]["write_dispatched"])
+
     def test_app_delegates_to_chat_graph_without_changing_callbacks(self):
         graph = FakeChatGraph()
         app = NikoApp(chat_graph=graph)
@@ -259,6 +456,444 @@ class NikoAppTests(unittest.TestCase):
         client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
+    def test_explicit_sdlc_status_bypasses_deep_busy_route(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+            allowed_next_actions=["continue_run", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "status run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertEqual(graph.normal_calls, [])
+        self.assertIsNone(graph.last_two_agent_route)
+        self.assertIn("implementation_ready", delivered[0])
+
+    def test_explicit_sdlc_status_runs_in_single_agent_mode(self):
+        graph = FakeSelectableGraph()
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "single_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "run_20261012_120000_abcd1234 đến đâu rồi em?",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertEqual(graph.normal_calls, [])
+        self.assertIn("implementation_ready", delivered[0])
+
+    def test_continue_and_sync_queue_background_action_after_preflight(self):
+        cases = [
+            (
+                "revalidate design run_20261012_120000_abcd1234",
+                ROUTE_SDLC_REVALIDATE_DESIGN,
+                "waiting_design_approval",
+                ["revalidate_design", "get_status"],
+                "revalidate_design",
+            ),
+            (
+                "rà soát lại implementation plan run_20261012_120000_abcd1234",
+                ROUTE_SDLC_REVALIDATE_PLAN,
+                "waiting_implementation_plan_review",
+                ["revalidate_implementation_plan", "get_status"],
+                "revalidate_implementation_plan",
+            ),
+            (
+                "chạy tiếp run_20261012_120000_abcd1234",
+                ROUTE_SDLC_CONTINUE,
+                "implementation_ready",
+                ["continue_run", "get_status"],
+                "continue_run",
+            ),
+            (
+                "đồng bộ lại run_20261012_120000_abcd1234",
+                ROUTE_SDLC_SYNC,
+                "code_review_sync_failed",
+                ["sync_run", "get_status"],
+                "sync_run",
+            ),
+        ]
+
+        for prompt, expected_route, status, actions, client_method in cases:
+            with self.subTest(route=expected_route):
+                graph = FakeSelectableGraph(route_kind="busy_reply")
+                runner = DeferredSdlcJobRunner()
+                app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+                delivered = []
+                result = SdlcResult(
+                    ok=True,
+                    action=ROUTE_SDLC_STATUS,
+                    run_id="run_20261012_120000_abcd1234",
+                    status=status,
+                    allowed_next_actions=actions,
+                )
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "NIKO_AGENT_MODE": "two_agent",
+                        "NIKO_SDLC_HARNESS_ENABLED": "1",
+                        "NIKO_RUNTIME_LOG_ENABLED": "0",
+                    },
+                    clear=False,
+                ), patch("niko.app.SdlcClient") as client_class:
+                    client_class.return_value.get_status.return_value = result
+                    final_result = SdlcResult(
+                        ok=True,
+                        action=expected_route,
+                        run_id="run_20261012_120000_abcd1234",
+                        status="code_review_ready",
+                    )
+                    getattr(client_class.return_value, client_method).return_value = final_result
+                    route = app.handle_message(
+                        prompt,
+                        SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                        delivered.append,
+                    )
+
+                    self.assertEqual(route, expected_route)
+                    self.assertEqual(len(delivered), 1)
+                    self.assertIn("xử lý nền", delivered[0])
+                    getattr(client_class.return_value, client_method).assert_not_called()
+                    runner.complete()
+
+                self.assertEqual(len(delivered), 2)
+                self.assertIn("code_review_ready", delivered[1])
+                self.assertEqual(graph.normal_calls, [])
+                getattr(client_class.return_value, client_method).assert_called_once_with(
+                    run_id="run_20261012_120000_abcd1234",
+                    requested_by="telegram:1",
+                )
+                self.assertEqual(graph.finished[0][2], "sdlc_job_queued")
+                self.assertEqual(graph.background_finished[0][2], "sdlc_job_final")
+
+    def test_duplicate_background_action_does_not_dispatch_write(self):
+        graph = FakeSelectableGraph()
+        runner = DeferredSdlcJobRunner(accept=False)
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+            allowed_next_actions=["continue_run", "get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "continue run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_CONTINUE)
+        self.assertIn("không tạo tiến trình thứ hai", delivered[0])
+        self.assertEqual(graph.finished[0][2], "sdlc_job_duplicate")
+        client_class.return_value.continue_run.assert_not_called()
+
+    def test_status_still_reads_harness_while_background_job_is_pending(self):
+        graph = FakeSelectableGraph()
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        ready = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="implementation_ready",
+            allowed_next_actions=["continue_run", "get_status"],
+        )
+        running = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id=ready.run_id,
+            status="implementation_in_progress",
+            allowed_next_actions=["get_status"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.side_effect = [ready, running]
+            app.handle_message(
+                "continue run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+            route = app.handle_message(
+                "status run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_STATUS)
+        self.assertIn("implementation_in_progress", delivered[-1])
+        self.assertEqual(client_class.return_value.get_status.call_count, 2)
+        client_class.return_value.continue_run.assert_not_called()
+
+    def test_explicit_sdlc_prompt_uses_existing_chat_route_when_disabled(self):
+        graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
+        app = NikoApp(chat_graph=graph)
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "0", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            route = app.handle_message(
+                "continue run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                lambda _reply: None,
+            )
+
+        self.assertEqual(route, "normal_chat")
+        client_class.assert_not_called()
+
+    def test_code_review_approval_gate_off_does_not_dispatch_write(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="code_review_ready",
+            pending_checkpoint={"type": "code_review", "pull_request_url": "https://github.test/pr/27"},
+            allowed_next_actions=["approve_checkpoint", "get_status", "sync_run"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "0",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "duyệt run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
+        self.assertIn("chưa duyệt Code Review", delivered[0])
+        self.assertIn("Draft PR", delivered[0])
+        client_class.return_value.approve_checkpoint.assert_not_called()
+        self.assertEqual(graph.normal_calls, [])
+
+    def test_code_review_approval_gate_on_queues_background_draft_to_ready(self):
+        graph = FakeSelectableGraph(route_kind="busy_reply")
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        ready = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="code_review_ready",
+            pending_checkpoint={"type": "code_review", "pull_request_url": "https://github.test/pr/27"},
+            allowed_next_actions=["approve_checkpoint", "get_status", "sync_run"],
+        )
+        approved = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_APPROVE,
+            run_id=ready.run_id,
+            status="code_review_approved",
+            summary_for_user="Code Review đã được duyệt; PR đã Ready for review.",
+            workspace={"pull_request_url": "https://github.test/pr/27"},
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "1",
+                "NIKO_SDLC_SYNC_MODE": "mock",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = ready
+            client_class.return_value.approve_checkpoint.return_value = approved
+            route = app.handle_message(
+                "duyệt run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+            self.assertEqual(route, ROUTE_SDLC_APPROVE)
+            self.assertEqual(len(delivered), 1)
+            self.assertIn("Draft PR sang Ready for review", delivered[0])
+            self.assertIn("không merge PR", delivered[0])
+            client_class.return_value.approve_checkpoint.assert_not_called()
+            runner.complete()
+
+        self.assertEqual(len(delivered), 2)
+        self.assertIn("code_review_approved", delivered[1])
+        client_class.return_value.approve_checkpoint.assert_called_once_with(
+            run_id="run_20261012_120000_abcd1234",
+            requested_by="telegram:1",
+        )
+        client_class.return_value.sync_run.assert_not_called()
+        self.assertEqual(graph.finished[0][2], "sdlc_job_queued")
+        self.assertEqual(graph.background_finished[0][2], "sdlc_job_final")
+
+    def test_duplicate_code_review_approval_does_not_dispatch_github_write(self):
+        graph = FakeSelectableGraph()
+        runner = DeferredSdlcJobRunner(accept=False)
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        ready = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="code_review_ready",
+            pending_checkpoint={"type": "code_review", "pull_request_url": "https://github.test/pr/27"},
+            allowed_next_actions=["approve_checkpoint", "get_status", "sync_run"],
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "1",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = ready
+            route = app.handle_message(
+                "duyệt run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_APPROVE)
+        self.assertIn("không tạo tiến trình thứ hai", delivered[0])
+        self.assertEqual(graph.finished[0][2], "sdlc_job_duplicate")
+        client_class.return_value.approve_checkpoint.assert_not_called()
+
+    def test_approval_sync_retry_queues_sync_without_reapproving_github(self):
+        graph = FakeSelectableGraph()
+        runner = DeferredSdlcJobRunner()
+        app = NikoApp(chat_graph=graph, sdlc_job_runner=runner)
+        delivered = []
+        failed = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            status="code_review_approval_sync_failed",
+            allowed_next_actions=["sync_run", "get_status"],
+            last_error={"error_code": "code_review_approval_sync_failed"},
+        )
+        synced = SdlcResult(
+            ok=True,
+            action=ROUTE_SDLC_SYNC,
+            run_id=failed.run_id,
+            status="code_review_approved",
+            summary_for_user="Approval sync đã hoàn tất.",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "NIKO_AGENT_MODE": "two_agent",
+                "NIKO_SDLC_HARNESS_ENABLED": "1",
+                "NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED": "0",
+                "NIKO_RUNTIME_LOG_ENABLED": "0",
+            },
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = failed
+            client_class.return_value.sync_run.return_value = synced
+            route = app.handle_message(
+                "sync lại run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+            runner.complete()
+
+        self.assertEqual(route, ROUTE_SDLC_SYNC)
+        client_class.return_value.sync_run.assert_called_once_with(
+            run_id=failed.run_id,
+            requested_by="telegram:1",
+        )
+        client_class.return_value.approve_checkpoint.assert_not_called()
+        self.assertIn("code_review_approved", delivered[-1])
+
+    def test_preflight_error_preserves_business_error_without_write(self):
+        graph = FakeSelectableGraph()
+        app = NikoApp(chat_graph=graph)
+        delivered = []
+        result = SdlcResult(
+            ok=False,
+            action=ROUTE_SDLC_STATUS,
+            run_id="run_20261012_120000_abcd1234",
+            error_code="run_not_found",
+            message="Run not found",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"NIKO_AGENT_MODE": "two_agent", "NIKO_SDLC_HARNESS_ENABLED": "1", "NIKO_RUNTIME_LOG_ENABLED": "0"},
+            clear=False,
+        ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
+            route = app.handle_message(
+                "continue run_20261012_120000_abcd1234",
+                SimpleNamespace(user=SimpleNamespace(key="telegram:1")),
+                delivered.append,
+            )
+
+        self.assertEqual(route, ROUTE_SDLC_CONTINUE)
+        self.assertIn("run_not_found", delivered[0])
+        client_class.return_value.continue_run.assert_not_called()
+        self.assertEqual(graph.finished[0][4]["preflight_reason"], "status_error")
+        self.assertFalse(graph.finished[0][4]["write_dispatched"])
+
     def test_app_routes_sdlc_approve_prompt(self):
         graph = FakeSelectableGraph(correction_result=FakeCorrectionResult(handled=False, reply="", route=""))
         app = NikoApp(chat_graph=graph)
@@ -291,6 +926,7 @@ class NikoAppTests(unittest.TestCase):
             },
             clear=False,
         ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
             client_class.return_value.approve_checkpoint.return_value = result
             route = app.handle_message(
                 "Niko, duyet run_20261012_120000_abcd1234 giup anh",
@@ -303,7 +939,11 @@ class NikoAppTests(unittest.TestCase):
         self.assertIn("repair iterations: 1", delivered[0])
         self.assertIn("design_artifact_v2", delivered[0])
         self.assertNotIn("muốn sửa", delivered[0])
-        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
+        client_class.return_value.approve_checkpoint.assert_called_once_with(
+            run_id="run_20261012_120000_abcd1234",
+            requested_by="telegram:1",
+        )
+        client_class.return_value.get_status.assert_called_once_with(run_id="run_20261012_120000_abcd1234")
         self.assertEqual(graph.normal_calls, [])
 
     def test_sdlc_reply_formats_checkpoint_for_telegram(self):
@@ -331,7 +971,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("Jira issue `SDLC-1`", reply)
         self.assertIn("đang chờ anh duyệt requirement", reply)
@@ -369,7 +1009,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("đang chờ anh review design checkpoint", reply)
         self.assertIn("design_artifact_v2", reply)
@@ -414,7 +1054,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("implementation plan", reply)
         self.assertIn("implementation_plan_v3", reply)
@@ -463,6 +1103,7 @@ class NikoAppTests(unittest.TestCase):
             },
             clear=False,
         ), patch("niko.app.SdlcClient") as client_class:
+            client_class.return_value.get_status.return_value = result
             client_class.return_value.approve_checkpoint.return_value = result
             route = app.handle_message(
                 "Niko, duyet run_20261013_143231_8e1a39d4 giup anh",
@@ -473,7 +1114,11 @@ class NikoAppTests(unittest.TestCase):
         self.assertEqual(route, ROUTE_SDLC_APPROVE)
         self.assertIn("implementation plan", delivered[0])
         self.assertIn("Phase 4", delivered[0])
-        client_class.return_value.approve_checkpoint.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
+        client_class.return_value.approve_checkpoint.assert_called_once_with(
+            run_id="run_20261013_143231_8e1a39d4",
+            requested_by="telegram:1",
+        )
+        client_class.return_value.get_status.assert_called_once_with(run_id="run_20261013_143231_8e1a39d4")
         self.assertEqual(graph.normal_calls, [])
 
     def test_sdlc_reply_formats_blocked_with_last_error_and_partial_sync(self):
@@ -501,7 +1146,7 @@ class NikoAppTests(unittest.TestCase):
             },
         )
 
-        reply = _format_sdlc_reply(result)
+        reply = format_sdlc_reply(result)
 
         self.assertIn("đang bị chặn", reply)
         self.assertIn("Đồng bộ một phần:", reply)

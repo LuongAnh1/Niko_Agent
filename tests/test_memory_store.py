@@ -157,6 +157,37 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertEqual(before_final_threshold, [])
         self.assertEqual([row["id"] for row in complete_batch], [first, wait, followup, busy, final])
 
+    def test_sdlc_queued_reply_is_transient_until_background_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MemoryStore(Path(temp_dir) / "memory.sqlite3")
+            user = store.log_chat("chat-1", "user", "continue run", source="test")
+            queued = store.log_chat(
+                "chat-1",
+                "assistant",
+                "da dua vao xu ly nen",
+                source="test",
+                meta={"route": "sdlc_job_queued"},
+            )
+
+            before_final = store.list_unconsolidated_complete_exchange_batch(
+                exchange_threshold=1,
+                session_id="chat-1",
+            )
+            final = store.log_chat(
+                "chat-1",
+                "assistant",
+                "phase 4 da hoan tat",
+                source="test",
+                meta={"route": "sdlc_job_final"},
+            )
+            complete_batch = store.list_unconsolidated_complete_exchange_batch(
+                exchange_threshold=1,
+                session_id="chat-1",
+            )
+
+        self.assertEqual(before_final, [])
+        self.assertEqual([row["id"] for row in complete_batch], [user, queued, final])
+
     def test_complete_exchange_batch_counts_multiple_local_exchanges(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = MemoryStore(Path(temp_dir) / "memory.sqlite3")

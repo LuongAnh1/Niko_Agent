@@ -9,6 +9,7 @@ Pipeline requirement/artifact/sync của SDLC vẫn thuộc repo SDLC_Harness.
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 
 from niko.graphs.chat_reply import ROUTE_BUSY_REPLY, ChatReplyGraph, two_agent_mode_enabled
 from niko.graphs.jira_issue import JiraIssueAnalysisWorkflow, jira_tools_enabled
@@ -17,19 +18,35 @@ from niko.harness.trace import TraceLogger
 from niko.memory.runtime import MemoryRuntime
 from niko.memory.store import MemoryStore
 from niko.sdlc.client import (
+    ROUTE_SDLC_ANSWER_CLARIFICATION,
+    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+    ROUTE_SDLC_CLARIFY_MORE,
     ROUTE_SDLC_APPROVE,
+    ROUTE_SDLC_CONTINUE,
+    ROUTE_SDLC_REVALIDATE,
+    ROUTE_SDLC_REVALIDATE_DESIGN,
+    ROUTE_SDLC_REVALIDATE_REQUIREMENT,
+    ROUTE_SDLC_REVALIDATE_PLAN,
     ROUTE_SDLC_START,
     ROUTE_SDLC_START_JIRA,
     ROUTE_SDLC_STATUS,
+    ROUTE_SDLC_SYNC,
     SdlcClient,
+    SdlcRequest,
     SdlcResult,
     detect_sdlc_request,
     sdlc_enabled,
 )
+from niko.sdlc.control import code_review_approval_enabled, evaluate_sdlc_preflight, preflight_notice
+from niko.sdlc.formatting import format_sdlc_reply
+from niko.sdlc.jobs import SdlcJob, SdlcJobRunner
 
 
 ReplyCallback = Callable[[str], None]
 NotifyCallback = Callable[[], None]
+ROUTE_SDLC_JOB_QUEUED = "sdlc_job_queued"
+ROUTE_SDLC_JOB_DUPLICATE = "sdlc_job_duplicate"
+ROUTE_SDLC_JOB_FINAL = "sdlc_job_final"
 
 
 def runtime_log(event: str, message: str, *, level: str = "info", data: dict | None = None) -> None:
@@ -46,6 +63,8 @@ class NikoApp:
         memory_store: MemoryStore | None = None,
         memory_runtime: MemoryRuntime | None = None,
         trace_logger: TraceLogger | None = None,
+        sdlc_client: SdlcClient | None = None,
+        sdlc_job_runner: SdlcJobRunner | None = None,
     ) -> None:
         if chat_graph is not None and any(dep is not None for dep in (memory_store, memory_runtime, trace_logger)):
             raise ValueError("Chi truyen chat_graph hoac cac dependency de tao graph, khong truyen ca hai.")
@@ -55,6 +74,20 @@ class NikoApp:
             memory_runtime=memory_runtime,
             trace_logger=trace_logger,
         )
+        self._sdlc_client = sdlc_client
+        self._sdlc_job_runner = sdlc_job_runner
+
+    @property
+    def sdlc_client(self) -> SdlcClient:
+        if self._sdlc_client is None:
+            self._sdlc_client = SdlcClient()
+        return self._sdlc_client
+
+    @property
+    def sdlc_job_runner(self) -> SdlcJobRunner:
+        if self._sdlc_job_runner is None:
+            self._sdlc_job_runner = SdlcJobRunner(trace_logger=self.chat_graph.trace_logger)
+        return self._sdlc_job_runner
 
     def handle_message(
         self,
@@ -69,6 +102,17 @@ class NikoApp:
 
         conversation_id = self.chat_graph.conversation_id_for(gateway_message)
         trace_turn = self.chat_graph.start_chat_turn(conversation_id, prompt, gateway_message)
+
+        sdlc_route = self._handle_sdlc_prompt(
+            conversation_id,
+            prompt,
+            gateway_message,
+            deliver_reply,
+            notify_working,
+            trace_turn.turn_id,
+        )
+        if sdlc_route:
+            return sdlc_route
 
         if not two_agent_mode_enabled():
             self._log_workflow_selected(
@@ -107,17 +151,6 @@ class NikoApp:
         if memory_route:
             return memory_route
 
-        sdlc_route = self._handle_sdlc_prompt(
-            conversation_id,
-            prompt,
-            gateway_message,
-            deliver_reply,
-            notify_working,
-            trace_turn.turn_id,
-        )
-        if sdlc_route:
-            return sdlc_route
-
         jira_route = self._handle_jira_issue_prompt(
             conversation_id,
             prompt,
@@ -153,6 +186,7 @@ class NikoApp:
             "handle_single_agent_message",
             "handle_busy_reply",
             "finish_workflow_reply",
+            "finish_background_workflow_reply",
         )
         return all(hasattr(self.chat_graph, name) for name in required)
 
@@ -205,31 +239,122 @@ class NikoApp:
         if request is None:
             return ""
 
+        if request.action == ROUTE_SDLC_CHALLENGE_ASSUMPTION and not (
+            request.run_id and request.assumption_id and request.instruction
+        ):
+            reply = (
+                "Dạ lệnh phản đối giả định chưa đủ thông tin nên em chưa thay đổi run.\n"
+                "Anh dùng cú pháp: `Phản đối giả định ASM-1 cho run_...: <lý do hoặc chỉ dẫn>`."
+            )
+            self._log_workflow_selected(
+                "sdlc_harness",
+                request.action,
+                conversation_id,
+                trace_id,
+                {
+                    "run_id": request.run_id,
+                    "assumption_id": request.assumption_id,
+                    "preflight_reason": "invalid_assumption_challenge_syntax",
+                    "write_dispatched": False,
+                },
+            )
+            return self.chat_graph.finish_workflow_reply(
+                conversation_id,
+                reply,
+                gateway_message,
+                deliver_reply,
+                route=request.action,
+                trace_id=trace_id,
+                meta={
+                    "run_id": request.run_id,
+                    "assumption_id": request.assumption_id,
+                    "preflight_reason": "invalid_assumption_challenge_syntax",
+                    "write_dispatched": False,
+                },
+            )
+
         if notify_working is not None:
             try:
                 notify_working()
             except Exception:
                 pass
 
+        client = self.sdlc_client
+        preflight = None
         if request.action == ROUTE_SDLC_STATUS:
-            result = SdlcClient().get_status(run_id=request.run_id)
-        elif request.action == ROUTE_SDLC_APPROVE:
-            result = SdlcClient().approve_checkpoint(run_id=request.run_id)
+            result = client.get_status(run_id=request.run_id)
+        elif request.action in {
+            ROUTE_SDLC_ANSWER_CLARIFICATION,
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+            ROUTE_SDLC_CLARIFY_MORE,
+            ROUTE_SDLC_APPROVE,
+            ROUTE_SDLC_CONTINUE,
+            ROUTE_SDLC_REVALIDATE,
+            ROUTE_SDLC_REVALIDATE_DESIGN,
+            ROUTE_SDLC_REVALIDATE_REQUIREMENT,
+            ROUTE_SDLC_REVALIDATE_PLAN,
+            ROUTE_SDLC_SYNC,
+        }:
+            status_result = client.get_status(run_id=request.run_id)
+            preflight = evaluate_sdlc_preflight(
+                request.action,
+                status_result,
+                allow_code_review_approval=code_review_approval_enabled(),
+                question_id=request.question_id,
+                assumption_id=request.assumption_id,
+            )
+            if (
+                request.action
+                in {
+                    ROUTE_SDLC_ANSWER_CLARIFICATION,
+                    ROUTE_SDLC_CHALLENGE_ASSUMPTION,
+                    ROUTE_SDLC_CLARIFY_MORE,
+                    ROUTE_SDLC_APPROVE,
+                    ROUTE_SDLC_CONTINUE,
+                    ROUTE_SDLC_REVALIDATE,
+                    ROUTE_SDLC_REVALIDATE_DESIGN,
+                    ROUTE_SDLC_REVALIDATE_REQUIREMENT,
+                    ROUTE_SDLC_REVALIDATE_PLAN,
+                    ROUTE_SDLC_SYNC,
+                }
+                and preflight.allowed
+                and not preflight.execute_now
+            ):
+                return self._queue_sdlc_action(
+                    conversation_id,
+                    request,
+                    gateway_message,
+                    deliver_reply,
+                    trace_id,
+                    status_result,
+                    preflight.reason,
+                )
+            if preflight.execute_now:
+                result = client.approve_checkpoint(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            else:
+                result = status_result
         elif request.action == ROUTE_SDLC_START_JIRA:
-            result = SdlcClient().start_from_jira(
+            result = client.start_from_jira(
                 issue_key=request.issue_key,
                 requested_by=_user_key(gateway_message),
             )
         else:
-            result = SdlcClient().start_or_get_run(
+            result = client.start_or_get_run(
                 dataset=request.dataset,
                 use_case=request.use_case,
                 requested_by=_user_key(gateway_message),
             )
 
+        write_dispatched = request.action in {ROUTE_SDLC_START, ROUTE_SDLC_START_JIRA} or bool(
+            preflight and preflight.execute_now
+        )
+
         self._log_workflow_selected(
             "sdlc_harness",
-            result.action,
+            request.action,
             conversation_id,
             trace_id,
             {
@@ -238,6 +363,9 @@ class NikoApp:
                 "current_phase": result.current_phase,
                 "status": result.status,
                 "error_code": result.error_code,
+                "preflight_reason": preflight.reason if preflight else "",
+                "write_dispatched": write_dispatched,
+                "assumption_id": request.assumption_id,
             },
         )
         try:
@@ -245,7 +373,7 @@ class NikoApp:
                 trace_id,
                 "sdlc_harness_finished",
                 {
-                    "route": result.action,
+                    "route": request.action,
                     "ok": result.ok,
                     "run_id": result.run_id,
                     "source_ref": result.source_ref,
@@ -257,20 +385,218 @@ class NikoApp:
                     "last_sync": result.last_sync,
                     "last_error": result.last_error,
                     "error_code": result.error_code,
+                    "preflight_reason": preflight.reason if preflight else "",
+                    "write_dispatched": write_dispatched,
+                    "assumption_id": request.assumption_id,
                 },
             )
         except Exception:
             pass
 
+        reply = format_sdlc_reply(result)
+        notice = preflight_notice(preflight) if preflight else ""
+        if notice:
+            reply = f"{notice}\n\n{reply}"
+
         return self.chat_graph.finish_workflow_reply(
             conversation_id,
-            _format_sdlc_reply(result),
+            reply,
             gateway_message,
             deliver_reply,
-            route=result.action,
+            route=request.action,
             trace_id=trace_id,
-            meta={"run_id": result.run_id, "ok": result.ok, "error_code": result.error_code},
+            meta={
+                "run_id": result.run_id,
+                "ok": result.ok,
+                "error_code": result.error_code,
+                "preflight_reason": preflight.reason if preflight else "",
+                "write_dispatched": write_dispatched,
+                "assumption_id": request.assumption_id,
+            },
         )
+
+    def _queue_sdlc_action(
+        self,
+        conversation_id: str,
+        request: SdlcRequest,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        trace_id: str,
+        status_result: SdlcResult,
+        preflight_reason: str,
+    ) -> str:
+        action_label = {
+            ROUTE_SDLC_ANSWER_CLARIFICATION: "trả lời câu hỏi làm rõ requirement",
+            ROUTE_SDLC_CHALLENGE_ASSUMPTION: "phản đối giả định của agent trong requirement",
+            ROUTE_SDLC_CLARIFY_MORE: "mở thêm một lượt làm rõ requirement, tối đa 5 câu",
+            ROUTE_SDLC_CONTINUE: "chạy tiếp workflow",
+            ROUTE_SDLC_REVALIDATE: "chạy lại Verification Runner và Validator",
+            ROUTE_SDLC_REVALIDATE_DESIGN: "tạo version mới và chạy lại Design Validator",
+            ROUTE_SDLC_REVALIDATE_REQUIREMENT: "kiểm tra tất định requirement hiện tại",
+            ROUTE_SDLC_REVALIDATE_PLAN: "tạo version mới và kiểm tra lại implementation plan",
+            ROUTE_SDLC_SYNC: "đồng bộ lại",
+            ROUTE_SDLC_APPROVE: "duyệt Code Review và chuyển Draft PR sang Ready for review",
+        }[request.action]
+        job = SdlcJob(
+            run_id=request.run_id,
+            action=request.action,
+            conversation_id=conversation_id,
+            user_key=_user_key(gateway_message),
+            trace_id=trace_id,
+            started_at=time.time(),
+        )
+
+        def task() -> SdlcResult:
+            if request.action == ROUTE_SDLC_ANSWER_CLARIFICATION:
+                return self.sdlc_client.answer_clarification(
+                    run_id=request.run_id,
+                    question_id=request.question_id,
+                    answer=request.answer,
+                    answered_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_CHALLENGE_ASSUMPTION:
+                return self.sdlc_client.challenge_assumption(
+                    run_id=request.run_id,
+                    assumption_id=request.assumption_id,
+                    instruction=request.instruction,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_CLARIFY_MORE:
+                return self.sdlc_client.clarify_more(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_CONTINUE:
+                return self.sdlc_client.continue_run(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_REVALIDATE:
+                return self.sdlc_client.revalidate_implementation(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_REVALIDATE_DESIGN:
+                return self.sdlc_client.revalidate_design(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_REVALIDATE_REQUIREMENT:
+                return self.sdlc_client.revalidate_requirement(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_REVALIDATE_PLAN:
+                return self.sdlc_client.revalidate_implementation_plan(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            if request.action == ROUTE_SDLC_SYNC:
+                return self.sdlc_client.sync_run(
+                    run_id=request.run_id,
+                    requested_by=_user_key(gateway_message),
+                )
+            return self.sdlc_client.approve_checkpoint(
+                run_id=request.run_id,
+                requested_by=_user_key(gateway_message),
+            )
+
+        def on_reserved() -> None:
+            self._log_workflow_selected(
+                "sdlc_harness",
+                request.action,
+                conversation_id,
+                trace_id,
+                {
+                    "ok": status_result.ok,
+                    "run_id": request.run_id,
+                    "current_phase": status_result.current_phase,
+                    "status": status_result.status,
+                    "error_code": status_result.error_code,
+                    "preflight_reason": preflight_reason,
+                    "write_dispatched": True,
+                    "question_id": request.question_id,
+                    "assumption_id": request.assumption_id,
+                },
+            )
+            queued_reply = (
+                f"Dạ, em đã đưa yêu cầu {action_label} cho run `{request.run_id}` vào xử lý nền. "
+                "Em sẽ gửi kết quả khi SDLC Harness hoàn tất. Anh vẫn có thể hỏi trạng thái run trong lúc chờ."
+            )
+            if request.action == ROUTE_SDLC_APPROVE:
+                queued_reply += " Thao tác này không merge PR; anh vẫn review và merge trực tiếp trên GitHub."
+            self.chat_graph.finish_workflow_reply(
+                conversation_id,
+                queued_reply,
+                gateway_message,
+                deliver_reply,
+                route=ROUTE_SDLC_JOB_QUEUED,
+                trace_id=trace_id,
+                meta={
+                    "action": request.action,
+                    "run_id": request.run_id,
+                    "preflight_reason": preflight_reason,
+                    "write_dispatched": True,
+                },
+            )
+
+        def on_complete(result: SdlcResult) -> None:
+            self.chat_graph.finish_background_workflow_reply(
+                conversation_id,
+                format_sdlc_reply(result),
+                gateway_message,
+                deliver_reply,
+                route=ROUTE_SDLC_JOB_FINAL,
+                trace_id=trace_id,
+                meta={
+                    "action": request.action,
+                    "run_id": result.run_id or request.run_id,
+                    "ok": result.ok,
+                    "status": result.status,
+                    "error_code": result.error_code,
+                    "question_id": request.question_id,
+                    "assumption_id": request.assumption_id,
+                },
+            )
+
+        started = self.sdlc_job_runner.submit(job, task, on_reserved, on_complete)
+        if started:
+            return request.action
+
+        self._log_workflow_selected(
+            "sdlc_harness",
+            request.action,
+            conversation_id,
+            trace_id,
+            {
+                "run_id": request.run_id,
+                "preflight_reason": "duplicate_background_job",
+                "write_dispatched": False,
+                "question_id": request.question_id,
+                "assumption_id": request.assumption_id,
+            },
+        )
+        duplicate_reply = (
+            f"Run `{request.run_id}` đang có tác vụ SDLC chạy nền nên em không tạo tiến trình thứ hai. "
+            "Anh có thể hỏi trạng thái run để xem tiến độ hiện tại."
+        )
+        self.chat_graph.finish_workflow_reply(
+            conversation_id,
+            duplicate_reply,
+            gateway_message,
+            deliver_reply,
+            route=ROUTE_SDLC_JOB_DUPLICATE,
+            trace_id=trace_id,
+            meta={
+                "action": request.action,
+                "run_id": request.run_id,
+                "preflight_reason": "duplicate_background_job",
+                "write_dispatched": False,
+                "question_id": request.question_id,
+                "assumption_id": request.assumption_id,
+            },
+        )
+        return request.action
 
     def _handle_jira_issue_prompt(
         self,
@@ -381,319 +707,13 @@ def _user_key(gateway_message) -> str:
     return str(getattr(user, "key", "") or "niko")
 
 
-def _format_sdlc_reply(result: SdlcResult) -> str:
-    """Đổi JSON trạng thái SDLC thành reply ngắn để người dùng quyết định bước tiếp."""
-    if not result.ok:
-        detail = result.message or "SDLC_Harness chưa xử lý được yêu cầu này."
-        if result.error_code:
-            return (
-                f"Dạ SDLC_Harness đang lỗi `{result.error_code}`.\n"
-                f"Chi tiết: {detail}\n"
-                "Em đã ghi lỗi vào log để mình soi tiếp."
-            )
-        return f"Dạ SDLC_Harness đang lỗi: {detail}"
-
-    status_label = _format_sdlc_status(result.current_phase, result.status)
-    source_label = _format_sdlc_source(result.source_ref)
-    sync_header = _format_sync_header(result.last_sync)
-    sync_lines = _format_sync_targets(result.last_sync)
-    quality_lines = _format_quality_summary(result.quality_reports)
-    block_lines = _format_blocked_reason(result)
-    action_lines = _format_action_suggestions(result.allowed_next_actions, result.status or result.current_phase)
-
-    if result.action == ROUTE_SDLC_STATUS:
-        lines = ["Dạ em kiểm tra SDLC_Harness rồi anh."]
-    elif result.action == ROUTE_SDLC_APPROVE:
-        lines = ["Dạ em đã gửi lệnh duyệt checkpoint sang SDLC_Harness rồi anh."]
-    else:
-        lines = ["Dạ SDLC_Harness đã nhận việc rồi anh."]
-
-    if source_label:
-        lines.append(f"Nguồn: {source_label}.")
-    if status_label:
-        lines.append(f"Trạng thái: {status_label}.")
-    elif result.current_phase or result.status:
-        status = " / ".join(part for part in (result.current_phase, result.status) if part)
-        lines.append(f"Trạng thái: {status}.")
-
-    if result.summary_for_user:
-        lines.append("")
-        lines.append(_format_sdlc_summary(result.summary_for_user))
-
-    if sync_lines:
-        lines.append("")
-        lines.append(sync_header)
-        lines.extend(sync_lines)
-
-    if block_lines:
-        lines.append("")
-        lines.extend(block_lines)
-
-    checkpoint_title = str(result.pending_checkpoint.get("title") or result.pending_checkpoint.get("name") or "").strip()
-    checkpoint_ref = str(result.pending_checkpoint.get("artifact_ref") or "").strip()
-    checkpoint_type = str(result.pending_checkpoint.get("type") or "").strip()
-    if checkpoint_title:
-        lines.append("")
-        lines.append(f"Checkpoint cần anh duyệt: {checkpoint_title}.")
-    elif checkpoint_type == "implementation_plan_review" and checkpoint_ref:
-        lines.append("")
-        lines.append(f"Checkpoint cần anh duyệt: implementation plan (`{checkpoint_ref}`).")
-    elif checkpoint_ref:
-        lines.append("")
-        lines.append(f"Checkpoint cần anh duyệt: `{checkpoint_ref}`.")
-
-    if quality_lines:
-        lines.append("")
-        lines.append("Kiểm tra chất lượng:")
-        lines.extend(quality_lines)
-
-    if action_lines:
-        lines.append("")
-        lines.append("Việc tiếp theo:")
-        lines.extend(action_lines)
-
-    if result.run_id:
-        lines.append("")
-        lines.append(f"Mã run: `{result.run_id}`")
-
-    artifacts = _format_artifact_labels(result.latest_artifacts)
-    if artifacts:
-        lines.append(f"Artifact nội bộ: {artifacts}.")
-
-    raw_status = _format_raw_status(result.current_phase, result.status)
-    if raw_status and raw_status not in (status_label or ""):
-        lines.append(f"Mã trạng thái: `{raw_status}`")
-    return "\n".join(lines)
-
-
-def _format_sdlc_status(current_phase: str, status: str) -> str:
-    """Dịch phase/status kỹ thuật thành trạng thái dễ đọc trên Telegram."""
-
-    status_key = (status or current_phase or "").strip()
-    labels = {
-        "requirement_drafting": "đang chuẩn hóa requirement",
-        "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
-        "design_drafting": "đang tạo design artifact",
-        "design_validating": "đang kiểm tra traceability của design",
-        "design_repairing": "đang repair design theo Validator",
-        "waiting_design_approval": "đang chờ anh review design checkpoint",
-        "design_review": "đang chờ anh review design checkpoint",
-        "implementation_planning": "đang lập implementation plan",
-        "waiting_implementation_plan_review": "đang chờ anh review implementation plan trước khi sang code/PR",
-        "blocked": "đang bị chặn, cần review trước khi chạy tiếp",
-        "checkpoint_pending": "đang chờ duyệt checkpoint",
-        "failed": "đang lỗi trong workflow SDLC",
-        "done": "đã hoàn tất",
-        "cancelled": "đã hủy",
-    }
-    label = labels.get(status_key)
-    if not label and current_phase and status and current_phase != status:
-        label = f"{current_phase} / {status}"
-    return label or status_key
-
-
-def _format_sdlc_source(source_ref: str) -> str:
-    """Rút gọn source_ref để người đọc hiểu nguồn context đến từ đâu."""
-
-    source = str(source_ref or "").strip()
-    if source.startswith("jira_issue:"):
-        return f"Jira issue `{source.split(':', 1)[1]}`"
-    if source.startswith("dataset_use_case:"):
-        parts = source.split(":")
-        if len(parts) >= 3:
-            return f"{parts[1]} {parts[2]}"
-    return source
-
-
-def _format_sdlc_summary(summary: str) -> str:
-    """Làm mềm summary từ SDLC_Harness, tránh cảm giác dump log máy."""
-
-    cleaned = " ".join(str(summary or "").split())
-    replacements = {
-        "Đã chuẩn hóa jira": "Em đã chuẩn hóa Jira issue",
-        "Đã chuẩn hóa eTour": "Em đã chuẩn hóa eTour",
-        "validator đã pass": "validator đã kiểm tra xong",
-        "sync status=synced": "đã đồng bộ lên tool",
-        "Run đang chờ anh duyệt requirement trước khi chuyển sang design.": (
-            "Hiện run đang chờ anh duyệt requirement trước khi chuyển sang design."
-        ),
-    }
-    for old, new in replacements.items():
-        cleaned = cleaned.replace(old, new)
-    return cleaned
-
-
-def _format_sync_targets(last_sync: dict) -> list[str]:
-    """Hiển thị link Jira/Confluence nếu sync thật đã có URL."""
-
-    targets = last_sync.get("targets") if isinstance(last_sync, dict) else None
-    if not isinstance(targets, list):
-        return []
-
-    lines: list[str] = []
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        tool = _title_tool(str(target.get("tool") or "tool"))
-        status = str(target.get("status") or "").strip()
-        url = str(target.get("url") or "").strip()
-        error = str(target.get("error") or target.get("message") or "").strip()
-        if url:
-            if status and status not in {"synced", "mock_synced"}:
-                lines.append(f"- {tool}: {status} - {url}")
-            else:
-                lines.append(f"- {tool}: {url}")
-        elif status and error:
-            lines.append(f"- {tool}: {status} ({_clip_text(error, 120)})")
-        elif status:
-            lines.append(f"- {tool}: {status}")
-    return lines[:3]
-
-
-def _format_sync_header(last_sync: dict) -> str:
-    """Đặt nhãn sync theo status để partial failure không bị hiểu là đã xong đẹp."""
-
-    status = str(last_sync.get("status") or "").strip() if isinstance(last_sync, dict) else ""
-    if status in {"partial_failed", "partially_failed", "partial_failure"}:
-        return "Đồng bộ một phần:"
-    if status in {"failed", "error", "sync_failed"}:
-        return "Đồng bộ đang lỗi:"
-    return "Đã đồng bộ:"
-
-
-def _format_blocked_reason(result: SdlcResult) -> list[str]:
-    """Hiển thị lý do blocked từ SDLC_Harness nếu contract có `last_error`."""
-
-    if result.status != "blocked" and result.current_phase != "blocked":
-        return []
-    error = result.last_error if isinstance(result.last_error, dict) else {}
-    code = str(error.get("error_code") or "").strip()
-    message = str(error.get("message") or "").strip()
-    if code and message:
-        return [f"Lý do chặn: `{code}` - {_clip_text(message, 220)}"]
-    if message:
-        return [f"Lý do chặn: {_clip_text(message, 220)}"]
-    return ["Lý do chặn: SDLC_Harness cần anh review artifact/quality report trước khi chạy tiếp."]
-
-
-def _format_quality_summary(quality_reports: dict) -> list[str]:
-    """Rút gọn quality report của SDLC để Telegram không phải dump artifact."""
-
-    if not isinstance(quality_reports, dict):
-        return []
-
-    lines: list[str] = []
-    plan_review = quality_reports.get("implementation_plan_review")
-    if isinstance(plan_review, dict):
-        summary = str(plan_review.get("summary") or "").strip()
-        if summary:
-            lines.append(f"- Validator plan: {_clip_text(summary, 180)}")
-        repair_iterations = plan_review.get("repair_iterations")
-        if repair_iterations is not None:
-            lines.append(f"- Implementation plan repair iterations: {repair_iterations}")
-        issue_count = plan_review.get("issue_count")
-        if issue_count is not None:
-            lines.append(f"- Implementation plan open issues: {issue_count}")
-        return lines[:3]
-
-    design_trace = quality_reports.get("design_traceability")
-    if not isinstance(design_trace, dict):
-        return []
-
-    summary = str(design_trace.get("summary") or "").strip()
-    if summary:
-        lines.append(f"- Validator: {summary}")
-    versions = design_trace.get("versions") or []
-    if isinstance(versions, list) and versions:
-        repair_iterations = max(0, len(versions) - 1)
-        latest_version = str(versions[-1])
-        lines.append(f"- Design version: {latest_version}; repair iterations: {repair_iterations}")
-    return lines[:2]
-
-
-def _format_action_suggestions(actions: list[str], status: str = "") -> list[str]:
-    """Dịch allowed_next_actions theo scope hiện tại: static source và approve-only."""
-
-    action_set = {str(action) for action in actions if action}
-    suggestions: list[str] = []
-    if "approve_checkpoint" in action_set:
-        if status == "waiting_implementation_plan_review":
-            suggestions.append("- Anh review implementation plan trên Jira/Confluence trước.")
-            suggestions.append("- Phase 4 tạo code/PR chưa mở trong Niko ở lát này; mình khóa checkpoint Phase 3 trước.")
-        elif status == "waiting_design_approval":
-            suggestions.append("- Anh review design checkpoint trên Jira/Confluence trước.")
-            suggestions.append("- Nếu ổn, nhắn em duyệt kèm mã run để mở bước tiếp theo khi workflow đã sẵn sàng.")
-        else:
-            suggestions.append("- Anh review requirement packet/checkpoint trước.")
-            suggestions.append("- Nếu ổn, nhắn em duyệt kèm mã run để mở bước design.")
-    if not suggestions and "get_status" in action_set:
-        suggestions.append("- Anh có thể hỏi lại mã run để xem tiến độ.")
-    return suggestions[:4]
-
-
-def _format_artifact_labels(value: dict) -> str:
-    """Hiển thị artifact bằng tên dễ đọc thay vì key/path thô."""
-
-    labels = {
-        "use_case_packet": "use case packet",
-        "formal_use_case": "formal use case",
-        "formal_check_report": "formal check report",
-        "requirement_packet": "requirement packet",
-        "trace_graph": "trace graph",
-        "designer_analysis": "designer analysis",
-        "requirement_graph": "requirement graph",
-        "class_diagram_graph": "class diagram graph",
-        "sequence_diagram_graph": "sequence diagram graph",
-        "design_artifact": "design artifact",
-        "requirement_design_trace": "requirement-design trace",
-        "missing_design_links": "missing design links",
-        "design_quality_report": "design quality report",
-        "implementation_plan": "implementation plan",
-        "implementation_plan_structured": "implementation plan structured data",
-        "implementation_plan_review": "implementation plan review",
-    }
-    priority = (
-        "implementation_plan",
-        "implementation_plan_review",
-        "design_artifact",
-        "design_quality_report",
-        "requirement_packet",
-        "trace_graph",
-    )
-    keys = [key for key in priority if key in value]
-    keys.extend(key for key in value.keys() if key not in keys)
-    names = [labels.get(str(key), str(key)) for key in keys]
-    if len(names) > 6:
-        return f"{', '.join(names[:6])}, +{len(names) - 6} artifact khác"
-    return ", ".join(names)
-
-
-def _format_raw_status(current_phase: str, status: str) -> str:
-    """Giữ mã trạng thái kỹ thuật để test/log và tra cứu vẫn rõ."""
-
-    parts = [part for part in (current_phase, status) if part]
-    if len(parts) == 2 and parts[0] == parts[1]:
-        return parts[0]
-    return " / ".join(parts)
-
-
-def _title_tool(tool: str) -> str:
-    mapping = {"jira": "Jira", "confluence": "Confluence"}
-    return mapping.get(tool.lower(), tool)
-
-
-def _clip_text(text: str, limit: int) -> str:
-    cleaned = " ".join(str(text or "").split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: max(0, limit - 1)].rstrip() + "…"
-
-
 def create_niko_app(
     chat_graph=None,
     memory_store: MemoryStore | None = None,
     memory_runtime: MemoryRuntime | None = None,
     trace_logger: TraceLogger | None = None,
+    sdlc_client: SdlcClient | None = None,
+    sdlc_job_runner: SdlcJobRunner | None = None,
 ) -> NikoApp:
     """Tạo app mặc định; tham số test-only giúp giữ đường inject graph hiện có."""
     return NikoApp(
@@ -701,4 +721,6 @@ def create_niko_app(
         memory_store=memory_store,
         memory_runtime=memory_runtime,
         trace_logger=trace_logger,
+        sdlc_client=sdlc_client,
+        sdlc_job_runner=sdlc_job_runner,
     )

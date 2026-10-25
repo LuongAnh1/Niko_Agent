@@ -138,7 +138,7 @@ Các nhóm nên chỉnh trong dashboard:
 - `Decision Model`: Ollama base URL, model Nimble, timeout triage, timeout warmup/stop, keep alive.
 - `Sticker`: sticker set/config/mode và timeout.
 - `Memory & Trace`: memory, recent context budget, retrieval/write/correction gate, auto consolidation, trace và runtime log.
-- `SDLC Harness`: bật/tắt route SDLC, workdir repo `../SDLC_Harness`, Python command và timeout CLI. Với các bước dài như approve design sang implementation plan, timeout nên đủ lớn, ví dụ 300s.
+- `SDLC Harness`: bật/tắt route, API base URL/token, request timeout, operation timeout, poll interval, sync mode và Code Review approval gate. LLM/runtime của workflow được cấu hình ở chính SDLC Harness.
 - `Replies`: suffix, wait/busy/error reply.
 
 Trước khi chạy bot, Ollama phải đang bật và model trong `NIKO_DECISION_MODEL_NAME`
@@ -277,16 +277,20 @@ legacy for the SDLC direction: new use-case loading and workflow state should
 live in SDLC_Harness, while Niko calls SDLC_Harness and reports
 status/checkpoints back to the user.
 
-See `docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and
-`docs/plans/2026-10-12-niko-sdlc-upgrade-checklist.md` for the local upgrade
-plan.
+Fixture route nhận tên use case dạng `eTour UC<n>`; fixture tương ứng phải tồn tại
+trong `SDLC_Harness/fixtures/etour/`. Hiện UC1 và UC2 được chuẩn bị cho demo.
+
+See `docs/plans/sdlc/README.md` for the dated local plan index. The current
+Phase 4 plan is `docs/plans/sdlc/2026-10-15/phase4-integration-plan.md`.
 <!-- NIKO_SDLC_SYNC_START -->
 ## SDLC Harness Integration Snapshot
 
 Niko hiện là lớp hội thoại/điều phối cho SDLC_Harness, không phải nơi tự xử lý
 pipeline requirement. Khi người dùng yêu cầu chạy use case hoặc Jira issue đã
-cấu hình, Niko nhận diện intent, gọi CLI JSON của `../SDLC_Harness`, rồi format
-kết quả ngắn gọn để trả về Telegram.
+cấu hình, Niko nhận diện intent, gọi HTTP API của `../SDLC_Harness`, rồi format
+kết quả ngắn gọn để trả về Telegram. Sau live E2E ngày 2026-10-19, subprocess
+CLI đã được loại khỏi runtime path của Niko. CLI của SDLC Harness vẫn tồn tại
+như công cụ debug/automation độc lập cho operator.
 
 Ranh giới hiện tại:
 
@@ -297,12 +301,30 @@ Ranh giới hiện tại:
   Jira/Confluence.
 - Phase 1 đã có đường chạy thật với Jira/Confluence; mock sync chỉ còn dùng cho
   test hoặc khi chưa cấu hình Atlassian.
-- Phase 2/3 checkpoint hiện đã được Niko đọc/format ở mức status và approve
-  theo `run_id`: Niko hiển thị design artifact/implementation plan, Validator
-  summary, repair iterations, link Jira/Confluence, trạng thái sync partial/full
-  failure và lý do `blocked` từ `last_error`. Niko chưa hỗ trợ `request_change`,
-  context động, hoặc tự sửa artifact SDLC từ Telegram; Phase 4 tạo code/PR chưa
-  mở trong Niko.
+- Phase 2/3 checkpoint được Niko đọc/format và approve theo `run_id`: Niko hiển
+  thị design artifact/implementation plan, Validator summary, repair iterations,
+  link Jira/Confluence, trạng thái sync partial/full failure và lý do `blocked`
+  từ `last_error`.
+- Phase 4 đã hỗ trợ `continue_run`, `get_status`, `sync_run` và Code Review
+  approval qua Telegram. Các write action chạy nền theo `run_id`; approval chỉ
+  mở khi `NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1` và chỉ chuyển đúng Draft PR
+  sang Ready for review.
+- HTTP client dùng operation `202` bền vững, idempotency key và polling. Khi
+  submit có kết quả chưa xác định, Niko không tạo operation mới bằng đường khác;
+  operation quá thời gian theo dõi được báo lại bằng operation ID.
+- API cutover live E2E ngày 2026-10-19 đã đưa run
+  `run_20261019_034156_05cfbb93` từ Jira intake tới `code_review_approved` hoàn
+  toàn qua HTTP API: GitHub PR #7 đã Ready for review; requirement, design,
+  implementation plan và code-review checkpoints đều sync thành công với
+  Jira/Confluence mà không có CLI fallback hoặc mutation trùng.
+- Dashboard có `NIKO_SDLC_SYNC_MODE`. Mặc định `mock` để test không ghi tool thật;
+  chọn `real` chỉ khi chủ động muốn SDLC_Harness cập nhật Jira/Confluence. Niko
+  truyền mode này rõ ràng trong API request thay vì dựa ngầm vào cấu hình server.
+- Niko chưa hỗ trợ `request_change`, context động, hoặc tự sửa artifact SDLC từ
+  Telegram.
+- SDLC_Harness sở hữu worktree-per-run và kiểm tra PR/workspace identity dưới
+  per-run lock. Niko không checkout branch, quản lý worktree hoặc merge PR;
+  merge luôn do human thực hiện trên GitHub.
 
 <!-- NIKO_SDLC_SYNC_END -->
 

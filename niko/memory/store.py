@@ -25,7 +25,7 @@ from niko.config import env_value, resolve_project_path
 
 DEFAULT_NIKO_STATE_DIR = "niko/.runtime"
 DEFAULT_MEMORY_DB_NAME = "niko_memory.sqlite3"
-TRANSIENT_ASSISTANT_ROUTES = {"deep_agent_wait", "busy_reply"}
+TRANSIENT_ASSISTANT_ROUTES = {"deep_agent_wait", "busy_reply", "sdlc_job_queued"}
 SEARCH_STOPWORDS = {
     "anh",
     "chi",

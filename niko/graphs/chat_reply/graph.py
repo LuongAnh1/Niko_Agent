@@ -200,6 +200,30 @@ class ChatReplyGraph:
         self._deliver_reply_safely(deliver_reply, final_reply, trace_id)
         return route
 
+    def finish_background_workflow_reply(
+        self,
+        conversation_id: str,
+        reply: str,
+        gateway_message,
+        deliver_reply: ReplyCallback,
+        *,
+        route: str,
+        trace_id: str,
+        meta: dict | None = None,
+    ) -> None:
+        """Ghi và gửi kết quả nền mà không đóng lại turn đã kết thúc khi queue."""
+        final_reply = prompts.ensure_reply_suffix(reply)
+        self._record_chat(
+            conversation_id,
+            "assistant",
+            final_reply,
+            gateway_message,
+            route=route,
+            trace_id=trace_id,
+            meta=meta,
+        )
+        self._deliver_reply_safely(deliver_reply, final_reply, trace_id)
+
     def get_active_deep_job(self, conversation_id: str) -> DeepAgentJob | None:
         with self.deep_jobs_lock:
             return self.deep_jobs.get(conversation_id)

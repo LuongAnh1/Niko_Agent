@@ -110,9 +110,9 @@ artifacts before downstream work continues.
 
 ## SDLC Harness Upgrade Direction
 
-The next Niko upgrade direction is documented in
-`docs/plans/2026-10-12-niko-sdlc-upgrade-plan.md` and its checklist. Treat that
-plan as the local source of truth when working on SDLC integration.
+The Niko SDLC plan index is documented in `docs/plans/sdlc/README.md`. The
+current Phase 4 source of truth is
+`docs/plans/sdlc/2026-10-15/phase4-integration-plan.md` and its checklist.
 
 The intended boundary is:
 
@@ -151,8 +151,8 @@ owner explicitly changes direction.
 - `niko/tools/<domain>/`: Loop tool adapters such as memory and Jira.
 - `niko/memory/`: SQLite chat memory baseline and correction/consolidation
   runtime.
-- `niko/sdlc/`: adapter từ Niko sang repo `../SDLC_Harness`; Niko chỉ gọi CLI/API
-  workflow và nhận JSON trạng thái, không tự kéo use case từ Jira.
+- `niko/sdlc/`: HTTP API client từ Niko sang repo `../SDLC_Harness`; Niko chỉ gửi
+  action và nhận JSON trạng thái, không tự kéo use case từ Jira.
 - `niko/runtime.py`: DeepSeek runtime cho Deep agent chính; Claude/FCC CLI helper
   là legacy fallback/debug.
 - `niko/harness/` and `niko/ops/`: traces, runtime logs, dashboard, config, bot
@@ -404,7 +404,7 @@ edit SDLC artifacts or handle change requests yet. Keep this boundary strict:
 ```text
 Telegram/user prompt
   -> Niko detects an SDLC intent
-  -> Niko calls SDLC_Harness CLI JSON
+  -> Niko calls the SDLC_Harness HTTP API through one client facade
   -> SDLC_Harness loads Jira/fixture source, refines requirements, validates,
      writes runtime artifacts, syncs Jira/Confluence, and returns a compact
      machine-readable result
@@ -417,12 +417,42 @@ the SDLC_Harness contract first, then adapt `niko/sdlc/`. The old read-only Jira
 fixture workflow in Niko is only for issue analysis, not the SDLC requirement
 pipeline.
 
-Current Telegram SDLC actions are `start`, `get_status`, and
-`approve_checkpoint` with an explicit `run_id`. Do not expose `request_change`,
-`cancel_run`, `resume_run`, or dynamic context invalidation until the matching
-SDLC_Harness phase exists and its JSON contract is extended. Niko should still
-surface SDLC `blocked`/sync-partial states clearly by reading `last_error` and
-`last_sync`; this is status reporting, not artifact mutation. Phase 4 code/PR is
-not open in Niko until SDLC_Harness exposes a matching checked contract.
+Current Telegram SDLC actions are `start`, `get_status`, Phase 1 V2
+`answer_clarification`/`clarify_more`/`challenge_assumption`/deterministic-only
+`revalidate_requirement`,
+Phase 1/2/3 `approve_checkpoint`, Phase 4 `continue_run`/`sync_run`, Phase 2
+`revalidate_design`, and gated Code Review approval. Control actions use
+an explicit `run_id`; clarification answers also include the current question
+ID so stale replies cannot answer a later question. Long-running write actions
+run in the background and return queued plus final replies. Code Review approval requires
+`NIKO_SDLC_CODE_REVIEW_APPROVAL_ENABLED=1`, whose safe default is `0`, and may
+only request Draft -> Ready for review. Niko should surface SDLC
+`blocked`/sync-partial states clearly by reading `last_error` and `last_sync`;
+approval sync failure must retry `sync_run` instead of approving GitHub again.
+Slice 8 cutover passed with live run `run_20261019_034156_05cfbb93` on
+2026-10-19. Niko is API-only for SDLC integration; its subprocess transport,
+transport selector and CLI-specific config were removed. HTTP writes use durable
+operations, idempotency and polling. After an ambiguous submit or timeout, Niko
+must not create a new operation through another path because that can execute
+the workflow twice. The standalone SDLC_Harness CLI remains an operator/debug tool.
+`revalidate_design` rereads the frozen Requirement V2 and the latest Phase 2
+design, then runs the hybrid V2 validator in a bounded current-version repair
+loop. Each version receives deterministic traceability/parser/cross-diagram
+checks plus one semantic review; only blockers feed the next Designer repair.
+Warnings do not block approval, zero blockers create the checkpoint, and a
+repeated blocker set stops the loop as stalled.
+
+Do not expose `request_change`, `cancel_run`, `resume_run`, dynamic context
+invalidation, merge, or auto-merge until the matching SDLC_Harness phase and
+JSON contract exist. SDLC_Harness owns worktree-per-run identity and locking.
+Niko never checks out target-repo branches, manages worktrees, merges PRs, or
+enables auto-merge; the project owner always performs merge on GitHub.
+
+Niko owns the local switch `NIKO_SDLC_SYNC_MODE`, whose safe default is `mock`,
+and sends it explicitly in API requests; use `real` only for an intentional
+Jira/Confluence live run. SDLC_Harness owns its LLM and server runtime config.
+Phase 4 intent, formatter, background runner, integration fixture and controlled
+live smoke have passed. Keep approval default-off and require an intentional
+live run before enabling it.
 <!-- NIKO_SDLC_SYNC_END -->
 
