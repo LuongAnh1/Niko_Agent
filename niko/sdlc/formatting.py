@@ -567,7 +567,13 @@ def _format_quality_summary(result: SdlcResult) -> list[str]:
         versions = design_validation.get("versions") or []
         if isinstance(versions, list) and versions:
             lines.append(f"- Design version: {versions[-1]}; repair iterations: {max(0, len(versions) - 1)}")
-        return lines[:2]
+        vertical_trace = quality_reports.get("vertical_trace")
+        if isinstance(vertical_trace, dict):
+            mode = str(vertical_trace.get("mode") or "legacy")
+            blockers = int(vertical_trace.get("blocking_count") or 0)
+            verdict = "passed" if vertical_trace.get("ok") else ("shadow phát hiện vấn đề" if mode == "shadow" else "chưa pass")
+            lines.append(f"- Vertical trace: {verdict}; mode={mode}; blockers={blockers}.")
+        return lines[:3]
 
     design_trace = quality_reports.get("design_traceability")
     if not isinstance(design_trace, dict):
@@ -688,6 +694,8 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "design_surface_view": "design surface view",
         "design_projection_manifest": "design projection manifest",
         "design_finding_ledger": "design finding ledger",
+        "vertical_trace_graph": "vertical trace graph",
+        "vertical_trace_validation": "vertical trace validation",
         "implementation_plan": "implementation plan",
         "implementation_plan_structured": "implementation plan structured data",
         "implementation_plan_review": "implementation plan review",

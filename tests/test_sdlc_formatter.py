@@ -105,6 +105,27 @@ class SdlcFormatterPhase4Tests(unittest.TestCase):
         self.assertIn("Designer bị chặn", reply)
         self.assertIn("revalidate design", reply)
 
+    def test_formats_vertical_trace_shadow_summary_without_private_paths(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_review",
+                status="waiting_design_approval",
+                quality_reports={
+                    "design_validation": {"ok": True, "blocking_count": 0, "warning_count": 1},
+                    "vertical_trace": {"ok": False, "mode": "shadow", "blocking_count": 2},
+                },
+                latest_artifacts={
+                    "vertical_trace_graph": "private-trace-path",
+                    "vertical_trace_validation": "private-report-path",
+                },
+            )
+        )
+
+        self.assertIn("Vertical trace: shadow phát hiện vấn đề; mode=shadow; blockers=2", reply)
+        self.assertIn("vertical trace graph", reply)
+        self.assertIn("vertical trace validation", reply)
+        self.assertNotIn("private-trace-path", reply)
+
     def test_formats_agent_assumption_and_copyable_challenge_command(self):
         run_id = "run_20261013_160421_f661babf"
         reply = format_sdlc_reply(
