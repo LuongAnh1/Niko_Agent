@@ -26,6 +26,128 @@ SDLC_ROOT = Path(
 ).expanduser().resolve()
 
 
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def _create_typescript_target(root: Path) -> tuple[Path, Path]:
+    """Create the smallest local target accepted by the harness profile contract."""
+
+    target = root / "target-repo"
+    remote = root / "target.git"
+    editable_roots = {
+        "web": ["apps/web/src"],
+        "api": ["apps/api/src"],
+        "contracts": ["packages/contracts/src"],
+        "database": ["packages/db/src", "packages/db/prisma"],
+        "e2e": ["tests/e2e"],
+    }
+    protected_paths = [
+        ".sdlc",
+        ".github",
+        "package.json",
+        "package-lock.json",
+        "compose.yaml",
+        "tsconfig.json",
+        "tsconfig.base.json",
+        "vitest.config.ts",
+        "playwright.config.ts",
+        "apps/web/package.json",
+        "apps/web/tsconfig.json",
+        "apps/web/vite.config.ts",
+        "apps/api/package.json",
+        "apps/api/tsconfig.json",
+        "packages/contracts/package.json",
+        "packages/contracts/tsconfig.json",
+        "packages/db/package.json",
+        "packages/db/prisma7.config.ts",
+        "packages/db/tsconfig.json",
+    ]
+    verification_stage_ids = [
+        "dependency_setup",
+        "database_ready",
+        "migrate_and_seed",
+        "typecheck",
+        "unit",
+        "api_database_integration",
+        "frontend_build",
+        "service_health",
+        "browser_e2e",
+        "cleanup",
+    ]
+    for paths in editable_roots.values():
+        for relative in paths:
+            path = target / relative
+            path.mkdir(parents=True, exist_ok=True)
+            (path / ".gitkeep").write_text("", encoding="utf-8")
+    (target / ".github").mkdir(parents=True)
+    (target / ".github/.gitkeep").write_text("", encoding="utf-8")
+    (target / "package.json").write_text(
+        json.dumps({"name": "niko-sdlc-integration-target", "version": "1.0.0", "private": True}) + "\n",
+        encoding="utf-8",
+    )
+    (target / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "niko-sdlc-integration-target",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "requires": True,
+                "packages": {"": {"name": "niko-sdlc-integration-target", "version": "1.0.0"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (target / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    manifest = {
+        "version": "target_profile_manifest_v1",
+        "project_profile_id": "typescript_fullstack_v1",
+        "project_profile_schema": "project_profile_v1",
+        "language_profile_id": "typescript_v1",
+        "language_profile_schema": "language_profile_v1",
+        "components": [
+            {"component_id": component_id, "editable_roots": paths}
+            for component_id, paths in editable_roots.items()
+        ],
+        "protected_paths": protected_paths,
+        "required_paths": [
+            ".sdlc/target-profile.json",
+            "package.json",
+            "package-lock.json",
+            "compose.yaml",
+            "apps/web",
+            "apps/api",
+            "packages/contracts",
+            "packages/db",
+            "tests/e2e",
+        ],
+        "verification_stage_ids": verification_stage_ids,
+    }
+    manifest_path = target / ".sdlc/target-profile.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    remote.mkdir()
+    _git(remote, "init", "--bare")
+    _git(target, "init")
+    _git(target, "config", "user.name", "Niko Integration")
+    _git(target, "config", "user.email", "niko-integration@example.com")
+    _git(target, "add", ".")
+    _git(target, "commit", "-m", "initial")
+    _git(target, "branch", "-M", "main")
+    _git(target, "remote", "add", "origin", str(remote))
+    _git(target, "push", "-u", "origin", "main")
+    return target, remote
+
+
 class _IntegrationGraph:
     """Small app shell that preserves Niko turn selection without invoking chat LLMs."""
 
@@ -83,6 +205,7 @@ class SdlcApiProcessIntegrationTests(unittest.TestCase):
         self.stderr_file = self.stderr_path.open("w+b")
         self.port = self._free_port()
         self.token = "slice-8-process-token"
+        self.target_repo, self.target_remote = _create_typescript_target(self.temp_path)
 
         server_env = os.environ.copy()
         server_env.update(
@@ -92,6 +215,10 @@ class SdlcApiProcessIntegrationTests(unittest.TestCase):
                 "SDLC_SYNC_MODE": "mock",
                 "SDLC_RUNTIME_CONFIG_FILE": str(self.runtime_root / "config.json"),
                 "SDLC_API_SHUTDOWN_TIMEOUT_SECONDS": "2",
+                "SDLC_PROJECT_PROFILE": "typescript_fullstack_v1",
+                "SDLC_TARGET_REPO_PATH": str(self.target_repo),
+                "SDLC_TARGET_REPO_REMOTE": str(self.target_remote.resolve()),
+                "SDLC_TARGET_WORKTREE_ROOT": str(self.temp_path / "worktrees"),
                 "PYTHONUNBUFFERED": "1",
             }
         )

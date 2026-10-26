@@ -155,6 +155,9 @@ def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str =
         "requirement_drafting": "đang chuẩn hóa requirement",
         "waiting_requirement_clarification": "đang chờ anh trả lời câu hỏi làm rõ requirement",
         "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
+        "repo_discovery": "đang khóa workspace và khảo sát codebase AS-IS trước Design",
+        "repo_discovery_paused": "khảo sát codebase đang tạm dừng do môi trường và có thể chạy tiếp",
+        "repo_discovery_blocked": "khảo sát codebase bị chặn bởi kiểm tra profile/conformance",
         "design_drafting": "đang tạo design artifact",
         "design_validating": "đang kiểm tra traceability và tính nhất quán của design",
         "design_revalidating": "đang chạy lại Design Validator hybrid",
@@ -270,7 +273,7 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     status = (result.status or result.current_phase or "").strip()
     is_failure = (
         status == "blocked"
-        or status == "implementation_paused"
+        or status in {"implementation_paused", "repo_discovery_paused"}
         or status.endswith("_failed")
         or status.endswith("_blocked")
     )
@@ -279,7 +282,7 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     error = result.last_error if isinstance(result.last_error, dict) else {}
     code = str(error.get("error_code") or "").strip()
     message = str(error.get("message") or "").strip()
-    if status == "implementation_paused":
+    if status in {"implementation_paused", "repo_discovery_paused"}:
         label = "Lý do tạm dừng"
     else:
         label = "Lý do chặn" if status == "blocked" or status.endswith("_blocked") else "Lý do lỗi"
@@ -607,6 +610,8 @@ def _format_action_suggestions(
     if "continue_run" in action_set and not suggestions:
         if status == "implementation_paused":
             suggestions.append("- Chạy tiếp Phase 4 để tiếp tục lát công việc Developer chưa hoàn thành.")
+        elif status == "repo_discovery_paused":
+            suggestions.append("- Chạy tiếp đúng mã run để retry khóa workspace và khảo sát codebase trước Design.")
         else:
             suggestions.append("- Bước tiếp theo của workflow là chạy tiếp Phase 4 cho mã run này.")
     if not suggestions and "get_status" in action_set:
@@ -638,6 +643,7 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "effective_design_contract": "effective design contract",
         "developer_work_packet": "developer work packet",
         "run_workspace": "run workspace",
+        "repo_landscape": "repo landscape",
         "code_change_report": "code change report",
         "test_report": "verification test report",
         "requirement_design_code_trace": "requirement-design-code trace",
@@ -658,6 +664,7 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "qa_test_report",
         "github_code_review",
         "run_workspace",
+        "repo_landscape",
         "implementation_plan",
         "design_artifact",
         "requirement_packet",

@@ -24,6 +24,38 @@ def _result(**overrides):
 
 
 class SdlcFormatterPhase4Tests(unittest.TestCase):
+    def test_formats_repo_discovery_pause_with_retry_action(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="repo_discovery",
+                status="repo_discovery_paused",
+                allowed_next_actions=["continue_run", "get_status"],
+                last_error={
+                    "error_code": "workspace_fetch_failed",
+                    "message": "Target remote is temporarily unavailable.",
+                },
+            )
+        )
+
+        self.assertIn("khảo sát codebase đang tạm dừng", reply)
+        self.assertIn("Lý do tạm dừng", reply)
+        self.assertIn("retry khóa workspace", reply)
+
+    def test_formats_repo_landscape_as_internal_artifact(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_review",
+                status="waiting_design_approval",
+                latest_artifacts={
+                    "repo_landscape": "private-landscape-path",
+                    "design_artifact": "private-design-path",
+                },
+            )
+        )
+
+        self.assertIn("repo landscape", reply)
+        self.assertNotIn("private-landscape-path", reply)
+
     def test_formats_agent_assumption_and_copyable_challenge_command(self):
         run_id = "run_20261013_160421_f661babf"
         reply = format_sdlc_reply(
