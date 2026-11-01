@@ -137,9 +137,9 @@ owner explicitly changes direction.
 
 ## Session Handoff: SDLC_Harness L3.10 (as of 2026-11-02)
 
-Active work is in the sibling repo `../SDLC_Harness`, not in Niko. All L3.10
-SDLC_Harness work is still uncommitted; commit only when the owner asks (never
-stage `docs/`).
+Active work is in the sibling repo `../SDLC_Harness`, not in Niko. L3.10 and
+the fixes below are committed and pushed as SDLC_Harness `3d66250` on `main`;
+commit later work only when the owner asks (never stage `docs/`).
 
 Read first (local-only docs in `../SDLC_Harness/docs/`):
 
@@ -148,7 +148,7 @@ Read first (local-only docs in `../SDLC_Harness/docs/`):
 - `role-specific-agent-loop-upgrade/progress.md` and `implementation-plan.md`.
 - Claude plan file: `~/.claude/plans/hi-n-t-i-th-ang-immutable-quail.md`.
 
-What L3.10 added (uncommitted, opt-in via
+What L3.10 added (opt-in via
 `SDLC_DESIGNER_UI_CONTRACT_VERSION=ui_experience_contract_v2`, default stays v1):
 `agents/designer/ui_context.py` (deterministic React/TS repo UI context),
 `runtime_surface_binding_v1` + `ui_experience_contract_v2` checks in
@@ -157,8 +157,8 @@ What L3.10 added (uncommitted, opt-in via
 review in `agents/validator/design_validation.py`, tests in
 `tests/test_designer_ui_runtime_surface.py`.
 
-Harness fixes made on 2026-11-02 during the controlled run (uncommitted, general
-across use cases):
+Harness fixes made on 2026-11-02 during the controlled run (general across use
+cases):
 
 - Paired boundary mapping (`graph.py` `_paired_request_edge`/`_mapping_pairs`):
   a cross-boundary `returns` edge must repeat the `input_mapping` of its paired
