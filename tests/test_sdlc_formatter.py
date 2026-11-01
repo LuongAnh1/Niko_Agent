@@ -24,6 +24,108 @@ def _result(**overrides):
 
 
 class SdlcFormatterPhase4Tests(unittest.TestCase):
+    def test_formats_repo_discovery_pause_with_retry_action(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="repo_discovery",
+                status="repo_discovery_paused",
+                allowed_next_actions=["continue_run", "get_status"],
+                last_error={
+                    "error_code": "workspace_fetch_failed",
+                    "message": "Target remote is temporarily unavailable.",
+                },
+            )
+        )
+
+        self.assertIn("khảo sát codebase đang tạm dừng", reply)
+        self.assertIn("Lý do tạm dừng", reply)
+        self.assertIn("retry khóa workspace", reply)
+
+    def test_formats_repo_landscape_as_internal_artifact(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_review",
+                status="waiting_design_approval",
+                latest_artifacts={
+                    "repo_landscape": "private-landscape-path",
+                    "design_artifact": "private-design-path",
+                },
+            )
+        )
+
+        self.assertIn("repo landscape", reply)
+        self.assertNotIn("private-landscape-path", reply)
+
+    def test_formats_designer_tool_loop_progress_and_resume(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_investigating",
+                status="design_paused",
+                allowed_next_actions=["continue_run", "get_status"],
+                last_error={
+                    "error_code": "designer_llm_transport_failed",
+                    "message": "Designer transport was interrupted.",
+                },
+                latest_artifacts={
+                    "vertical_design_graph": "private-graph-path",
+                    "design_projection_manifest": "private-manifest-path",
+                },
+                raw={
+                    "designer_execution": {
+                        "graph_revision": 3,
+                        "design_version": 2,
+                        "action_budget": {"used": 5, "limit": 16, "remaining": 11},
+                        "blocking_count": 1,
+                        "warning_count": 2,
+                    }
+                },
+            )
+        )
+
+        self.assertIn("Designer đã tạm dừng an toàn", reply)
+        self.assertIn("Lý do tạm dừng", reply)
+        self.assertIn("Vertical design graph revision: 3; design version: 2", reply)
+        self.assertIn("5/16 actions", reply)
+        self.assertIn("1 blocker; 2 warning", reply)
+        self.assertIn("resume đúng phiên Designer", reply)
+        self.assertIn("vertical design graph", reply)
+        self.assertIn("design projection manifest", reply)
+        self.assertNotIn("private-graph-path", reply)
+
+    def test_design_blocked_offers_revalidation(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_validating",
+                status="design_blocked",
+                allowed_next_actions=["revalidate_design", "get_status"],
+                last_error={"error_code": "design_validation_blocked", "message": "One blocker remains."},
+            )
+        )
+
+        self.assertIn("Designer bị chặn", reply)
+        self.assertIn("revalidate design", reply)
+
+    def test_formats_vertical_trace_shadow_summary_without_private_paths(self):
+        reply = format_sdlc_reply(
+            _result(
+                current_phase="design_review",
+                status="waiting_design_approval",
+                quality_reports={
+                    "design_validation": {"ok": True, "blocking_count": 0, "warning_count": 1},
+                    "vertical_trace": {"ok": False, "mode": "shadow", "blocking_count": 2},
+                },
+                latest_artifacts={
+                    "vertical_trace_graph": "private-trace-path",
+                    "vertical_trace_validation": "private-report-path",
+                },
+            )
+        )
+
+        self.assertIn("Vertical trace: shadow phát hiện vấn đề; mode=shadow; blockers=2", reply)
+        self.assertIn("vertical trace graph", reply)
+        self.assertIn("vertical trace validation", reply)
+        self.assertNotIn("private-trace-path", reply)
+
     def test_formats_agent_assumption_and_copyable_challenge_command(self):
         run_id = "run_20261013_160421_f661babf"
         reply = format_sdlc_reply(

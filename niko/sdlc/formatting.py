@@ -72,6 +72,7 @@ def format_sdlc_reply(result: SdlcResult) -> str:
     sync_lines = _format_sync_targets(result.last_sync)
     failure_lines = _format_failure_reason(result)
     quality_lines = _format_quality_summary(result)
+    designer_progress_lines = _format_designer_progress(result)
     developer_progress_lines = _format_developer_progress(result)
     action_lines = _format_action_suggestions(
         result.allowed_next_actions,
@@ -118,6 +119,10 @@ def format_sdlc_reply(result: SdlcResult) -> str:
         lines.append("")
         lines.extend(failure_lines)
 
+    if designer_progress_lines:
+        lines.extend(("", "Tiến độ Designer:"))
+        lines.extend(designer_progress_lines)
+
     if developer_progress_lines:
         lines.extend(("", "Tiến độ Developer:"))
         lines.extend(developer_progress_lines)
@@ -155,10 +160,18 @@ def _format_sdlc_status(current_phase: str, status: str, *, repair_source: str =
         "requirement_drafting": "đang chuẩn hóa requirement",
         "waiting_requirement_clarification": "đang chờ anh trả lời câu hỏi làm rõ requirement",
         "waiting_requirement_approval": "đang chờ anh duyệt requirement trước khi sang design",
+        "repo_discovery": "đang khóa workspace và khảo sát codebase AS-IS trước Design",
+        "repo_discovery_paused": "khảo sát codebase đang tạm dừng do môi trường và có thể chạy tiếp",
+        "repo_discovery_blocked": "khảo sát codebase bị chặn bởi kiểm tra profile/conformance",
         "design_drafting": "đang tạo design artifact",
+        "design_investigating": "Designer đang khảo sát codebase và evidence cho design",
+        "design_applying_delta": "Designer đang cập nhật vertical design graph",
         "design_validating": "đang kiểm tra traceability và tính nhất quán của design",
         "design_revalidating": "đang chạy lại Design Validator hybrid",
         "design_repairing": "Designer đang sửa các blocker của design",
+        "design_paused": "Designer đã tạm dừng an toàn và có thể tiếp tục cùng phiên",
+        "design_blocked": "Designer bị chặn sau vòng kiểm tra design",
+        "design_human_required": "Designer cần anh quyết định trước khi chạy tiếp",
         "waiting_design_approval": "đang chờ anh review design checkpoint",
         "design_review": "đang chờ anh review design checkpoint",
         "implementation_planning": "đang lập implementation plan",
@@ -270,7 +283,8 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     status = (result.status or result.current_phase or "").strip()
     is_failure = (
         status == "blocked"
-        or status == "implementation_paused"
+        or status == "design_human_required"
+        or status in {"implementation_paused", "repo_discovery_paused", "design_paused"}
         or status.endswith("_failed")
         or status.endswith("_blocked")
     )
@@ -279,7 +293,9 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     error = result.last_error if isinstance(result.last_error, dict) else {}
     code = str(error.get("error_code") or "").strip()
     message = str(error.get("message") or "").strip()
-    if status == "implementation_paused":
+    if status == "design_human_required":
+        label = "Quyết định cần từ anh"
+    elif status in {"implementation_paused", "repo_discovery_paused", "design_paused"}:
         label = "Lý do tạm dừng"
     else:
         label = "Lý do chặn" if status == "blocked" or status.endswith("_blocked") else "Lý do lỗi"
@@ -290,6 +306,37 @@ def _format_failure_reason(result: SdlcResult) -> list[str]:
     if label == "Lý do chặn":
         return ["Lý do chặn: SDLC_Harness cần anh review artifact hoặc quality report trước khi chạy tiếp."]
     return []
+
+
+def _format_designer_progress(result: SdlcResult) -> list[str]:
+    raw = result.raw if isinstance(result.raw, dict) else {}
+    progress = raw.get("designer_execution")
+    if not isinstance(progress, dict) or not progress:
+        return []
+    lines: list[str] = []
+    graph_revision = progress.get("graph_revision")
+    design_version = progress.get("design_version")
+    if isinstance(graph_revision, int):
+        line = f"- Vertical design graph revision: {graph_revision}"
+        if isinstance(design_version, int):
+            line += f"; design version: {design_version}"
+        lines.append(line + ".")
+    action_budget = progress.get("action_budget")
+    if isinstance(action_budget, dict):
+        actions_used = action_budget.get("used")
+        action_limit = action_budget.get("limit")
+    else:
+        actions_used = progress.get("actions_used")
+        action_limit = action_budget
+    if isinstance(actions_used, int) and isinstance(action_limit, int):
+        lines.append(f"- Tool-loop: {actions_used}/{action_limit} actions đã dùng.")
+    blockers = progress.get("blocking_count", progress.get("blocker_count"))
+    warnings = progress.get("warning_count")
+    if isinstance(blockers, int) or isinstance(warnings, int):
+        lines.append(f"- Quality findings: {int(blockers or 0)} blocker; {int(warnings or 0)} warning.")
+    if result.status == "design_paused" and "continue_run" in result.allowed_next_actions:
+        lines.append("- Journal đã giữ graph và tool history; lần chạy tiếp sẽ resume đúng phiên Designer này.")
+    return lines[:7]
 
 
 def _format_developer_progress(result: SdlcResult) -> list[str]:
@@ -520,7 +567,13 @@ def _format_quality_summary(result: SdlcResult) -> list[str]:
         versions = design_validation.get("versions") or []
         if isinstance(versions, list) and versions:
             lines.append(f"- Design version: {versions[-1]}; repair iterations: {max(0, len(versions) - 1)}")
-        return lines[:2]
+        vertical_trace = quality_reports.get("vertical_trace")
+        if isinstance(vertical_trace, dict):
+            mode = str(vertical_trace.get("mode") or "legacy")
+            blockers = int(vertical_trace.get("blocking_count") or 0)
+            verdict = "passed" if vertical_trace.get("ok") else ("shadow phát hiện vấn đề" if mode == "shadow" else "chưa pass")
+            lines.append(f"- Vertical trace: {verdict}; mode={mode}; blockers={blockers}.")
+        return lines[:3]
 
     design_trace = quality_reports.get("design_traceability")
     if not isinstance(design_trace, dict):
@@ -582,7 +635,7 @@ def _format_action_suggestions(
         "waiting_requirement_clarification_continue",
     }:
         suggestions.append("- Có thể yêu cầu em `revalidate requirement` kèm mã run để chạy lại kiểm tra tất định; lệnh này không sinh câu hỏi mới.")
-    if "revalidate_design" in action_set and status in {"waiting_design_approval", "blocked"}:
+    if "revalidate_design" in action_set and status in {"waiting_design_approval", "blocked", "design_blocked"}:
         suggestions.append("- Có thể yêu cầu em `revalidate design` kèm mã run để tạo version mới và chạy lại hybrid validator.")
     if "revalidate_implementation_plan" in action_set and status in {
         "waiting_implementation_plan_review",
@@ -607,6 +660,10 @@ def _format_action_suggestions(
     if "continue_run" in action_set and not suggestions:
         if status == "implementation_paused":
             suggestions.append("- Chạy tiếp Phase 4 để tiếp tục lát công việc Developer chưa hoàn thành.")
+        elif status == "design_paused":
+            suggestions.append("- Chạy tiếp đúng mã run để resume cùng phiên Designer và vertical design graph hiện tại.")
+        elif status == "repo_discovery_paused":
+            suggestions.append("- Chạy tiếp đúng mã run để retry khóa workspace và khảo sát codebase trước Design.")
         else:
             suggestions.append("- Bước tiếp theo của workflow là chạy tiếp Phase 4 cho mã run này.")
     if not suggestions and "get_status" in action_set:
@@ -632,12 +689,20 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "missing_design_links": "missing design links",
         "design_validation_report": "design validation report",
         "design_quality_report": "design quality report",
+        "vertical_design_graph": "vertical design graph",
+        "design_component_view": "design component view",
+        "design_surface_view": "design surface view",
+        "design_projection_manifest": "design projection manifest",
+        "design_finding_ledger": "design finding ledger",
+        "vertical_trace_graph": "vertical trace graph",
+        "vertical_trace_validation": "vertical trace validation",
         "implementation_plan": "implementation plan",
         "implementation_plan_structured": "implementation plan structured data",
         "implementation_plan_review": "implementation plan review",
         "effective_design_contract": "effective design contract",
         "developer_work_packet": "developer work packet",
         "run_workspace": "run workspace",
+        "repo_landscape": "repo landscape",
         "code_change_report": "code change report",
         "test_report": "verification test report",
         "requirement_design_code_trace": "requirement-design-code trace",
@@ -658,6 +723,7 @@ def _format_artifact_labels(value: dict[str, Any]) -> str:
         "qa_test_report",
         "github_code_review",
         "run_workspace",
+        "repo_landscape",
         "implementation_plan",
         "design_artifact",
         "requirement_packet",
