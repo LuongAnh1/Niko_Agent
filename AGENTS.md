@@ -135,117 +135,136 @@ legacy fallback/debug. Do not add new FCC/Claude-dependent behavior for the SDLC
 lane. Do not design this upgrade as a generic provider abstraction unless the
 owner explicitly changes direction.
 
-## Session Handoff: SDLC_Harness L3.10 (as of 2026-11-02)
+## Session Handoff: SDLC_Harness L3.10 (as of 2026-11-02, after controlled run r8)
 
-Active work is in the sibling repo `../SDLC_Harness`, not in Niko. L3.10 and
-the fixes below are committed and pushed as SDLC_Harness `3d66250` on `main`;
-commit later work only when the owner asks (never stage `docs/`).
+Active work is in the sibling repo `../SDLC_Harness`, not in Niko. Current
+focus is **Requirement + Design only**. All work below is committed and pushed
+as SDLC_Harness `7357bf3` on `main` (base was `3d66250`). Commit later work only
+when the owner asks; never stage `docs/` or `.runtime/`.
 
 Read first (local-only docs in `../SDLC_Harness/docs/`):
+`role-specific-agent-loop-upgrade/l3.10-holistic-ui-ux-design-implementation-plan.md`,
+`progress.md`, `implementation-plan.md`. These docs were **not** updated this
+session (open item 7).
 
-- `role-specific-agent-loop-upgrade/l3.10-holistic-ui-ux-design-implementation-plan.md`
-  (M1 runtime surface binding + M2 holistic UX checklist; both implemented).
-- `role-specific-agent-loop-upgrade/progress.md` and `implementation-plan.md`.
-- Claude plan file: `~/.claude/plans/hi-n-t-i-th-ang-immutable-quail.md`.
+### Where things stand
 
-What L3.10 added (opt-in via
-`SDLC_DESIGNER_UI_CONTRACT_VERSION=ui_experience_contract_v2`, default stays v1):
-`agents/designer/ui_context.py` (deterministic React/TS repo UI context),
-`runtime_surface_binding_v1` + `ui_experience_contract_v2` checks in
-`agents/designer/graph.py`, prompt/scaffold/JSON-repair changes in
-`agents/designer/execution.py`, `ui_feature_experience` projection, holistic
-review in `agents/validator/design_validation.py`, tests in
-`tests/test_designer_ui_runtime_surface.py`.
+- Controlled run r8 `run_20261102_061023_4ed5c466` (runtime root
+  `.runtime/l3.10-controlled-20261102-r8`, eTour UC1, approved Requirement from
+  Phase 1 run r7) is paused at `waiting_design_approval`. **Do not approve**:
+  approval automatically moves the run on to Plan.
+- r8 result: vertical trace validation 0 blocking / 0 warnings, 10/10 required
+  surfaces, 2 valid branch parents, 14 requirements traced, 12 nodes / 16 edges,
+  pin `layered_layout_v1`. The layered layout is correct (the SC-3
+  connection-interrupted alert is in the dialog `overlay`), Runtime inputs show
+  2 entries (`agencySession` PRE-1, `culturalHeritageList` MF-1, both via
+  `Root`), and each scenario has its own journey and focus policies.
+- r8 is **not** proof of unattended stability: it stopped 8 times, the Harness
+  was fixed 6 times mid-run (the stopped step was then rejected with a neutral
+  "Harness corrected X, regenerate" note), there were 3 manual reject notes and
+  2 approvals past a known model error. r5/r6/r7 each failed differently at
+  designer-0004, so DeepSeek varies between runs.
+- The owner deleted runtime roots r1-r4 (2026-11-01) and r5-r6; r4 is no longer
+  available as a reference run. r7 is kept (stopped at designer-0004).
 
-Harness fixes made on 2026-11-02 during the controlled run (general across use
-cases):
+### Harness changes in `7357bf3` (general across use cases)
 
-- Paired boundary mapping (`graph.py` `_paired_request_edge`/`_mapping_pairs`):
-  a cross-boundary `returns` edge must repeat the `input_mapping` of its paired
-  `calls`/`reads`/`writes` edge (same scenario, reversed endpoints, prefer same
-  `provider_operation`); otherwise `boundary_contract_mismatch` with
-  `paired_edge_id`/`paired_input_mapping` diagnostics.
-- `_boundary_contract_repair_scaffold` (API and non-API branches) fills the
-  paired `input_mapping`; `active_repair_task.instruction` states the rule.
-- Operator review notes are scoped: `pending_step_review.review_target` +
-  `session.last_review_target`; `_scoped_review_feedback` drops a reject note
-  when the next call has a different repair target/partition (legacy notes
-  without a target still apply).
-- Tests: `test_returns_edge_must_repeat_paired_write_input_mapping`,
-  `test_review_feedback_only_applies_to_the_reviewed_target`, and the extended
-  `test_boundary_repair_scaffold_uses_api_source_for_returns_edge`.
-- Last full regression: 945 passed, 1 skipped, 1 failed. The failure is
-  `tests/test_write_api.py::WriteApiTests::test_write_validation_auth_and_missing_operation_errors_are_json`
-  (WinError 10053 socket abort). It passes alone (3/3) but failed 2/2 in the
-  full suite, so it may be order/load dependent; unrelated to designer code,
-  root cause not yet investigated.
+- Layered layout contract and projection fixes from the morning of 2026-11-02
+  (per-scenario runtime states, merged layout regions, overlay wireframe,
+  cross-node layout/style checks); defaults partition action budget 12 and
+  investigation timeout 300s.
+- **Harness owns composition wiring** (`_materialize_delta_wiring`,
+  `execution.py`): the Designer declares inputs only on the screen node; the
+  Harness inserts the filled `composition_wiring` template for every AS-IS hop,
+  replaces Designer-written wiring with the template (keeping its temp_ref),
+  and moves every `external_use_case` `provided_by` to the entrypoint
+  (`_normalize_external_providers`). Prompt key is
+  `active_partition.harness_wiring_operations`.
+- **Harness owns the branch parent edge** (`_materialize_branch_parent`):
+  inserts the seeded branch->main `depends_on` when the first branch delta
+  omits it; `branch_parent_missing/invalid` repairs may target the main flow
+  entry. `_main_flow_entry_node` skips wiring and prefers the source of the
+  first ordered behavior edge.
+- Gates (`graph.py`): boundary contract checks also run on same-component
+  edges that declare a contract (this is what caught the reversed r8 returns
+  edge); every `business_rule` input must be a required `input_mapping` target;
+  an API with only 4xx/5xx responses needs no `response_mapping`.
+- Context/prompt: `feature_ux_decisions` lists focus policies per owning
+  scenario (`scenario_focus_policies`) and ignores wiring nodes; the operator
+  rejected delta is shown in the next prompt (`last_review_rejected_delta`);
+  prompt contradictions removed (wiring ownership, edge endpoints may be
+  same-delta temp_refs, required props apply to screen nodes, provided_by
+  placeholder names the entrypoint).
+- Loop robustness (Codex audit EXE-002/007/009/010): repeated-action
+  fingerprint uses the Designer's own arguments; `complete` is rejected while a
+  partition or repair task is active (code `active_work_pending`); setup errors
+  go through `_execution_error` / `DesignerExecutionError`;
+  `designer_repo_path_unsafe` is a rejected action.
+- Last full suite: 960 passed, 1 skipped, 1 known flaky
+  (`test_write_api::test_write_validation_auth_and_missing_operation_errors_are_json`,
+  WinError 10053, passes alone).
 
-Controlled DeepSeek run (mock sync, step-review): run
-`run_20261101_125924_cce62c78`, runtime root
-`.runtime/l3.10-controlled-20261101-r4`, latest log `driver_resume18.log`.
-Call 24 was rejected (reversed returns `input_mapping`); call 25 was approved
-(Codex verdict was wrong: it applied the stale call-24 note to a different
-edge, SC-3 API returns edge `VDE-c22ff74de351cd05`; the model output was
-correct). Calls 26-27 approved; validator a01 auto-rejected for invalid JSON,
-a02 approved.
+### Review workflow (agreed with the owner)
 
-**The run is paused at the Design checkpoint (`waiting_design_approval`).** Do
-not approve it yet. The owner reviewed
-`runs/run_20261101_125924_cce62c78/artifacts/ui_feature_experience_v1.md` and
-decided the projection must be fixed first (in a later session):
+- Codex CLI (`gpt-5.6-sol`, reasoning `high`, never xhigh) reviews every
+  Designer input/output; on a blocking defect the driver stops (exit 3) and
+  writes `runs/<run>/codex_findings/<call_id>.json`.
+- Claude is the lead: on every stop, only read, verify and analyze, then report
+  with a recommendation; no code edits, approve/reject or resume until the owner
+  decides. Challenge both "model" verdicts and Codex itself.
+- **Judge every stop as if the Harness ran unattended** (owner, 2026-11-02):
+  in production nobody rejects manually. If the Harness itself would catch the
+  error and feed it back to DeepSeek, approve and let the run prove it. If it
+  cannot (missing gate, misleading context, contract conflict), that is a
+  Harness defect: fix the Harness generally. Do not use manual reject notes as
+  the fix; a neutral reject is only for regenerating a step after a Harness fix.
+- Before trusting a gate, verify it on the real call path (the r8 lesson: a
+  direct `_boundary_contract_diagnostics` call passed while the real path skipped
+  same-component edges).
+- At the Design checkpoint, show the owner `ui_feature_experience_v<N>.md`; do
+  not approve unless the owner asks.
 
-1. Main issue: `Runtime states` and `Visual decisions` only reflect the SC-2
-   cancellation node. Missing SC-1 deletion in-flight/success states and SC-3
-   interruption error + retry. The projection appears to take state/visual
-   data from one node instead of merging all scenario nodes that share one
-   screen/runtime target. This is the holistic-UX promise of L3.10 M2. Cause
-   is inferred from output; the projection code has not been read yet.
-2. Wireframe omits the SC-3 alert/retry region and draws the modal dialog as a
-   stacked band instead of an overlay.
-3. `Composition` repeats the same mount path three times (not deduplicated).
-4. Component tree is split per scenario (`ConfirmationDialog` appears 3 times);
-   a merged screen tree would read better (lower priority).
-5. `externally_blocked` is expected (MF-1 list data and PRE-1 session come from
-   other use cases); explain it to the owner, no fix needed.
-6. Known non-blocking gap: same-component `returns` edges are not checked for
-   paired `input_mapping` (e.g. `VDE-b8f61b5166b38594`).
+### Next steps
 
-Resume or continue the driver with:
+1. Clean run r9 from scratch with the current Harness (same UC1) and measure
+   Codex stops and Harness-caught errors; the goal is reaching the checkpoint
+   without mid-run Harness fixes. First check whether
+   `scripts/codex_step_review.py` can run review in an observe-only mode.
+2. Run a second use case with a different shape (several screens, no UI, or
+   API-only) to check the fixes are general.
 
 ```bash
-SDLC_DESIGNER_PARTITION_ACTION_BUDGET=12 SDLC_PHASE2_DESIGNER_INVESTIGATION_TIMEOUT_SECONDS=300 SDLC_PHASE2_DESIGNER_INVESTIGATION_MAX_TOKENS=32768 SDLC_UIUX_SKILL_ROOT="C:/Users/admin/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.15.0/.claude/skills/ui-ux-pro-max" PYTHONIOENCODING=utf-8 python scripts/codex_step_review.py --runtime-root .runtime/l3.10-controlled-20261101-r4   --target-repo ../SDLC_Target_TypeScript   --worktree-root .runtime/l3.10-controlled-20261101-r4/worktrees   --run-id run_20261101_125924_cce62c78 --decision approve|reject --note "..."
+SDLC_PHASE2_DESIGNER_INVESTIGATION_MAX_TOKENS=32768 SDLC_UIUX_SKILL_ROOT="C:/Users/admin/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.15.0/.claude/skills/ui-ux-pro-max" PYTHONIOENCODING=utf-8 python scripts/codex_step_review.py --runtime-root .runtime/l3.10-controlled-<YYYYMMDD>-r9 --target-repo ../SDLC_Target_TypeScript --worktree-root .runtime/l3.10-controlled-<YYYYMMDD>-r9/worktrees --approved-requirement .runtime/phase1-thinking-controlled-20261030-r7-uc1/runs/run_20261030_041600_0585c84a/artifacts/requirement_model_v2_r4.json --source-file fixtures/etour/UC1.txt
 ```
 
-The driver stops (exit 3) on a blocking defect and writes
-`runs/<run>/codex_findings/<call_id>.json`. Review rules agreed with the owner:
+Resume after a stop with the same env/paths plus
+`--run-id <run> --decision approve|reject --note "..."`. The driver process
+loads code at start, so editing Harness files while a run is active does not
+affect that process.
 
-- Codex CLI (`gpt-5.6-sol`, reasoning `high`, never xhigh) is the analyst;
-  Claude is the lead and must verify every finding before acting.
-- On every driver stop, only read, verify, and analyze the finding, then report
-  to the owner with a recommendation. Do not edit code, approve/reject, or
-  resume until the owner decides.
-- When Harness input or DeepSeek output is wrong, stop and find where. Most
-  DeepSeek errors come from Harness context; challenge any "model" verdict, and
-  also challenge Codex (it can misread stale operator notes).
-- Fixes must be general across use cases, not UC-specific; check conflicts.
+### Open items
 
-Next steps:
-
-1. Fix the `ui_feature_experience` projection (issues 1-3, optionally 4): merge
-   runtime states, visual decisions, and wireframe regions across every
-   scenario node bound to the same screen; dedupe composition paths. Add tests,
-   regenerate the artifact for r4, and show the owner the read-back again
-   before approving the Design checkpoint.
-2. Investigate the order-dependent `test_write_api` socket failure.
-3. Update `progress.md` and the L3.10 checklist with the controlled-run Harness
-   fixes (JSON closer repair, dependency_refs, outcome_context limited to main
-   scenario postconditions, composition_wiring, scaffold edge wording, paired
-   returns mapping, scoped review feedback).
-4. Ask the owner whether to make the temporary env values (budget 12, timeout
-   300s) the v2 defaults, then rerun full regression and commit on request.
-5. Phase 1 follow-up: Requirement validator should require every `POST-*`/`AC-*`
-   to be allocated to a surface; typed cross-UC dependency when the eTour
-   catalogue is loaded. Later: L5.1.7 Planner closure.
+1. EXE-004: a hop already wired for input A is treated as done for input B, in
+   both `_wiring_hop_inputs` and the validator shortcut (`graph.py`
+   `composition_hop_unmodeled`). Right fix: canonical input names per
+   `screen_id`; merge with item 2.
+2. Known gap: merged screen text repeats near-duplicate clauses (layout,
+   typography, responsive, wireframe, component tree per scenario) because each
+   scenario node rewrites the whole screen contract. Bigger option: one
+   screen-owner node plus per-scenario state/transition deltas.
+3. Codex audit leftovers: EXE-008 (`authorization_required` missing is treated
+   as false; require it for v2 graphs only), EXE-011 (crash recovery does not
+   mark repair targets completed), EXE-012 (wiring identity uses the symbol
+   only), EXE-013..015 (`completion_claims` unused, `ui_guidance_required` written
+   but never read, `_repair_targets` dead code; `complete` is now effectively
+   dead too).
+4. Copy an external input's dependency `binding` (PRE-*/MF-*) into its
+   `requirement_refs` (r8 designer-0004 had `binding=PRE-1`, empty refs).
+5. Design validator returned unparsable output on its first attempt in r8
+   (`design-validator-0001-a01`); the retry passed. Not investigated.
+6. Flaky `test_write_api` test above; root cause not investigated.
+7. Update `progress.md` and the L3.10 checklist with the r5-r8 Harness fixes
+   above and the 2026-11-02 morning changes.
 
 ## Architecture Map
 
