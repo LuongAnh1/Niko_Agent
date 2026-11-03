@@ -156,6 +156,11 @@ lesson.
   outcome means in context, it belongs in semantic validation.
 - Topology is split deliberately: the Harness checks that a path is connected
   and executable; the Validator decides whether that path is the right design.
+- The Validator decides which runtime inputs are semantically necessary and
+  whether their providers make sense. Once those inputs are declared in the
+  typed Design artifact, the Harness may mechanically require every declared
+  input to be forwarded across every missing AS-IS composition hop. Never
+  hard-code business input names into that gate.
 - Never repair a semantic failure by adding use-case keywords, fuzzy component
   names, prescribed field names, status/live-region name matching, or a fixed
   `UI -> API -> business_rule -> data` chain to a deterministic gate.
@@ -163,257 +168,102 @@ lesson.
   that is empty, truncated or unparsable must fail closed and can never create a
   checkpoint.
 
-## Session Handoff: SDLC_Harness L3.10 (as of 2026-11-02, after controlled run r9 checkpoint)
+## Session Handoff: SDLC_Harness L3.10 (2026-11-03, r9 reached Design checkpoint)
 
-Active work is in the sibling repo `../SDLC_Harness`, not in Niko. Current
-focus is **Requirement + Design only**. The r8 Harness hardening is committed
-and pushed as SDLC_Harness `7357bf3` on `main` (base was `3d66250`). Pre-r9
-review/parser fixes after that commit are local and uncommitted. Commit later
-work only when the owner asks; never stage `docs/` or `.runtime/`.
+Active work is in sibling repo `../SDLC_Harness`, not Niko. Scope remains
+**Requirement + Design only**. SDLC_Harness `main` is pushed at `022310d`:
 
-Read first (local-only docs in `../SDLC_Harness/docs/`):
-`role-specific-agent-loop-upgrade/l3.10-holistic-ui-ux-design-implementation-plan.md`,
-`progress.md`, `implementation-plan.md`, and
-`workflow-reference/phase-2-design/README.md`. The Phase 2 workflow reference
-was audited and expanded this session: `README.md` and
-`designer-runtime-reference.md` were added, while
-`phase-2-design-workflow.md`, `vertical-design-graph.md`,
-`design-validation-and-repair-policy.md`, and
-`vertical-slice-trace-graph.md` were updated. These files remain local-only.
+- `4955078` fix(llm): retry transient transport failures
+- `a680fc8` feat(validator): sliced semantic design review
+- `20ac3ef` feat(designer): repair routing, per-target budgets and budget-aware prompt
+- `022310d` feat(phase2): run sliced validation in the repair loop
 
-### Where things stand
+Full suite after these changes: **1016 passed, 1 skipped**. Never stage `docs/`
+or `.runtime/`. Local reference docs were updated in
+`../SDLC_Harness/docs/workflow-reference/phase-2-design/` (new:
+`sliced-semantic-review.md`).
 
-- Controlled run r9 `run_20261102_100240_755e94d0` (runtime root
-  `.runtime/l3.10-controlled-20261102-r9`, eTour UC1, same approved Requirement
-  V2 as r8) reached `waiting_design_approval` at graph revision 8: 12 nodes,
-  18 edges, 7 partitions, all 10 required surfaces covered, 2 valid branch
-  parents, vertical trace 0 blockers / 0 warnings, semantic quality 0 blockers /
-  1 warning. **Do not approve**: approval automatically moves the run to Plan.
-  Do not start another r9.
-- Final artifact to show the owner is
-  `artifacts/ui_feature_experience_v2.md`. It has two external runtime inputs
-  (`agencyOperatorSession` from PRE-1 and `culturalHeritageRecords` from MF-1,
-  both provided by `Root`), separate SC-1/SC-2/SC-3 journeys, the SC-3 alert
-  inside the dialog overlay, and focus on Retry rather than the announced alert.
-  The one warning is a real but non-blocking ambiguity about when the Cancel
-  action stops being available on the shared confirmation dialog.
-- Earlier r9 history: `designer-0005` contradicted AC-4 by disabling controls on
-  deletion confirmation and moved focus to a status announcement. The Harness
-  was hardened, that pending step was neutrally rejected, `designer-0006`
-  returned invalid JSON which the driver caught, `designer-0007` produced the UI
-  delta that became graph revision 1, and `designer-0008` read backend source.
-- `designer-0009` is valid JSON but unsafe Design: it says the agency is already
-  authenticated while setting `authorization_required=false`, invents an
-  "existing session" without repository evidence, omits the UI -> API and final
-  API -> UI path, and reverses the provider/consumer direction of one returns
-  contract. It has not been applied. The graph from `designer-0007` also exposes
-  the earlier Harness defect that it inserted Root and AppShell wiring nodes but
-  did not mechanically insert the Root -> AppShell calls edge.
-- After the auth/topology/wiring fix, `designer-0010` correctly created the SC-1
-  API/rule path and the Harness reconciled Root -> AppShell (revision 2);
-  `designer-0013` inserted persistence into the path (revision 3). SC-2 output
-  `designer-0014` put `visual_contract` at the wrong level; the existing graph
-  gate rejected it before mutation and `designer-0015` corrected it (revision
-  4). `designer-0016` added the valid SC-3 UI interruption projection (revision
-  5); `designer-0017` read API source.
-- `designer-0018` exposed a semantic question, not a safe deterministic
-  gate: its SC-3 rollback rule names the ETOUR interruption but declares only
-  `culturalHeritageId` and `confirmation`. That may be missing data, or it may be
-  valid when an already-selected error/catch path invokes the interruption
-  handler. Requiring a fixed `connectionInterrupted` field would reject valid
-  designs. The final semantic Design Validator now owns this decision and must
-  block when neither an input/boundary mapping, response/error event,
-  already-selected control-flow path nor local state supplies the condition.
-  It was structurally approved as revision 6; `designer-0019` added the SC-3
-  rollback persistence projection as revision 7. The semantic Validator later
-  confirmed that the already-selected interruption path supplies the condition.
-- Deterministic validation then correctly caught two SC-3 sequence-order defects:
-  the UI return was terminal before the persistence messages, and orders 5/6
-  jumped to unrelated participants. Repair `design_v2/designer-0002` reordered
-  the path to UI -> API -> rule -> data -> rule -> API -> UI and produced graph
-  revision 8.
-- Semantic exchange `design-validator-0001-a01` consumed all 32,768 completion
-  tokens as reasoning (`finish_reason=length`) and returned no JSON. It was not
-  approved. The Harness now gives the semantic Validator 65,536 tokens and a
-  600-second timeout by default, and unattended execution raises a dedicated
-  `design_semantic_review_truncated` error for `finish_reason=length` plus a
-  fail-closed error for empty output. Neutral retry `a02` returned complete JSON:
-  all 25 canonical claims assessed, 0 blockers, 1 warning.
-- r9 proves the repaired path can reach a correct checkpoint, but it is not an
-  unattended-stability proof: the run included controlled per-call approvals,
-  neutral regeneration after Harness fixes, one structural repair iteration and
-  one rejected provider-truncated Validator output. The next meaningful proof is
-  a differently shaped use case, not another UC1 rerun.
-- Controlled run r8 `run_20261102_061023_4ed5c466` (runtime root
-  `.runtime/l3.10-controlled-20261102-r8`, eTour UC1, approved Requirement from
-  Phase 1 run r7) is paused at `waiting_design_approval`. **Do not approve**:
-  approval automatically moves the run on to Plan.
-- r8 result: vertical trace validation 0 blocking / 0 warnings, 10/10 required
-  surfaces, 2 valid branch parents, 14 requirements traced, 12 nodes / 16 edges,
-  pin `layered_layout_v1`. The layered layout is correct (the SC-3
-  connection-interrupted alert is in the dialog `overlay`), Runtime inputs show
-  2 entries (`agencySession` PRE-1, `culturalHeritageList` MF-1, both via
-  `Root`), and each scenario has its own journey and focus policies.
-- r8 is **not** proof of unattended stability: it stopped 8 times, the Harness
-  was fixed 6 times mid-run (the stopped step was then rejected with a neutral
-  "Harness corrected X, regenerate" note), there were 3 manual reject notes and
-  2 approvals past a known model error. r5/r6/r7 each failed differently at
-  designer-0004, so DeepSeek varies between runs.
-- The owner deleted runtime roots r1-r4 (2026-11-01) and r5-r6; r4 is no longer
-  available as a reference run. r7 is kept (stopped at designer-0004).
+### Mandatory validation boundary
 
-### Harness changes in `7357bf3` (general across use cases)
+- Harness deterministic gates own structure and mechanically provable contracts:
+  schema, IDs, graph endpoints, required fields, declared input propagation and
+  exact trace links. Harness may also derive facts mechanically (exact
+  state-name `branch_entries`, typed `approved_context`, field projection,
+  byte-identical result reuse) but must not interpret meaning.
+- The LLM Validator owns semantic correctness. Do not hard-code use-case
+  vocabulary, interpretations of Requirement terms or business chains into
+  Harness gates or prompts.
+- `expected_change` states what must become true on existing node/edge ids; it
+  must not prescribe a design or introduce a system the Requirement and graph
+  do not contain.
+- Empty, truncated, unparsable, transport/HTTP-failed or twice contract-invalid
+  provider output is `inconclusive`: fail closed, no checkpoint, no repair.
+- Repair edits existing nodes/edges; adding nodes belongs to construction.
+- The Designer read-source gate (read one file of the component per session
+  before its first delta) is intentional and stays; it trades actions for
+  grounding.
 
-- Layered layout contract and projection fixes from the morning of 2026-11-02
-  (per-scenario runtime states, merged layout regions, overlay wireframe,
-  cross-node layout/style checks); defaults partition action budget 12 and
-  investigation timeout 300s.
-- **Harness owns composition wiring** (`_materialize_delta_wiring`,
-  `execution.py`): the Designer declares inputs only on the screen node; the
-  Harness inserts the filled `composition_wiring` template for every AS-IS hop,
-  replaces Designer-written wiring with the template (keeping its temp_ref),
-  and moves every `external_use_case` `provided_by` to the entrypoint
-  (`_normalize_external_providers`). Prompt key is
-  `active_partition.harness_wiring_operations`.
-- **Harness owns the branch parent edge** (`_materialize_branch_parent`):
-  inserts the seeded branch->main `depends_on` when the first branch delta
-  omits it; `branch_parent_missing/invalid` repairs may target the main flow
-  entry. `_main_flow_entry_node` skips wiring and prefers the source of the
-  first ordered behavior edge.
-- Gates (`graph.py`): boundary contract checks also run on same-component
-  edges that declare a contract (this is what caught the reversed r8 returns
-  edge); every `business_rule` input must be a required `input_mapping` target;
-  an API with only 4xx/5xx responses needs no `response_mapping`.
-- Context/prompt: `feature_ux_decisions` lists focus policies per owning
-  scenario (`scenario_focus_policies`) and ignores wiring nodes; the operator
-  rejected delta is shown in the next prompt (`last_review_rejected_delta`);
-  prompt contradictions removed (wiring ownership, edge endpoints may be
-  same-delta temp_refs, required props apply to screen nodes, provided_by
-  placeholder names the entrypoint).
-- Loop robustness (Codex audit EXE-002/007/009/010): repeated-action
-  fingerprint uses the Designer's own arguments; `complete` is rejected while a
-  partition or repair task is active (code `active_work_pending`); setup errors
-  go through `_execution_error` / `DesignerExecutionError`;
-  `designer_repo_path_unsafe` is a rejected action.
-- Pre-r9 offline hardening fixed the step-review driver's confusion between
-  `parsed_output` and invalid JSON, and canonicalizes external input provider plus
-  dependency `requirement_refs` before Codex reviews the parsed action.
-- The r9 audit moved context-dependent approval policy out of deterministic
-  Designer gates and into the semantic Design Validator. Removed hard-coded
-  keyword inference for authenticated preconditions, the UC1-specific
-  deletion-confirmation prohibited effect, status/live-region name matching,
-  the fixed `UI -> API -> business_rule -> ... -> UI` topology obligation, and
-  the assumption that a data surface must be inserted immediately after a
-  business-rule node. Prompt guidance may still help the Designer, but it is not
-  an approval rule.
-- The prompt audit after `designer-0009` found three general Harness causes:
-  approved preconditions were absent from the active Requirement slice; the API
-  scaffold prefilled `authorization_required=false` and conflated authentication
-  with role authorization; and the Harness supplied wiring nodes but no wiring
-  edges. The backend prompt also
-  carried the complete unrelated UI experience contract (about 18K of a 45K
-  prompt). Requirement V2 was deliberately not changed: Requirement still owns
-  elicitation and clarification, while Design owns implementation decisions.
-- Phase 2 now projects approved preconditions into local
-  `cross_cutting_conditions`. New API contracts separate `authentication` from
-  `authorization`, cite Requirement refs, distinguish
-  `existing_runtime|external_dependency|new_boundary|none`, and require frozen
-  repository evidence before claiming existing authentication. The scaffold no
-  longer decides auth from English keywords. Graph validation preserves legacy
-  contracts, but when the typed access fields are present it enforces their
-  types, source/evidence consistency, and a boolean `authorization_required`;
-  the semantic Validator decides whether those values satisfy the approved
-  Requirement. Boundary `auth_mapping` remains required when either typed
-  authentication or authorization is required.
-- Deterministic topology validation remains general: required surfaces must be
-  reachable from a runtime entrypoint, cross-application calls need an executable
-  boundary, declared mappings must match provider contracts, and each UI
-  scenario has one continuous observable terminal path. The Harness no longer
-  prescribes one surface ordering or reverse-return chain. Composition
-  materialization still inserts missing
-  nonterminal calls edges between consecutive Harness-owned AS-IS wiring hops,
-  including reconciliation of the existing r9 Root -> AppShell gap.
-- Backend construction prompts retain graph topology and contracts but strip
-  unrelated UI `experience_contract` payload. Prompt text now states that the
-  Harness owns wiring nodes plus internal wiring edges, the Designer owns only
-  the semantic final hop, and returns edges run provider -> consumer.
-- The Design semantic review policy now checks decision/guard input sufficiency,
-  negative constraints, authentication versus authorization, focus/announcement
-  behavior, and runtime topology without prescribing a field name or one fixed
-  architecture. Its blocker loop already feeds exact node/edge findings back to
-  Designer and cannot create the Design checkpoint until blockers are cleared.
-- The Design semantic profile now defaults to 65,536 max tokens / 600 seconds.
-  `_complete_json` explicitly rejects token-truncated or empty provider output;
-  this prevents a reasoning-only DeepSeek completion from being mistaken for a
-  semantic verdict in unattended runs.
-- Regression coverage includes the semantic policy prompt, cross-cutting
-  preconditions as raw context, typed auth contract structure, removal of
-  prescribed topology/data insertion, automatic wiring-edge materialization,
-  final reachability gates, and backend prompt compaction. Focused
-  Designer/Validator tests passed **129/129**; the post-validator-budget Phase 2,
-  semantic-validator and runtime-config set passed **82/82**; last full suite:
-  **973 passed, 1 skipped**. The prior known flaky
-  `test_write_api::test_write_validation_auth_and_missing_operation_errors_are_json`
-  did not fail in this run; its earlier WinError 10053 root cause remains unknown.
+### How the sliced Validator works now (`sliced_enforce`)
 
-### Review workflow (agreed with the owner)
+```text
+global (1) + per scenario: runtime (1) -> behavior (1, skipped by Harness when
+runtime has a blocker; claims deferred) + coherence (1) + adjudication (<=1)
+```
 
-- As of pending `designer-0014`, the owner asked the lead agent to run and check
-  every input/output directly instead of letting Codex CLI auto-drive the loop.
-  Use `scripts/run_l3_designer_shadow.py` one review decision at a time, inspect
-  the exact prompt, parsed action, post-approval Harness result and graph revision,
-  then stop at the next pending call. Codex findings are advisory history, not
-  the decision maker; do not resume `scripts/codex_step_review.py` unattended.
-- On every blocking stop, only read, verify and analyze, then report with a
-  recommendation; no Harness code edits, approve/reject or resume until the owner
-  decides. Challenge model output and deterministic gates independently.
-- **Judge every stop as if the Harness ran unattended** (owner, 2026-11-02):
-  in production nobody rejects manually. If the Harness itself would catch the
-  error and feed it back to DeepSeek, approve and let the run prove it. If it
-  cannot (missing gate, misleading context, contract conflict), that is a
-  Harness defect: fix the Harness generally. Do not use manual reject notes as
-  the fix; a neutral reject is only for regenerating a step after a Harness fix.
-- Before trusting a gate, verify it on the real call path (the r8 lesson: a
-  direct `_boundary_contract_diagnostics` call passed while the real path skipped
-  same-component edges).
-- At the Design checkpoint, show the owner `ui_feature_experience_v<N>.md`; do
-  not approve unless the owner asks.
+Validated task results are cached in
+`<run>/design_validator_execution/semantic_task_cache_v1.json` and reused only
+for byte-identical task prompts (graph digest ignored) from earlier validation
+versions. A revalidation after fixing one scenario costs 2-4 calls; after a
+provider failure, only the missing calls. A contract-invalid output is retried
+once with the exact error.
 
-### Next steps
+### Current controlled run
 
-1. Show the owner `ui_feature_experience_v2.md` and the one semantic warning.
-   Never approve the r9 Design checkpoint without the owner's request.
-2. Run a second use case with a different shape (several screens, no UI, or
-   API-only) to check the fixes are general.
-3. Keep the r9 runtime as evidence; do not resume it into Plan merely to test the
-   driver. The driver process loads code at start, so any future resumed process
-   must load the current Harness code.
+- Runtime root: `../SDLC_Harness/.runtime/l3.10-controlled-20261102-r9`
+- Run: `run_20261102_100240_755e94d0`
+- State: `waiting_design_approval`, checkpoint
+  `checkpoint_design_run_20261102_100240_755e94d0`, Design validation v25:
+  **0 blockers, 2 warnings** (`artifacts/design_validation_report_v25.json`).
+- **Do not approve the Design checkpoint**; approval moves the run to Plan.
+- Driver command (step review, needs `SDLC_UIUX_SKILL_ROOT` pointing at the
+  ui-ux-pro-max skill):
+  `python scripts/run_l3_designer_shadow.py --runtime-root <root> --target-repo ../SDLC_Target_TypeScript --worktree-root <root>/worktrees --revalidate-run-id <run>|--review-run-id <run> [--review-call-id <id> --review-decision approve] --step-review --review-input --review-output --design-semantic-review-mode sliced_enforce --vertical-trace-mode enforce --ui-contract-version ui_experience_contract_v2`
 
-### Open items
+What the owner should know when reviewing the checkpoint:
 
-1. EXE-004: a hop already wired for input A is treated as done for input B, in
-   both `_wiring_hop_inputs` and the validator shortcut (`graph.py`
-   `composition_hop_unmodeled`). Right fix: canonical input names per
-   `screen_id`; merge with item 2.
-2. Known gap: merged screen text repeats near-duplicate clauses (layout,
-   typography, responsive, wireframe, component tree per scenario) because each
-   scenario node rewrites the whole screen contract. Bigger option: one
-   screen-owner node plus per-scenario state/transition deltas.
-3. Codex audit leftovers: EXE-011 (crash recovery does not mark repair targets
-   completed), EXE-012 (wiring identity uses the symbol only), EXE-013..015
-   (`completion_claims` unused, `ui_guidance_required` written but never read,
-   `_repair_targets` dead code; `complete` is now effectively dead too).
-   EXE-008 is resolved for new construction and repair deltas by the explicit
-   authn/authz contract; historical graphs remain readable.
-4. Flaky `test_write_api` test above; root cause not investigated.
+- SC-1 and SC-2 are clean. SC-2 was repaired so cancellation happens while the
+  confirmation dialog is open and no deletion is dispatched.
+- SC-3 models "ETOUR" as an **external service** (idempotent DELETE plus
+  reconciliation) only in node prose, with no node/edge for that service. This
+  reading came from a Validator suggestion at v18, not from the Requirement; the
+  `expected_change` prompt rule was added afterwards to stop such suggestions.
+- Warnings: shared `deleteCulturalHeritageRecord`/route/rule contracts differ
+  between SC-1 and SC-3; SC-1 empty/error UI states have no transition.
+- The runtime root contains manual-resume backups
+  (`state.before_manual_resume.json`, `state.before_budget_reset.json`,
+  `designer_execution/design_v19/designer_loop_session_v1.before_budget_reset.json`)
+  from two owner-approved state edits made before the ordinal and budget fixes
+  existed. The semantic task cache was seeded once from approved v19 exchanges.
 
-Resolved before r9: external dependency bindings are copied into
-`requirement_refs` before step review; the valid structured output from
-`design-validator-0001-a01` was misclassified by the driver rather than unparsable,
-and the driver now recognizes `parsed_output`; `progress.md` and the L3.10 checklist
-now record r5-r8 plus the pre-r9 2026-11-02 hardening. All r9 code and docs work
-described above remains local and uncommitted; the current runtime is paused at
-`waiting_design_approval`; commit only when the owner asks.
+### Open items (not implemented)
+
+- Provider HTTP errors are labelled `requirement_refiner_failed`.
+- "must assess every supplied claim exactly once" does not name the claim.
+- Some runtime reasoning still loops on "Potential issue" (20-30K tokens).
+- The model still varies between runs on identical input; consider two runtime
+  samples (block if either blocks) only if false passes recur.
+- When a repair turn has one action left and source is unread, the gate hits
+  `design_evidence_insufficient` instead of allowing a read.
+- DeepSeek was overloaded on 2026-11-03 (one 11-minute empty reply, two HTTP
+  503s); retry later rather than in a tight loop.
+
+### Next session
+
+1. Ask the owner whether to keep the r9 Design as the reference or revise the
+   SC-3 ETOUR interpretation; do not approve the checkpoint without an explicit
+   request.
+2. Before another paid run, inspect any new step-review input/output and stop on
+   Harness-context defects, invalid provider results or new semantic blockers.
 
 ## Architecture Map
 
